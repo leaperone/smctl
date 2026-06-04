@@ -2,13 +2,15 @@ import Darwin
 import Foundation
 import IOKit
 
-public final class SMCConnection: SMCBackend {
+public final class SMCConnection: SMCWriteBackend, @unchecked Sendable {
     private static let selector: UInt32 = 2
     private static let commandReadValue: UInt8 = 5
+    private static let commandWriteValue: UInt8 = 6
     private static let commandGetKeyByIndex: UInt8 = 8
     private static let commandReadKeyInfo: UInt8 = 9
 
     private var connection: io_connect_t = 0
+    private let queue = DispatchQueue(label: "dev.smctl.smc-connection")
 
     public init() throws {
         let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSMC"))
@@ -25,7 +27,9 @@ public final class SMCConnection: SMCBackend {
 
     deinit {
         if connection != 0 {
-            IOServiceClose(connection)
+            _ = queue.sync {
+                IOServiceClose(connection)
+            }
         }
     }
 
@@ -57,13 +61,29 @@ public final class SMCConnection: SMCBackend {
         }
 
         let maxCount = min(Int(count), limit ?? Int(count))
-        return try (0..<maxCount).compactMap { index in
+        return (0..<maxCount).compactMap { index in
             var input = SMCParamStruct()
             input.data8 = Self.commandGetKeyByIndex
             input.data32 = UInt32(index)
-            let output = try call(input)
-            return FourCharCode.string(output.key)
+            do {
+                let output = try call(input)
+                return FourCharCode.string(output.key)
+            } catch {
+                return nil
+            }
         }
+    }
+
+    public func writeRawValue(_ key: String, bytes: [UInt8]) throws {
+        let info = try readKeyInfo(key)
+
+        var input = SMCParamStruct()
+        input.key = try FourCharCode.make(key)
+        input.keyInfo = info
+        input.data8 = Self.commandWriteValue
+        input.bytes = SMCParamStruct.byteTuple32(bytes)
+
+        _ = try call(input)
     }
 
     private func call(_ input: SMCParamStruct) throws -> SMCParamStruct {
@@ -71,16 +91,18 @@ public final class SMCConnection: SMCBackend {
         var output = SMCParamStruct()
         var outputSize = MemoryLayout<SMCParamStruct>.stride
 
-        let result = withUnsafePointer(to: &mutableInput) { inputPointer in
-            withUnsafeMutablePointer(to: &output) { outputPointer in
-                IOConnectCallStructMethod(
-                    connection,
-                    Self.selector,
-                    inputPointer,
-                    MemoryLayout<SMCParamStruct>.stride,
-                    outputPointer,
-                    &outputSize
-                )
+        let result = queue.sync {
+            withUnsafePointer(to: &mutableInput) { inputPointer in
+                withUnsafeMutablePointer(to: &output) { outputPointer in
+                    IOConnectCallStructMethod(
+                        connection,
+                        Self.selector,
+                        inputPointer,
+                        MemoryLayout<SMCParamStruct>.stride,
+                        outputPointer,
+                        &outputSize
+                    )
+                }
             }
         }
 

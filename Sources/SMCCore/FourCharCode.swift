@@ -28,9 +28,15 @@ public enum FourCharCode {
             UInt8(value & 0xff)
         ]
 
-        return String(bytes: bytes.map { byte in
-            byte == 0 ? UInt8(ascii: " ") : byte
-        }, encoding: .ascii) ?? "????"
+        return bytes.map { byte in
+            if byte == 0 {
+                return " "
+            }
+            if (0x20...0x7e).contains(byte), let scalar = UnicodeScalar(Int(byte)) {
+                return String(Character(scalar))
+            }
+            return "?"
+        }.joined()
     }
 
     public static func normalizedStrings(_ value: UInt32) -> Set<String> {

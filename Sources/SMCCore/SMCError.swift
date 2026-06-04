@@ -11,6 +11,7 @@ public enum SMCError: Error, Equatable, CustomStringConvertible {
     case notPrivileged
     case smcResult(UInt8)
     case malformedData(key: String, type: String, expected: Int, actual: Int)
+    case writeVerificationFailed(key: String, expected: [UInt8], actual: [UInt8])
 
     public var description: String {
         switch self {
@@ -34,6 +35,10 @@ public enum SMCError: Error, Equatable, CustomStringConvertible {
             return "SMC returned result 0x\(String(result, radix: 16))"
         case .malformedData(let key, let type, let expected, let actual):
             return "SMC key \(key) type \(type) expected \(expected) bytes, got \(actual)"
+        case .writeVerificationFailed(let key, let expected, let actual):
+            let expectedHex = expected.map { String(format: "%02x", $0) }.joined()
+            let actualHex = actual.map { String(format: "%02x", $0) }.joined()
+            return "SMC write verification failed for \(key): expected \(expectedHex), read back \(actualHex)"
         }
     }
 
