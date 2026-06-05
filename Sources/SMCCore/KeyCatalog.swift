@@ -92,7 +92,7 @@ public struct Capabilities: Codable, Equatable {
 }
 
 public struct KeyCatalog {
-    private static let logger = Logger(subsystem: "dev.smctl", category: "KeyCatalog")
+    private static let logger = Logger(subsystem: "one.leaper.smctl", category: "KeyCatalog")
 
     public var temperatureCandidates: [String]
     public var batteryCandidates: [String]

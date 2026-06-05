@@ -401,7 +401,7 @@ struct DaemonInstall: ParsableCommand {
         print("Installed smctld at \(Self.plistPath)")
     }
 
-    static let plistPath = "/Library/LaunchDaemons/dev.smctl.daemon.plist"
+    static let plistPath = "/Library/LaunchDaemons/one.leaper.smctl.daemon.plist"
 
     private static func currentSmctldPath() throws -> String {
         let rawCommand = CommandLine.arguments[0]
@@ -424,14 +424,14 @@ struct DaemonInstall: ParsableCommand {
         <plist version="1.0">
         <dict>
             <key>Label</key>
-            <string>dev.smctl.daemon</string>
+            <string>one.leaper.smctl.daemon</string>
             <key>ProgramArguments</key>
             <array>
                 <string>\(smctldPath)</string>
             </array>
             <key>MachServices</key>
             <dict>
-                <key>dev.smctl.daemon</key>
+                <key>one.leaper.smctl.daemon</key>
                 <true/>
             </dict>
             <key>KeepAlive</key>
@@ -458,9 +458,12 @@ struct DaemonUninstall: ParsableCommand {
         _ = try? client.setFanAuto(index: nil)
         _ = try? client.setChargingEnabled(true)
         _ = try? client.setAdapterEnabled(true)
-        _ = try? runProcess("/bin/launchctl", ["bootout", "system", DaemonInstall.plistPath])
-        if FileManager.default.fileExists(atPath: DaemonInstall.plistPath) {
-            try FileManager.default.removeItem(atPath: DaemonInstall.plistPath)
+        // Current identifier plus the pre-0.1.2 legacy one (dev.smctl.*).
+        for plistPath in [DaemonInstall.plistPath, "/Library/LaunchDaemons/dev.smctl.daemon.plist"] {
+            _ = try? runProcess("/bin/launchctl", ["bootout", "system", plistPath])
+            if FileManager.default.fileExists(atPath: plistPath) {
+                try FileManager.default.removeItem(atPath: plistPath)
+            }
         }
         print("Uninstalled smctld and restored fans plus charging/adapter power when supported.")
     }

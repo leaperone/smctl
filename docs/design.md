@@ -219,7 +219,7 @@ temp_ceiling = 100         # 温度护栏（℃），不可关闭，硬上限 10
 - **安装**：Homebrew formula / 公证 pkg → 首次 `sudo smctl daemon install` 用 SMAppService 注册 LaunchDaemon（`KeepAlive=true`）。二进制固定落 `/usr/local/libexec/smctl/`（root 拥有），规避 batt 的「移动二进制 daemon 起不来」一类 issue
 - **卸载**：`smctl daemon uninstall` 顺序执行：恢复充电默认 → 恢复风扇 auto + 清 Ftst → 注销 daemon → 删 plist；`--purge` 额外删配置与历史库。卸载流程幂等，可重复执行
 - **升级**：替换二进制 + 重注册；daemon 启动对账机制（§5.3）天然覆盖升级期间的状态衔接
-- **日志**：os_log（`subsystem: dev.smctl`）+ `smctl daemon log` 查看，不落 /tmp
+- **日志**：os_log（`subsystem: one.leaper.smctl`）+ `smctl daemon log` 查看，不落 /tmp
 
 ## 10. CLI 命令面（v1）
 

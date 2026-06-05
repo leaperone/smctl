@@ -8,7 +8,7 @@ import SMCCore
 import SMCtlProtocol
 import TOMLKit
 
-private let logger = Logger(subsystem: "dev.smctl", category: "daemon")
+private let logger = Logger(subsystem: "one.leaper.smctl", category: "daemon")
 /// Resolved once at startup; non-nil iff this binary is Developer ID signed.
 private let enforcedTeamID = CodeSignPolicy.ownTeamID()
 private let ioMessageCanSystemSleep = natural_t(0xe0000270)
@@ -140,7 +140,7 @@ final class SmctlDaemon: @unchecked Sendable {
     static let configPath = "/etc/smctl/config.toml"
     static let period: TimeInterval = 10
 
-    private let queue = DispatchQueue(label: "dev.smctl.daemon.state")
+    private let queue = DispatchQueue(label: "one.leaper.smctl.daemon.state")
     private var config = DaemonConfig()
     private var chargeMachine = ChargeStateMachine(period: SmctlDaemon.period)
     private var sleepMachine = SleepStateMachine(policy: .strict)
