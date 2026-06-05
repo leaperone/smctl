@@ -23,6 +23,7 @@ struct SMCtl: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "smctl",
         abstract: "Mac hardware control utility.",
+        version: SMCtlProtocolInfo.version,
         subcommands: [Sensors.self, Fan.self, Battery.self, Daemon.self, Debug.self]
     )
 }

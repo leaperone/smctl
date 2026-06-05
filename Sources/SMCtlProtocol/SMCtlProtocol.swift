@@ -1,7 +1,7 @@
 import Foundation
 
 public enum SMCtlProtocolInfo {
-    public static let version = "0.2.0"
+    public static let version = "0.1.0"
     public static let machServiceName = "dev.smctl.daemon"
 }
 
