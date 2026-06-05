@@ -42,6 +42,13 @@ $ brew install leaperone/smctl/smctl
 $ sudo smctl daemon install
 ```
 
+Or tap once and use short names from then on:
+
+```console
+$ brew tap leaperone/smctl
+$ brew install smctl        # later: brew upgrade smctl
+```
+
 ### From source
 
 ```console
