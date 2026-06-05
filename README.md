@@ -8,7 +8,9 @@
 
 **smctl** is an open-source, CLI-first tool for controlling the hardware your Mac normally manages for you — fan speed, battery charging, and power telemetry — straight from the terminal.
 
-English | [中文](docs/README.zh-CN.md)
+**smctl** 是一个开源、命令行优先的 Mac 硬件控制工具：风扇曲线、电池充电限制、温度/功耗遥测——这些 macOS 不开放的控制能力，一条命令搞定。
+
+English | [中文文档](docs/README.zh-CN.md)
 
 ![smctl demo](docs/assets/demo.gif)
 

@@ -1,145 +1,118 @@
 # smctl
 
-> The missing control knob for your Mac's SMC.
-> 开源、CLI 优先的 Mac 硬件控制工具：风扇曲线、电池充放电策略、电源管理，一个工具搞定。
+[![CI](https://github.com/leaperone/smctl/actions/workflows/ci.yml/badge.svg)](https://github.com/leaperone/smctl/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](../LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey.svg)](https://github.com/leaperone/smctl)
 
-**当前状态：调研 / 设计阶段。** 本 README 暂为中文工作文档，正式发布时改写为英文。
+> 你的 Mac 缺失的那个硬件控制旋钮。
 
-## 愿景
+**smctl** 是一个开源（MIT）、命令行优先的 Mac 硬件控制工具——风扇转速、电池充电、温度功耗遥测，这些 macOS 替你"管理"却不让你碰的东西，现在可以在终端里直接控制。
 
-macOS 用户在风扇和电池管理上长期被碎片化、半收费、半失修的工具折磨。smctl 的定位：
+[English](../README.md) | 中文
 
-- **CLI 优先**：`smctl fan` / `smctl battery` / `smctl sensors`，命名传统对齐 `systemctl` / `launchctl`
-- **策略驱动**：声明式配置文件（TOML）定义风扇曲线与充电策略，可进 dotfiles 同步
-- **后续封装 macOS 桌面端**：daemon 架构保证 GUI 阶段零返工，GUI 只是另一个客户端
-- **开源（MIT）**
+![smctl demo](assets/demo.gif)
 
-## 核心功能规划
-
-### 1. 风扇控制（Mac mini / Mac Studio / MacBook Pro 等带风扇机型）
-
-- 读传感器温度、读/写风扇转速，自定义风扇曲线
-- 策略引擎差异化：多传感器加权、滞回（hysteresis，防转速抖动）、场景 profile（静音模式 / 全速模式）
-- headless 场景一等公民：Mac mini 当 homelab 服务器的用户没有任何 CLI 风扇工具可用
-
-### 2. 电池充放电策略（MacBook 系列）
-
-- 充到 X% 停止充电、高于 Y% 主动放电、sailing 区间（如 75–80% 浮动不充）
-- 出门前 top-up 一键充满、校准模式（定期放电到低位再充满）
-- 循环次数 / 健康度 / 历史曲线记录（本地 SQLite，GUI 阶段直接画图）
-
-### 3. 周边集成（同一用户群的高复用痛点）
-
-- **温度与功耗监控**：CPU/GPU/电池温度、封装功耗（`powermetrics` 需 root，daemon 正好有）；老牌 `istats` 已失修多年，CLI 真空
-- **睡眠/保持唤醒**：`caffeinate` 人性化封装（「下载完前别睡」「合盖不睡 2 小时」）
-- **低电量模式 / 电源策略切换**：按电源状态自动切（插电高性能、电池省电）
-- **MagSafe LED 控制**：SMC key `ACLC`，配合充电限位（限充时灯变绿）
-- **热压制可见性**：`pmset -g therm` 读 CPU speed limit，告诉用户被降频了多少
-- **菜单栏状态**（GUI 阶段）：温度 + 转速 + 充电状态，对标 Stats 但「看 + 控 + 策略」
-
-**明确不做**：内存清理、缓存清理等「优化大师」功能——与硬件控制定位不搭，拉低专业感。
-
-## 技术调研结论（2026-06）
-
-### SMC 是唯一底层通路
-
-读温度、读写转速、控制充电，全部通过 IOKit 与 `AppleSMC` 内核驱动通信。不需要关 SIP，但**写操作需要 root** → 必须有特权 daemon。
-
-关键 SMC keys：
-
-| 功能 | Key | 说明 |
-|---|---|---|
-| 充电开关 | `CH0B` / `CH0C` | AlDente、batt 均用此组（Apple Silicon） |
-| 断开电源输入 | `CH0I` / `CH0J` | 实现「插电时主动放电」 |
-| 官方 80% 限充 | `CHWA` | 只有 80% 一档，不可自定义 |
-| 风扇模式（AS） | `F0Md` | auto / forced |
-| 风扇目标转速 | `F0Tg` | Intel 时代也是它；Intel 另有 `F0Ac`（实际转速）、`FS! `（强制手动） |
-| MagSafe LED | `ACLC` | 改灯色 |
-
-注意：M 系列每代传感器 key（大量 `Tp__`/`Tg__` 私有 key）都可能变。**调研更新（见 `docs/research-macos-smc-fan.md` §3）**：风扇控制 key 的代际差异可用**运行时探测**（readKey 探针试 key 大小写 + Ftst 存在性）解决，无需维护静态芯片表；但私有温度传感器 key 和充电 key 仍可能随 macOS 大版本漂移（如 Tahoe 26 新增 `CHTE`/`CHIE`，见 `docs/research-batt.md` §4），需要「启动时能力探测 + 多 key 兼容表」。
-
-### ⚠️ Apple Silicon 风扇控制：刚被破解的前沿（最重要发现）
-
-- macOS 上 Apple 的 `thermalmonitord` 守护进程会**主动拦截 SMC 风扇写入**，强制锁定 "System Mode"（mode 3）。在 2026 年之前 macOS 上的 Apple Silicon 手动风扇控制**没有任何公开文档**（Asahi Linux 只在 Linux 侧实现过）。
-- [agoodkind/macos-smc-fan](https://github.com/agoodkind/macos-smc-fan)（MIT）首次公开了绕过方法：**`Ftst` 诊断模式解锁序列**，提供 M1–M5 全代际可用实现，XPC + 特权 helper 架构。README 明确允许「研究成果自由用于独立实现」。
-- 解锁公开后，2026 年 5 月涌现一批 0–50 星的 Apple Silicon 风扇 GUI 小工具（CoolMyMac、ChillPill、macfanctl 等），**窗口期正在打开，但还没人做统一 CLI**。
-- **风险**：`Ftst` 本质是诊断模式，Apple 可能在未来 macOS 版本封堵。设计上必须把「风扇控制不可用时优雅降级为只读监控」做成一等公民。
-
-### 睡眠期间的充电行为是口碑分水岭
-
-Mac 睡着后 daemon 不跑，系统可能继续充满。成熟方案（AlDente、batt）在睡眠前钩子里写入禁充 key，或阻止睡眠。这块细节决定工具口碑。
-
-### 竞品格局
-
-| 项目 | 星数 | 语言 / License | 状态 | 备注 |
-|---|---|---|---|---|
-| [exelban/stats](https://github.com/exelban/stats) | 39.3k | Swift / MIT | 活跃 | 菜单栏监控，只读不可控 |
-| [actuallymentor/battery](https://github.com/actuallymentor/battery) | 7.0k | Shell / MIT | 活跃 | **CLI → GUI 路线的活样本**；底层糙（调预编译 smc 二进制） |
-| [hholtmann/smcFanControl](https://github.com/hholtmann/smcFanControl) | 2.5k | ObjC / GPL-2.0 | **失修**（2023 止） | Intel 时代遗产 |
-| [zackelia/bclm](https://github.com/zackelia/bclm) | 2.2k | Swift / MIT | 半维护 | Intel 限充为主 |
-| [charlie0129/batt](https://github.com/charlie0129/batt) | 1.6k | Go / **GPL-2.0** | 活跃 | **架构最佳参照**：daemon + CLI + Unix socket + 睡眠钩子；代码不可抄进 MIT |
-| [rurza/BatFi](https://github.com/rurza/BatFi) | 580 | Swift / MIT | 活跃 | GUI 限充 |
-| [dkorunic/iSMC](https://github.com/dkorunic/iSMC) | 188 | Go / GPL-3.0 | 活跃 | SMC 只读 CLI |
-| [agoodkind/macos-smc-fan](https://github.com/agoodkind/macos-smc-fan) | 19 | Swift / MIT | 新研究 | **AS 风扇解锁首个公开文档** |
-| AlDente | — | 闭源收费 | 活跃 | 只做电池，无 CLI |
-| Macs Fan Control / TG Pro | — | 闭源（半收费） | 活跃 | 只做风扇，无 CLI，策略弱 |
-
-**结论：市场上没有「开源 + CLI 优先 + 风扇/电池/电源策略统一」的工具，smctl 卡位这个空白。**
-
-### License 策略
-
-- 本项目 **MIT**
-- 可直接借鉴代码：battery、bclm、BatFi、agoodkind/macos-smc-fan（均 MIT）
-- 只可参考思路、不可抄代码：batt、smcFanControl、iSMC（GPL）；SMC key 本身是事实，不受版权保护
-
-## 架构设计（初稿）
-
-```
-┌─ CLI (smctl) ──┐
-│                ├──→ Unix socket / XPC ──→ 特权 daemon (root, LaunchDaemon)
-└─ GUI (以后) ───┘                             ├──→ SMC 读写（IOKit → AppleSMC）
-                                               ├──→ 策略引擎（风扇曲线 / 充电策略）
-                                               └──→ 睡眠/唤醒钩子
+```console
+$ smctl battery maintain 70-80     # 电量维持在 70%–80% 区间
+$ smctl fan profile quiet          # 自定义风扇曲线，不热不转
+$ smctl sensors --watch            # 实时温度、风扇转速、封装功耗
 ```
 
-设计要点：
+## 为什么需要它
 
-- **策略引擎放 daemon 里**，CLI / GUI 都只是客户端 → GUI 阶段零返工
-- 语言候选：**Swift**（IOKit 绑定顺、SMAppService 注册 daemon 顺、GUI 无缝）或 **Rust**（有 `smc` crate）；Go 的问题是 GUI 阶段要换语言
-- 配置：声明式 TOML 定义风扇曲线与充电策略
-- 分发：Homebrew + 公证 pkg。**永远进不了 App Store**（root daemon），一开始就不按沙盒约束设计
-- **硬约束**：SMAppService 安装特权 helper 需要 **Developer ID 签名（付费开发者账号）**，做桌面端反正需要，提前办
+- **电池在 100% 满电状态下老化最快。** macOS 只提供一个黑盒的"优化充电"和固定 80% 一档，smctl 给你确定性的自定义限充区间——设一次，写进 dotfiles 永久同步。
+- **Apple Silicon Mac 完全不开放风扇控制。** 没有官方 API，也没有第三方命令行工具——smctl 在 M 系列芯片上实现了手动转速和声明式风扇曲线，并内置温度安全护栏。
+- **无头 Mac 值得一等公民待遇。** Mac mini 当家用服务器？所有功能都能走 SSH，所有命令都支持 `--json` 输出，随便接脚本。
 
-## 命名
+## 功能
 
-`smctl` = SMC + ctl。落选：`tend` / `stasis` / `halcyon`（同名活跃项目）、`macctl`（已有同概念仓库）、`wattson`（撞 Apex 角色）。GitHub 无实质冲突，Homebrew 无冲突（2026-06 核查）。
+| 命令 | 作用 |
+|---|---|
+| `smctl sensors [--watch] [--json]` | 按传感器分组的温度、风扇转速/模式、电池、封装功耗 |
+| `smctl battery status` | 电量、充电状态、当前限充配置 |
+| `smctl battery maintain 80` / `70-80` / `stop` | 带死区的充电限制（不会在阈值附近反复充放） |
+| `smctl battery charge 90` / `discharge 40` | 一次性充到目标 / 监督放电到目标 |
+| `smctl fan status` | 每个风扇的实际/目标/最小/最大转速和控制模式 |
+| `smctl fan set 2500 [--fan N]` | 手动设定目标转速 |
+| `smctl fan profile quiet\|full\|auto\|<自定义>` | 声明式风扇曲线（TOML），带滞回和变速率限制 |
+| `smctl daemon install\|uninstall\|status\|ping` | 管理特权 daemon |
 
-## 下一步
+策略配置在 `/etc/smctl/config.toml`——声明式、可 diff、对 dotfiles 友好。
 
-- [x] 精读 agoodkind/macos-smc-fan（`Ftst` 解锁细节、风扇行为）→ `docs/research-macos-smc-fan.md`
-- [x] 精读 batt 的 daemon 设计（socket 协议、睡眠钩子、状态机）→ `docs/research-batt.md`
-- [x] 精读 battery 的产品路线与分发打法（CLI→GUI、安装分层、命令面、踩坑）→ `docs/research-battery.md`
-- [x] 技术设计文档：SMC 抽象层、daemon 通信协议、策略引擎、降级策略 → `docs/design.md`
-- [x] 定语言：**Swift**（XPC/SMAppService 生态原生，Rust 做特权 IPC 极痛，见 `docs/design.md` §3）；IPC 定 **XPC**（audit token 签名校验，§7）
-- [x] MVP 边界：M1 只读监控 → M2 电池策略 → M3 风扇控制，纵切三步每步可用（`docs/design.md` §13）
-- [x] 仓库脚手架：SPM 多 target（SMCCore / PolicyEngine / SMCtlProtocol / smctld / smctl）
-- [x] M1：SMCCore 只读层 + `smctl sensors`（真机验证 ✅）
-- [x] M2：电池策略 daemon + XPC + `smctl battery`（真机 E2E ✅；充电写路径待 MacBook 实测）
-- [x] M3：Apple Silicon 风扇控制 + 温度护栏（真机全链路 ✅，实测发现见 `docs/field-notes-m4-mini.md`）
+## 安装
 
-MVP 之后（v0.1 发布线）：
+### Homebrew（推荐）
 
-- [ ] 办 Apple Developer ID 账号（签名/公证硬前置）→ XPC 调用方签名校验补全
-- [ ] 建 GitHub 仓库 + README 改写英文 + Homebrew tap
-- [ ] MacBook 实测：充电写路径（CHTE/CH0B）、睡眠偷充、Ftst 回退路径（M4 Max/M2/M3 机型）
-- [ ] `smctl battery calibrate`、`smctl power status`（热压制可见性）
-- [ ] 长测：曲线 profile 多日稳定性、macOS 升级击穿演练
+```console
+$ brew install leaperone/smctl/smctl
+$ sudo smctl daemon install
+```
 
-调研沉淀的关键设计约束（技术设计文档必须吸收）：
+也可以先 tap 一次，之后都用短命令：
 
-1. **风扇手动控制需常驻进程持续保持 `Ftst=1`**——thermalmonitord 空闲 ~4s / 热负载 ~250ms 就会 reclaim，不是「写一次就完事」
-2. **crash 安全**：daemon 异常退出必须 best-effort 还原 `Ftst=0` + auto 模式；固件兜底（sleep 清 Ftst、独立热保护）是推断未实测，不可依赖
-3. **睡眠模型统一成一个状态机**（pre-sleep 写值 + power assertion + 唤醒重算 + 掉拍检测），不学 batt 的三个互斥开关
-4. **SMC 写要回读校验 + 重试**（batt 没做，是其鲁棒性短板）
-5. **卸载/异常路径都要恢复硬件默认态**（「不留砖」一等公民）
-6. **IPC 调用方要校验代码签名/Team ID**（macos-smc-fan 的 XPC 校验形同虚设，不能学）
+```console
+$ brew tap leaperone/smctl
+$ brew install smctl        # 以后升级：brew upgrade smctl
+```
+
+### 源码构建
+
+```console
+$ git clone https://github.com/leaperone/smctl && cd smctl
+$ swift build -c release
+$ sudo .build/release/smctl daemon install
+```
+
+### 签名二进制
+
+每个 [release](https://github.com/leaperone/smctl/releases) 附带 `smctl` + `smctld` 的 zip，均经 Developer ID 签名和 Apple 公证。
+
+充电限制和风扇控制由 root LaunchDaemon `smctld` 执行，CLI 通过 XPC 与之通信；只读传感器不需要 daemon 也不需要 root。
+
+## 安全设计
+
+在用户态控制风扇和充电，必须以最坏情况为设计前提。smctl 把这些当作一等不变量：
+
+- **绝不留砖。** 卸载、停止、杀死 daemon 都会把风扇和充电交还系统控制——由退出钩子、启动对账、launchd 自动重启三道防线保证。
+- **温度护栏。** 风扇处于手动控制期间，smctl 每秒监控全部温度传感器；持续超过上限（默认 100°C，硬上限 105°C，**不可关闭**）会强制风扇回到系统控制并锁定手动模式，直到降温。温度读不到同样视为不安全。
+- **写入校验。** 每次 SMC 写入都会回读验证（带沉降窗口，兼容异步生效的固件）——失败会如实报错，绝不静默装作成功。
+- **优雅降级。** 如果 macOS 更新改变了 SMC 行为，受影响的功能会降级为只读并明确提示，而不是假装还能工作。
+
+## 支持的硬件
+
+- **Apple Silicon Mac，macOS 14+**
+- 风扇控制已在 **M4 Mac mini** 上完整验证（直写路径）。部分 MacBook 机型需要的诊断模式解锁路径已按公开研究实现，需要更多真机覆盖——[欢迎反馈](https://github.com/leaperone/smctl/issues)
+- 充电控制使用与成熟工具相同的 SMC key（pre-Tahoe 与 macOS 26 两套 key 运行时自动探测）
+- Intel Mac：暂不支持（传感器只读可用）
+
+能力探测在运行时进行——硬件不支持的功能会明确告诉你不可用，而不是静默失败。
+
+## 对比
+
+| | smctl | macOS 自带 | AlDente | Macs Fan Control | stats |
+|---|---|---|---|---|---|
+| CLI / 可脚本化 | ✅ | — | — | — | — |
+| 电池限充 | ✅ 自定义区间 | 固定 80% | ✅ | — | — |
+| 风扇控制（Apple Silicon） | ✅ 曲线 | — | — | ✅ 仅 GUI | — |
+| 声明式配置 | ✅ TOML | — | — | — | — |
+| 开源 | ✅ MIT | — | — | — | ✅ |
+
+## 路线图
+
+- Homebrew tap → homebrew-core
+- `smctl battery calibrate`、热压制可见性（`smctl power`）
+- 菜单栏 App（daemon 已经说 XPC，GUI 只是另一个客户端）
+
+## 文档
+
+- [架构与技术设计](design.md)
+- [真机实测笔记：M4 Mac mini](field-notes-m4-mini.md)——含 SMC 异步写入等一手发现
+- [项目调研与规划笔记](project-notes.zh-CN.md)
+
+## 许可证
+
+[MIT](../LICENSE)
+
+## 免责声明
+
+smctl 会写入 Mac 的系统管理控制器（SMC）。上述安全机制按保守原则设计，但使用风险自负——尤其是持续高负载下的手动风扇控制。
