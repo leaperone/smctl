@@ -27,8 +27,8 @@ let package = Package(
         ),
         .target(name: "PolicyEngine"),
         .target(name: "SMCtlProtocol"),
-        .executableTarget(
-            name: "smctld",
+        .target(
+            name: "SMCtlDaemonCore",
             dependencies: [
                 "SMCCore",
                 "PolicyEngine",
@@ -37,6 +37,13 @@ let package = Package(
             ],
             linkerSettings: [
                 .linkedFramework("IOKit")
+            ]
+        ),
+        .executableTarget(
+            name: "smctld",
+            dependencies: [
+                "SMCtlDaemonCore",
+                "SMCtlProtocol"
             ]
         ),
         .executableTarget(
@@ -54,6 +61,10 @@ let package = Package(
         .testTarget(
             name: "PolicyEngineTests",
             dependencies: ["PolicyEngine"]
+        ),
+        .testTarget(
+            name: "SMCtlDaemonCoreTests",
+            dependencies: ["SMCtlDaemonCore"]
         )
     ]
 )
