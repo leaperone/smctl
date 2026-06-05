@@ -151,7 +151,7 @@ struct Fan: ParsableCommand {
 }
 
 struct FanStatus: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "status")
+    static let configuration = CommandConfiguration(commandName: "status", abstract: "Per-fan actual/target/min/max RPM and control mode.")
 
     @Flag(name: .long, help: "Print machine-readable JSON.")
     var json = false
@@ -167,7 +167,7 @@ struct FanStatus: ParsableCommand {
 }
 
 struct FanSet: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "set")
+    static let configuration = CommandConfiguration(commandName: "set", abstract: "Set a manual fan target in RPM (clamped to min/max unless --force).")
 
     @Argument(help: "Target fan speed in RPM.")
     var rpm: Double
@@ -202,7 +202,7 @@ struct FanSet: ParsableCommand {
 }
 
 struct FanAuto: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "auto")
+    static let configuration = CommandConfiguration(commandName: "auto", abstract: "Return fans to system control.")
 
     @Option(name: .long, help: "0-based fan index. Omit to restore all fans.")
     var fan: Int?
@@ -218,7 +218,7 @@ struct FanAuto: ParsableCommand {
 }
 
 struct FanProfile: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "profile")
+    static let configuration = CommandConfiguration(commandName: "profile", abstract: "Apply a fan profile: auto, quiet, full, or a custom curve.")
 
     @Argument(help: "Profile name: auto, quiet, full, or a configured custom curve.")
     var name: String
@@ -238,7 +238,7 @@ struct Battery: ParsableCommand {
 }
 
 struct BatteryStatus: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "status")
+    static let configuration = CommandConfiguration(commandName: "status", abstract: "Charge level, charging state, and the configured limit.")
 
     @Flag(name: .long, help: "Print machine-readable JSON.")
     var json = false
@@ -254,7 +254,7 @@ struct BatteryStatus: ParsableCommand {
 }
 
 struct Maintain: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "maintain")
+    static let configuration = CommandConfiguration(commandName: "maintain", abstract: "Keep charge inside a limit, e.g. 80, 70-80, or stop.")
 
     @Argument(help: "Charge limit: 80, 70-80, or stop.")
     var limit: String
@@ -274,7 +274,7 @@ struct Maintain: ParsableCommand {
 }
 
 struct Charge: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "charge")
+    static let configuration = CommandConfiguration(commandName: "charge", abstract: "One-shot charge up to a target percent.")
 
     @Argument(help: "Upper charge target percent.")
     var target: Int
@@ -292,7 +292,7 @@ struct Charge: ParsableCommand {
 }
 
 struct Discharge: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "discharge")
+    static let configuration = CommandConfiguration(commandName: "discharge", abstract: "Cut adapter power and discharge to a target percent (foreground).")
 
     @Argument(help: "Discharge target percent.")
     var target: Int
@@ -352,7 +352,7 @@ struct Daemon: ParsableCommand {
 }
 
 struct DaemonPing: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "ping")
+    static let configuration = CommandConfiguration(commandName: "ping", abstract: "Round-trip check that smctld is alive.")
 
     func run() throws {
         let ping: PingDTO = try DaemonClient().ping()
@@ -361,7 +361,7 @@ struct DaemonPing: ParsableCommand {
 }
 
 struct DaemonStatus: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "status")
+    static let configuration = CommandConfiguration(commandName: "status", abstract: "Daemon health: config path, evaluation loop, last error.")
 
     @Flag(name: .long, help: "Print machine-readable JSON.")
     var json = false
@@ -385,7 +385,7 @@ struct DaemonStatus: ParsableCommand {
 }
 
 struct DaemonInstall: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "install")
+    static let configuration = CommandConfiguration(commandName: "install", abstract: "Register smctld as a LaunchDaemon (requires root).")
 
     func run() throws {
         guard geteuid() == 0 else {
@@ -445,7 +445,7 @@ struct DaemonInstall: ParsableCommand {
 }
 
 struct DaemonUninstall: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "uninstall")
+    static let configuration = CommandConfiguration(commandName: "uninstall", abstract: "Stop smctld, restore hardware defaults, remove the LaunchDaemon (requires root).")
 
     func run() throws {
         guard geteuid() == 0 else {
