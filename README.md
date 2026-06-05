@@ -35,13 +35,24 @@ Policies live in `/etc/smctl/config.toml` — declarative, diffable, dotfiles-fr
 
 ## Install
 
-Homebrew tap coming soon. From source today:
+### Homebrew (recommended)
+
+```console
+$ brew install leaperone/smctl/smctl
+$ sudo smctl daemon install
+```
+
+### From source
 
 ```console
 $ git clone https://github.com/leaperone/smctl && cd smctl
 $ swift build -c release
 $ sudo .build/release/smctl daemon install
 ```
+
+### Signed binaries
+
+Each [release](https://github.com/leaperone/smctl/releases) ships a zip with `smctl` + `smctld`, Developer ID signed and notarized by Apple.
 
 Charge limiting and fan control are applied by `smctld`, a root LaunchDaemon. The CLI talks to it over XPC; reading sensors needs no daemon and no root.
 
