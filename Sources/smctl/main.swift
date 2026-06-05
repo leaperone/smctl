@@ -23,7 +23,7 @@ struct SMCtl: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "smctl",
         abstract: "Mac hardware control utility.",
-        subcommands: [Sensors.self, Battery.self, Daemon.self]
+        subcommands: [Sensors.self, Fan.self, Battery.self, Daemon.self]
     )
 }
 
@@ -138,6 +138,93 @@ struct Sensors: ParsableCommand {
 
     private func clearScreen() {
         print("\u{001B}[2J\u{001B}[H", terminator: "")
+    }
+}
+
+struct Fan: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "fan",
+        abstract: "Inspect and control fans through smctld.",
+        subcommands: [FanStatus.self, FanSet.self, FanAuto.self, FanProfile.self]
+    )
+}
+
+struct FanStatus: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "status")
+
+    @Flag(name: .long, help: "Print machine-readable JSON.")
+    var json = false
+
+    func run() throws {
+        let status: FansStatusDTO = try DaemonClient().getFans()
+        if json {
+            print(try CLIJSON.encodeString(status))
+            return
+        }
+        printFansStatus(status)
+    }
+}
+
+struct FanSet: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "set")
+
+    @Argument(help: "Target fan speed in RPM.")
+    var rpm: Double
+
+    @Option(name: .long, help: "0-based fan index. Omit to set all fans.")
+    var fan: Int?
+
+    @Flag(name: .long, help: "Do not clamp to the fan's reported min/max RPM.")
+    var force = false
+
+    func run() throws {
+        guard rpm.isFinite, rpm >= 0 else {
+            throw ValidationError("RPM must be a non-negative finite number.")
+        }
+        let client = DaemonClient()
+        let indices: [Int]
+        if let fan {
+            indices = [fan]
+        } else {
+            let status = try client.getFans()
+            indices = status.fans.map(\.index)
+            guard !indices.isEmpty else {
+                print("No fans were reported by smctld.")
+                return
+            }
+        }
+        for index in indices {
+            try client.setFanManual(index: index, rpm: rpm, force: force)
+        }
+        print("Fan target set to \(formatRPM(rpm))\(fan.map { " on fan \($0)" } ?? " on all fans").")
+    }
+}
+
+struct FanAuto: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "auto")
+
+    @Option(name: .long, help: "0-based fan index. Omit to restore all fans.")
+    var fan: Int?
+
+    func run() throws {
+        try DaemonClient().setFanAuto(index: fan)
+        if let fan {
+            print("Fan \(fan) restored to system auto control.")
+        } else {
+            print("All fans restored to system auto control.")
+        }
+    }
+}
+
+struct FanProfile: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "profile")
+
+    @Argument(help: "Profile name: auto, quiet, full, or a configured custom curve.")
+    var name: String
+
+    func run() throws {
+        try DaemonClient().setFanProfile(name)
+        print("Fan profile set to \(name).")
     }
 }
 
@@ -367,13 +454,14 @@ struct DaemonUninstall: ParsableCommand {
         // The connection must be resumed for the restore calls to be delivered; if the
         // daemon is already gone they fail fast via the error handler and are ignored.
         let client = DaemonClient()
+        _ = try? client.setFanAuto(index: nil)
         _ = try? client.setChargingEnabled(true)
         _ = try? client.setAdapterEnabled(true)
         _ = try? runProcess("/bin/launchctl", ["bootout", "system", DaemonInstall.plistPath])
         if FileManager.default.fileExists(atPath: DaemonInstall.plistPath) {
             try FileManager.default.removeItem(atPath: DaemonInstall.plistPath)
         }
-        print("Uninstalled smctld and restored charging/adapter power when supported.")
+        print("Uninstalled smctld and restored fans plus charging/adapter power when supported.")
     }
 }
 
@@ -393,6 +481,32 @@ private func printBatteryStatus(_ status: BatteryStatusDTO) {
     if let message = status.message {
         print("  note: \(message)")
     }
+}
+
+private func printFansStatus(_ status: FansStatusDTO) {
+    print("Fans")
+    print("  profile: \(status.profile)")
+    if status.fans.isEmpty {
+        print("  No fans reported by smctld.")
+    } else {
+        for fan in status.fans {
+            print("  Fan \(fan.index): actual \(formatOptionalRPM(fan.actualRPM)), target \(formatOptionalRPM(fan.targetRPM)), min \(formatOptionalRPM(fan.minimumRPM)), max \(formatOptionalRPM(fan.maximumRPM)), mode \(fan.mode)")
+        }
+    }
+    if let message = status.message {
+        print("  note: \(message)")
+    }
+}
+
+private func formatOptionalRPM(_ value: Double?) -> String {
+    guard let value else {
+        return "-"
+    }
+    return formatRPM(value)
+}
+
+private func formatRPM(_ value: Double) -> String {
+    "\(String(format: "%.0f", value)) RPM"
 }
 
 private final class DaemonClient {
@@ -421,6 +535,12 @@ private final class DaemonClient {
         }
     }
 
+    func getFans() throws -> FansStatusDTO {
+        try call { proxy, reply in
+            proxy.getFans(withReply: reply)
+        }
+    }
+
     func getDaemonStatus() throws -> DaemonStatusDTO {
         try call { proxy, reply in
             proxy.getDaemonStatus(withReply: reply)
@@ -445,6 +565,27 @@ private final class DaemonClient {
         let data = try SMCtlProtocolCoding.encode(SetEnabledRequestDTO(enabled: enabled))
         let _: EmptyResponseDTO = try call { proxy, reply in
             proxy.setAdapterEnabled(data, withReply: reply)
+        }
+    }
+
+    func setFanManual(index: Int, rpm: Double, force: Bool) throws {
+        let data = try SMCtlProtocolCoding.encode(SetFanManualRequestDTO(index: index, rpm: rpm, force: force))
+        let _: EmptyResponseDTO = try call { proxy, reply in
+            proxy.setFanManual(data, withReply: reply)
+        }
+    }
+
+    func setFanAuto(index: Int?) throws {
+        let data = try SMCtlProtocolCoding.encode(SetFanAutoRequestDTO(index: index))
+        let _: EmptyResponseDTO = try call { proxy, reply in
+            proxy.setFanAuto(data, withReply: reply)
+        }
+    }
+
+    func setFanProfile(_ name: String) throws {
+        let data = try SMCtlProtocolCoding.encode(SetFanProfileRequestDTO(name: name))
+        let _: EmptyResponseDTO = try call { proxy, reply in
+            proxy.setFanProfile(data, withReply: reply)
         }
     }
 
