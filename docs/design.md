@@ -207,7 +207,8 @@ points = [[50, 0], [65, 2000], [80, 4000], [95, "max"]]
 hysteresis = 3             # ℃
 
 [safety]
-temp_ceiling = 95          # 温度护栏，有硬下限，不可关闭只可上调至硬上限
+temp_ceiling = 100         # 温度护栏（℃），不可关闭，硬上限 105；连续 2 tick 超限才触发
+                           # （实测标定：AS 结温热点传感器负载下常态 95-103℃，见 field-notes-m4-mini.md §4）
 ```
 
 - CLI 改策略 = 通过 daemon API 写配置 + 立即生效（daemon 是 config 的唯一 owner，避免双写竞态）
