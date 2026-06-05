@@ -364,7 +364,9 @@ struct DaemonUninstall: ParsableCommand {
             throw ValidationError("daemon uninstall must be run as root. Try: sudo smctl daemon uninstall")
         }
 
-        let client = DaemonClient(connectImmediately: false)
+        // The connection must be resumed for the restore calls to be delivered; if the
+        // daemon is already gone they fail fast via the error handler and are ignored.
+        let client = DaemonClient()
         _ = try? client.setChargingEnabled(true)
         _ = try? client.setAdapterEnabled(true)
         _ = try? runProcess("/bin/launchctl", ["bootout", "system", DaemonInstall.plistPath])
@@ -396,12 +398,11 @@ private func printBatteryStatus(_ status: BatteryStatusDTO) {
 private final class DaemonClient {
     private let connection: NSXPCConnection
 
-    init(connectImmediately: Bool = true) {
+    init() {
         connection = NSXPCConnection(machServiceName: SMCtlProtocolInfo.machServiceName, options: .privileged)
         connection.remoteObjectInterface = NSXPCInterface(with: SMCtlDaemonXPCProtocol.self)
-        if connectImmediately {
-            connection.resume()
-        }
+        // Resumed exactly once here; a second resume would trap (over-resume).
+        connection.resume()
     }
 
     deinit {
@@ -473,7 +474,10 @@ private final class DaemonClient {
             box.error = error
             semaphore.signal()
         }
-        semaphore.wait()
+        // Bounded wait: never hang the CLI on a wedged daemon or undelivered message.
+        if semaphore.wait(timeout: .now() + 15) == .timedOut {
+            throw ValidationError("Timed out waiting for smctld (15s). Check 'smctl daemon status'.")
+        }
 
         if let error = box.error {
             throw ValidationError(error)

@@ -542,7 +542,7 @@ signal(SIGINT, SIG_IGN)
 let terminationSignals = [SIGTERM, SIGINT].map { signalNumber in
     let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: .main)
     source.setEventHandler {
-        logger.info("Received termination signal; restoring hardware defaults")
+        logger.notice("Received termination signal; restoring hardware defaults")
         daemon.restoreHardwareDefaultsBestEffort()
         exit(0)
     }
@@ -551,5 +551,5 @@ let terminationSignals = [SIGTERM, SIGINT].map { signalNumber in
 }
 _ = terminationSignals
 
-logger.info("smctld started")
+logger.notice("smctld started")
 RunLoop.main.run()
