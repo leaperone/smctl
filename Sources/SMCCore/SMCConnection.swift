@@ -10,7 +10,7 @@ public final class SMCConnection: SMCWriteBackend, @unchecked Sendable {
     private static let commandReadKeyInfo: UInt8 = 9
 
     private var connection: io_connect_t = 0
-    private let queue = DispatchQueue(label: "dev.smctl.smc-connection")
+    private let queue = DispatchQueue(label: "one.leaper.smctl.smc-connection")
 
     public init() throws {
         let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSMC"))

@@ -1,8 +1,8 @@
 import Foundation
 
 public enum SMCtlProtocolInfo {
-    public static let version = "0.1.1"
-    public static let machServiceName = "dev.smctl.daemon"
+    public static let version = "0.1.2"
+    public static let machServiceName = "one.leaper.smctl.daemon"
 }
 
 @objc(SMCtlDaemonXPCProtocol)
