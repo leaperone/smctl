@@ -501,15 +501,24 @@ public struct FanSafetyDecision: Equatable, Sendable {
 }
 
 public struct FanSafetyGuard: Codable, Equatable, Sendable {
-    public static let defaultCeilingCelsius = 95.0
+    /// Calibrated against field data: Apple Silicon junction hot-spot sensors (Tp0E/Tp3P
+    /// class) routinely sit at 95–103C under ordinary compile load while the silicon is
+    /// rated to ~110C. 95C made manual control unusable under any load; 100C still trips
+    /// well before firmware-level throttling/shutdown territory.
+    public static let defaultCeilingCelsius = 100.0
     public static let hardMaximumCeilingCelsius = 105.0
     /// The latch releases only after cooling this far below the ceiling, so a trip
     /// cannot be immediately re-armed into a hot system.
     public static let releaseHysteresisCelsius = 5.0
+    /// Overheat must persist for this many consecutive ticks (1s cadence) to trip —
+    /// debounces momentary hot-spot spikes while keeping reaction time under ~2.5s.
+    /// Sensor blindness is NOT debounced: it trips immediately.
+    public static let consecutiveTripsRequired = 2
 
     public var configuredCeilingCelsius: Double
     /// Set when the guard trips; manual fan control must be rejected while latched.
     public private(set) var isLatched: Bool
+    private var consecutiveOverCeiling: Int
 
     public init(configuredCeilingCelsius: Double = Self.defaultCeilingCelsius, isLatched: Bool = false) {
         if configuredCeilingCelsius <= 0 {
@@ -518,6 +527,7 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
             self.configuredCeilingCelsius = min(configuredCeilingCelsius, Self.hardMaximumCeilingCelsius)
         }
         self.isLatched = isLatched
+        self.consecutiveOverCeiling = 0
     }
 
     /// One evaluation tick. Fail-safe semantics: while a manual fan policy is active the
@@ -533,22 +543,29 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
 
         guard manualPolicyActive else {
             // System is in control; nothing to enforce.
+            consecutiveOverCeiling = 0
             return FanSafetyDecision(forceAuto: false)
         }
 
         guard let peak else {
             isLatched = true
+            consecutiveOverCeiling = 0
             return FanSafetyDecision(
                 forceAuto: true,
                 reason: "no readable temperature sensors while fans are under manual control"
             )
         }
         if peak >= configuredCeilingCelsius {
-            isLatched = true
-            return FanSafetyDecision(
-                forceAuto: true,
-                reason: "temperature \(peak)C reached safety ceiling \(configuredCeilingCelsius)C"
-            )
+            consecutiveOverCeiling += 1
+            if consecutiveOverCeiling >= Self.consecutiveTripsRequired {
+                isLatched = true
+                return FanSafetyDecision(
+                    forceAuto: true,
+                    reason: "temperature \(peak)C held at/above safety ceiling \(configuredCeilingCelsius)C for \(consecutiveOverCeiling) consecutive checks"
+                )
+            }
+        } else {
+            consecutiveOverCeiling = 0
         }
         if isLatched {
             return FanSafetyDecision(

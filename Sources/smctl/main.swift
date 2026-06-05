@@ -23,7 +23,7 @@ struct SMCtl: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "smctl",
         abstract: "Mac hardware control utility.",
-        subcommands: [Sensors.self, Fan.self, Battery.self, Daemon.self]
+        subcommands: [Sensors.self, Fan.self, Battery.self, Daemon.self, Debug.self]
     )
 }
 
@@ -507,6 +507,97 @@ private func formatOptionalRPM(_ value: Double?) -> String {
 
 private func formatRPM(_ value: Double) -> String {
     "\(String(format: "%.0f", value)) RPM"
+}
+
+struct Debug: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "debug",
+        abstract: "Low-level SMC inspection (read-only, no daemon required).",
+        shouldDisplay: false,
+        subcommands: [DebugKeys.self, DebugRead.self, DebugWrite.self]
+    )
+}
+
+struct DebugWrite: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "write",
+        abstract: "Write raw bytes to one SMC key (root only; development diagnostics)."
+    )
+
+    @Argument(help: "Four-character SMC key.")
+    var key: String
+
+    @Argument(help: "Hex bytes, e.g. '01' or '00 00 1c 45'.")
+    var hexBytes: [String]
+
+    @Flag(name: .long, help: "Skip the read-back verification.")
+    var noVerify = false
+
+    func run() throws {
+        guard geteuid() == 0 else {
+            throw ValidationError("debug write must run as root.")
+        }
+        let bytes = try hexBytes.flatMap { chunk -> [UInt8] in
+            try stride(from: 0, to: chunk.count, by: 2).map { offset in
+                let start = chunk.index(chunk.startIndex, offsetBy: offset)
+                let end = chunk.index(start, offsetBy: 2, limitedBy: chunk.endIndex) ?? chunk.endIndex
+                guard let byte = UInt8(chunk[start..<end], radix: 16) else {
+                    throw ValidationError("Invalid hex byte in '\(chunk)'.")
+                }
+                return byte
+            }
+        }
+        let connection = try SMCConnection()
+        if noVerify {
+            try connection.writeRawValue(key, bytes: bytes)
+            print("wrote \(key) (no verify)")
+        } else {
+            try connection.writeKey(key, bytes: bytes, retryPolicy: SMCWriteRetryPolicy(maxAttempts: 1, initialBackoffNanoseconds: 0))
+            print("wrote \(key) (verified)")
+        }
+        let value = try connection.readValue(key)
+        print("read-back: \(value.bytes.map { String(format: "%02x", $0) }.joined(separator: " "))")
+    }
+}
+
+struct DebugKeys: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "keys", abstract: "Enumerate SMC keys.")
+
+    @Option(name: .long, help: "Only list keys with this prefix.")
+    var prefix: String?
+
+    func run() throws {
+        let connection = try SMCConnection()
+        var keys = try connection.enumerateKeys()
+        if let prefix {
+            keys = keys.filter { $0.hasPrefix(prefix) }
+        }
+        for key in keys {
+            let info = try? connection.readKeyInfo(key)
+            let type = info.map { $0.dataTypeString } ?? "?"
+            let size = info.map { String($0.dataSize) } ?? "?"
+            let attributes = info.map { String(format: "0x%02x", $0.dataAttributes) } ?? "?"
+            print("\(key)  type=\(type) size=\(size) attr=\(attributes)")
+        }
+    }
+}
+
+struct DebugRead: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "read", abstract: "Read one SMC key.")
+
+    @Argument(help: "Four-character SMC key.")
+    var key: String
+
+    func run() throws {
+        let connection = try SMCConnection()
+        let value = try connection.readValue(key)
+        let hex = value.bytes.map { String(format: "%02x", $0) }.joined(separator: " ")
+        print("\(key)  type=\(value.info.dataTypeString) size=\(value.info.dataSize) attr=\(String(format: "0x%02x", value.info.dataAttributes))")
+        print("  bytes: \(hex)")
+        if let decoded = value.decoded?.doubleValue {
+            print("  decoded: \(decoded)")
+        }
+    }
 }
 
 private final class DaemonClient {

@@ -197,7 +197,10 @@ public struct FanController {
             return .direct
         } catch {
             guard capabilities.ftstAvailable else {
-                throw FanControlError.unsupported("Manual fan control is unsupported: direct mode write failed and Ftst is unavailable.")
+                throw FanControlError.unsupported(
+                    "Manual fan control is unsupported: direct mode write failed"
+                        + " (\(String(describing: error))) and Ftst is unavailable."
+                )
             }
         }
 

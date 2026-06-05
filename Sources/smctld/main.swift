@@ -644,7 +644,14 @@ final class SmctlDaemon: @unchecked Sendable {
         let ftst = readUInt8Locked("Ftst")
         if FanStartupReconciler().shouldRestoreAuto(hasLocalManualPolicy: false, fanModes: modes, ftstValue: ftst) {
             logger.notice("Detected leftover manual fan state at startup; restoring fans to auto")
-            try? restoreFansAutoLocked(indices: capabilities.fans.map(\.index), clearPolicy: true)
+            do {
+                try restoreFansAutoLocked(indices: capabilities.fans.map(\.index), clearPolicy: true)
+            } catch {
+                // Likely an external fan tool re-asserting its own manual setting
+                // (e.g. Macs Fan Control); surface it — never swallow a failed restore.
+                lastError = String(describing: error)
+                logger.error("Startup fan restore failed (external fan controller running?): \(String(describing: error), privacy: .public)")
+            }
         }
     }
 
