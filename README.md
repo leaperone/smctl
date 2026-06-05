@@ -10,6 +10,8 @@
 
 English | [中文](docs/README.zh-CN.md)
 
+![smctl demo](docs/assets/demo.gif)
+
 ```console
 $ smctl battery maintain 70-80     # keep the battery between 70% and 80%
 $ smctl fan profile quiet          # custom fan curve, stays silent until hot
