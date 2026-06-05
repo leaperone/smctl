@@ -1,7 +1,7 @@
 import Foundation
 
 public enum PolicyEngine {
-    public static let version = "0.1.0"
+    public static let version = "0.1.1"
 }
 
 public protocol PolicyClock: Sendable {
