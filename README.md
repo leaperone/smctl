@@ -1,5 +1,9 @@
 # smctl
 
+[![CI](https://github.com/leaperone/smctl/actions/workflows/ci.yml/badge.svg)](https://github.com/leaperone/smctl/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-lightgrey.svg)](https://github.com/leaperone/smctl)
+
 > The missing control knob for your Mac's SMC.
 
 **smctl** is an open-source, CLI-first tool for controlling the hardware your Mac normally manages for you — fan speed, battery charging, and power telemetry — straight from the terminal.
