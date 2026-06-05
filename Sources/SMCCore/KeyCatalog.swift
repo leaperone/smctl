@@ -1,4 +1,37 @@
 import Foundation
+import OSLog
+
+public struct SMCKeyWrite: Codable, Equatable, Sendable {
+    public var key: String
+    public var bytes: [UInt8]
+
+    public init(key: String, bytes: [UInt8]) {
+        self.key = key
+        self.bytes = bytes
+    }
+}
+
+public struct SMCControlKeyGroup: Codable, Equatable, Sendable {
+    public var identifier: String
+    public var statusKey: String
+    public var requiredKeys: [String]
+    public var enableWrites: [SMCKeyWrite]
+    public var disableWrites: [SMCKeyWrite]
+
+    public init(
+        identifier: String,
+        statusKey: String,
+        requiredKeys: [String],
+        enableWrites: [SMCKeyWrite],
+        disableWrites: [SMCKeyWrite]
+    ) {
+        self.identifier = identifier
+        self.statusKey = statusKey
+        self.requiredKeys = requiredKeys
+        self.enableWrites = enableWrites
+        self.disableWrites = disableWrites
+    }
+}
 
 public struct FanCapability: Codable, Equatable {
     public var index: Int
@@ -24,19 +57,25 @@ public struct Capabilities: Codable, Equatable {
     public var temperatureKeys: [String]
     public var batteryKeys: [String]
     public var powerKeys: [String]
+    public var chargingControl: SMCControlKeyGroup?
+    public var adapterControl: SMCControlKeyGroup?
 
     public init(
         fans: [FanCapability] = [],
         ftstAvailable: Bool = false,
         temperatureKeys: [String] = [],
         batteryKeys: [String] = [],
-        powerKeys: [String] = []
+        powerKeys: [String] = [],
+        chargingControl: SMCControlKeyGroup? = nil,
+        adapterControl: SMCControlKeyGroup? = nil
     ) {
         self.fans = fans
         self.ftstAvailable = ftstAvailable
         self.temperatureKeys = temperatureKeys
         self.batteryKeys = batteryKeys
         self.powerKeys = powerKeys
+        self.chargingControl = chargingControl
+        self.adapterControl = adapterControl
     }
 
     public var availableKeysByFeature: [String: [String]] {
@@ -45,34 +84,54 @@ public struct Capabilities: Codable, Equatable {
             "ftst": ftstAvailable ? ["Ftst"] : [],
             "temperature": temperatureKeys,
             "battery": batteryKeys,
-            "power": powerKeys
+            "power": powerKeys,
+            "chargingControl": chargingControl?.requiredKeys ?? [],
+            "adapterControl": adapterControl?.requiredKeys ?? []
         ]
     }
 }
 
 public struct KeyCatalog {
+    private static let logger = Logger(subsystem: "dev.smctl", category: "KeyCatalog")
+
     public var temperatureCandidates: [String]
     public var batteryCandidates: [String]
     public var powerCandidates: [String]
+    public var chargingControlCandidates: [SMCControlKeyGroup]
+    public var adapterControlCandidates: [SMCControlKeyGroup]
 
     public init(
         temperatureCandidates: [String] = KeyCatalog.defaultTemperatureCandidates,
         batteryCandidates: [String] = ["BUIC", "B0AC", "B0AV", "PPBR", "AC-W"],
-        powerCandidates: [String] = ["PDTR", "ID0R", "VD0R"]
+        powerCandidates: [String] = ["PDTR", "ID0R", "VD0R"],
+        chargingControlCandidates: [SMCControlKeyGroup] = KeyCatalog.defaultChargingControlCandidates,
+        adapterControlCandidates: [SMCControlKeyGroup] = KeyCatalog.defaultAdapterControlCandidates
     ) {
         self.temperatureCandidates = temperatureCandidates
         self.batteryCandidates = batteryCandidates
         self.powerCandidates = powerCandidates
+        self.chargingControlCandidates = chargingControlCandidates
+        self.adapterControlCandidates = adapterControlCandidates
     }
 
     public func detectCapabilities(using backend: SMCBackend) -> Capabilities {
         let fans = detectFans(using: backend)
+        let chargingControl = detectControlGroup(chargingControlCandidates, using: backend)
+        let adapterControl = detectControlGroup(adapterControlCandidates, using: backend)
+        let batteryKeys = probe(
+            batteryCandidates
+                + chargingControlCandidates.flatMap(\.requiredKeys)
+                + adapterControlCandidates.flatMap(\.requiredKeys),
+            using: backend
+        )
         return Capabilities(
             fans: fans,
             ftstAvailable: probe("Ftst", using: backend),
             temperatureKeys: probe(temperatureCandidates, using: backend),
-            batteryKeys: probe(batteryCandidates, using: backend),
-            powerKeys: probe(powerCandidates, using: backend)
+            batteryKeys: batteryKeys,
+            powerKeys: probe(powerCandidates, using: backend),
+            chargingControl: chargingControl,
+            adapterControl: adapterControl
         )
     }
 
@@ -135,7 +194,14 @@ public struct KeyCatalog {
         } catch SMCError.notFound {
             return false
         } catch {
-            return false
+            Self.logger.error("Probe for SMC key \(key, privacy: .public) failed with non-notFound error: \(String(describing: error), privacy: .public)")
+            return true
+        }
+    }
+
+    private func detectControlGroup(_ groups: [SMCControlKeyGroup], using backend: SMCBackend) -> SMCControlKeyGroup? {
+        groups.first { group in
+            group.requiredKeys.allSatisfy { probe($0, using: backend) }
         }
     }
 
@@ -154,5 +220,55 @@ public struct KeyCatalog {
             commonSuffixes.map { "\(prefix)\($0)" }
         }
         return numeric + common
+    }
+
+    public static var defaultChargingControlCandidates: [SMCControlKeyGroup] {
+        [
+            SMCControlKeyGroup(
+                identifier: "tahoe-charging",
+                statusKey: "CHTE",
+                requiredKeys: ["CHTE"],
+                enableWrites: [SMCKeyWrite(key: "CHTE", bytes: [0x00, 0x00, 0x00, 0x00])],
+                disableWrites: [SMCKeyWrite(key: "CHTE", bytes: [0x01, 0x00, 0x00, 0x00])]
+            ),
+            SMCControlKeyGroup(
+                identifier: "legacy-charging",
+                statusKey: "CH0B",
+                requiredKeys: ["CH0B", "CH0C"],
+                enableWrites: [
+                    SMCKeyWrite(key: "CH0B", bytes: [0x00]),
+                    SMCKeyWrite(key: "CH0C", bytes: [0x00])
+                ],
+                disableWrites: [
+                    SMCKeyWrite(key: "CH0B", bytes: [0x02]),
+                    SMCKeyWrite(key: "CH0C", bytes: [0x02])
+                ]
+            )
+        ]
+    }
+
+    public static var defaultAdapterControlCandidates: [SMCControlKeyGroup] {
+        [
+            SMCControlKeyGroup(
+                identifier: "tahoe-adapter",
+                statusKey: "CHIE",
+                requiredKeys: ["CHIE"],
+                enableWrites: [SMCKeyWrite(key: "CHIE", bytes: [0x00])],
+                disableWrites: [SMCKeyWrite(key: "CHIE", bytes: [0x08])]
+            ),
+            SMCControlKeyGroup(
+                identifier: "legacy-adapter",
+                statusKey: "CH0I",
+                requiredKeys: ["CH0I", "CH0J"],
+                enableWrites: [
+                    SMCKeyWrite(key: "CH0I", bytes: [0x00]),
+                    SMCKeyWrite(key: "CH0J", bytes: [0x00])
+                ],
+                disableWrites: [
+                    SMCKeyWrite(key: "CH0I", bytes: [0x01]),
+                    SMCKeyWrite(key: "CH0J", bytes: [0x01])
+                ]
+            )
+        ]
     }
 }

@@ -1,5 +1,5 @@
 {
-  "originHash" : "a19aed199908954834140b5e1b5e288257f900a67c136b8638872017c46f836a",
+  "originHash" : "c99b7280596a755428906e643d216760f9200f8560fb82fe8d83bc06a73e3a64",
   "pins" : [
     {
       "identity" : "swift-argument-parser",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "ca37474853a4b5f59a22c74bfdd449b1f6bc4cc2",
         "version" : "1.8.1"
+      }
+    },
+    {
+      "identity" : "tomlkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/LebJe/TOMLKit.git",
+      "state" : {
+        "revision" : "ec6198d37d495efc6acd4dffbd262cdca7ff9b3f",
+        "version" : "0.6.0"
       }
     }
   ],
