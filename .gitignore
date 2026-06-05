@@ -1,3 +1,4 @@
 .build/
 .swiftpm/
 DerivedData/
+dist/

@@ -9,6 +9,8 @@ import SMCtlProtocol
 import TOMLKit
 
 private let logger = Logger(subsystem: "dev.smctl", category: "daemon")
+/// Resolved once at startup; non-nil iff this binary is Developer ID signed.
+private let enforcedTeamID = CodeSignPolicy.ownTeamID()
 private let ioMessageCanSystemSleep = natural_t(0xe0000270)
 private let ioMessageSystemWillSleep = natural_t(0xe0000280)
 private let ioMessageSystemWillPowerOn = natural_t(0xe0000320)
@@ -120,6 +122,7 @@ struct SafetyConfig: Codable, Equatable, Sendable {
 enum DaemonError: Error, CustomStringConvertible {
     case unsupported(String)
     case unauthorized
+    case untrustedClient
 
     var description: String {
         switch self {
@@ -127,6 +130,8 @@ enum DaemonError: Error, CustomStringConvertible {
             return message
         case .unauthorized:
             return "Write requests require root or an admin user."
+        case .untrustedClient:
+            return "Write requests require a client signed by the same Developer ID team as smctld."
         }
     }
 }
@@ -958,11 +963,18 @@ final class XPCService: NSObject, SMCtlDaemonXPCProtocol {
         guard let connection else {
             throw DaemonError.unauthorized
         }
-        // Distribution signing is not configured in this CLI-only milestone, so M3
-        // keeps the M2 euid/admin write gate here.
         let uid = connection.effectiveUserIdentifier
         guard uid == 0 || Self.userIsAdmin(uid) else {
             throw DaemonError.unauthorized
+        }
+        // Team ID enforcement: active whenever the daemon itself is Developer ID
+        // signed. Unsigned/source builds cannot enforce this by construction and
+        // rely on the euid gate above (see CodeSignPolicy).
+        if let teamID = enforcedTeamID {
+            guard CodeSignPolicy.clientMatches(teamID: teamID, connection: connection) else {
+                logger.error("Rejected write from pid \(connection.processIdentifier, privacy: .public): client not signed with team \(teamID, privacy: .public)")
+                throw DaemonError.untrustedClient
+            }
         }
     }
 
@@ -1036,5 +1048,9 @@ let terminationSignals = [SIGTERM, SIGINT].map { signalNumber in
 }
 _ = terminationSignals
 
-logger.notice("smctld started")
+if let enforcedTeamID {
+    logger.notice("smctld started; XPC write authorization requires team \(enforcedTeamID, privacy: .public)")
+} else {
+    logger.notice("smctld started; unsigned build, XPC write authorization is euid-gated only")
+}
 RunLoop.main.run()
