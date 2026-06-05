@@ -335,13 +335,17 @@ public struct FanCurve: Codable, Equatable, Sendable {
     }
 
     public static func quiet(maxRPM: Double) -> FanCurve {
+        // Calibrated for Apple Silicon junction hot-spot aggregation (max over all
+        // sensors): hot-spots idle at 75–85C and reach 95–105C under load, so the
+        // Intel-era 45–95C anchors would pin a "quiet" curve near full speed at idle.
+        // Quiet = stay at the floor until genuinely hot, then ramp decisively.
         try! FanCurve(
             name: "quiet",
             points: [
-                FanCurvePoint(45, 0),
-                FanCurvePoint(70, maxRPM * 0.35),
-                FanCurvePoint(85, maxRPM * 0.7),
-                FanCurvePoint(95, maxRPM)
+                FanCurvePoint(85, 0),
+                FanCurvePoint(93, maxRPM * 0.25),
+                FanCurvePoint(100, maxRPM * 0.55),
+                FanCurvePoint(105, maxRPM)
             ],
             hysteresisCelsius: 3,
             slewRateRPMPerSecond: 400
