@@ -132,9 +132,13 @@ enum FanPointValue: Codable, Equatable, Sendable {
 
 struct SafetyConfig: Codable, Equatable, Sendable {
     var temp_ceiling: Double
+    /// Advanced opt-in: allows `fan set --force` to target below the fan's reported
+    /// minimum RPM (e.g. full fan stop). Off by default; the flag alone is not enough.
+    var allow_below_minimum: Bool
 
-    init(temp_ceiling: Double = FanSafetyGuard.defaultCeilingCelsius) {
+    init(temp_ceiling: Double = FanSafetyGuard.defaultCeilingCelsius, allow_below_minimum: Bool = false) {
         self.temp_ceiling = temp_ceiling
+        self.allow_below_minimum = allow_below_minimum
     }
 
     // Defensive decoding — see BatteryConfig.
@@ -142,6 +146,7 @@ struct SafetyConfig: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         temp_ceiling = try container.decodeIfPresent(Double.self, forKey: .temp_ceiling)
             ?? FanSafetyGuard.defaultCeilingCelsius
+        allow_below_minimum = try container.decodeIfPresent(Bool.self, forKey: .allow_below_minimum) ?? false
     }
 }
 
@@ -532,13 +537,32 @@ public final class SmctlDaemon: @unchecked Sendable {
         guard rpm.isFinite, rpm >= 0 else {
             throw DaemonError.unsupported("Fan RPM must be a non-negative finite number.")
         }
-        guard !force else {
-            return rpm
-        }
         let status = try fanControllerLocked().status(index: index)
         let minimum = status.minimumRPM ?? 0
         let maximum = status.maximumRPM ?? rpm
-        return min(maximum, max(minimum, rpm))
+
+        // The reported maximum is a hard ceiling under all circumstances.
+        let capped = min(maximum, rpm)
+
+        if capped >= minimum {
+            return capped
+        }
+        // Below-idle targets reduce cooling below what the firmware considers safe.
+        // This is double-gated: the --force flag alone is not enough — the operator
+        // must also opt in via `[safety] allow_below_minimum = true` in the config
+        // (editing the root-owned config is itself an administrative act).
+        guard force else {
+            return minimum
+        }
+        guard config.safety.allow_below_minimum else {
+            throw DaemonError.unsupported(
+                "Targets below the fan's minimum (\(Int(minimum)) RPM) are dangerous and disabled. "
+                    + "To enable, set `allow_below_minimum = true` under [safety] in \(configPath) and retry. "
+                    + "The thermal safety guard remains active regardless."
+            )
+        }
+        logger.notice("Below-minimum fan target \(capped, privacy: .public) RPM accepted for fan \(index, privacy: .public) (allow_below_minimum enabled)")
+        return capped
     }
 
     func evaluateFanSubsystemLocked() {
@@ -842,6 +866,7 @@ public final class SmctlDaemon: @unchecked Sendable {
 
         [safety]
         temp_ceiling = \(FanSafetyGuard(configuredCeilingCelsius: config.safety.temp_ceiling).configuredCeilingCelsius)
+        allow_below_minimum = \(config.safety.allow_below_minimum ? "true" : "false")
 
         """
         for curve in config.fan.curves {

@@ -90,6 +90,51 @@ final class SmctlDaemonTests: XCTestCase {
         )
     }
 
+    // MARK: - Below-minimum gating
+
+    func testBelowMinimumIsClampedWithoutForce() throws {
+        let backend = RecordingBackend()
+        let daemon = makeDaemon(backend: backend, capabilities: .oneFan)
+
+        try daemon.setFanManual(index: 0, rpm: 200, force: false)
+
+        XCTAssertTrue(
+            backend.writes.contains { $0.key == "F0Tg" && $0.bytes == FanController.float32LittleEndianBytes(1000) },
+            "below-minimum target must clamp to the fan minimum; writes: \(backend.writes)"
+        )
+    }
+
+    func testForceAloneCannotGoBelowMinimum() {
+        let backend = RecordingBackend()
+        let daemon = makeDaemon(backend: backend, capabilities: .oneFan)
+
+        XCTAssertThrowsError(try daemon.setFanManual(index: 0, rpm: 200, force: true)) { error in
+            XCTAssertTrue("\(error)".contains("allow_below_minimum"), "error must point at the config opt-in: \(error)")
+        }
+        XCTAssertFalse(
+            backend.writes.contains { $0.key == "F0Tg" && $0.bytes == FanController.float32LittleEndianBytes(200) },
+            "no below-minimum write may reach the SMC without the opt-in"
+        )
+    }
+
+    func testForceWithConfigOptInAllowsBelowMinimumButNeverAboveMaximum() throws {
+        let backend = RecordingBackend()
+        let daemon = makeDaemon(backend: backend, capabilities: .oneFan)
+        daemon.config.safety.allow_below_minimum = true
+
+        try daemon.setFanManual(index: 0, rpm: 0, force: true)
+        XCTAssertTrue(
+            backend.writes.contains { $0.key == "F0Tg" && $0.bytes == FanController.float32LittleEndianBytes(0) },
+            "opt-in plus --force must allow a full fan stop; writes: \(backend.writes)"
+        )
+
+        try daemon.setFanManual(index: 0, rpm: 9000, force: true)
+        XCTAssertTrue(
+            backend.writes.contains { $0.key == "F0Tg" && $0.bytes == FanController.float32LittleEndianBytes(4900) },
+            "the reported maximum is a hard ceiling even with --force; writes: \(backend.writes)"
+        )
+    }
+
     // MARK: - Config persistence
 
     func testConfigRoundtripAcrossDaemonInstances() throws {
@@ -157,9 +202,15 @@ private final class RecordingBackend: SMCWriteBackend {
         guard let bytes = values[key] else {
             throw SMCError.notFound
         }
+        let dataType: String
+        switch bytes.count {
+        case 1: dataType = "ui8 "
+        case 4: dataType = "flt "   // fan keys (F0Tg/F0Mn/F0Mx) are 4-byte floats
+        default: dataType = "hex_"
+        }
         return SMCKeyInfo(
             dataSize: UInt32(bytes.count),
-            dataType: FourCharCode.unchecked(bytes.count == 1 ? "ui8 " : "hex_"),
+            dataType: FourCharCode.unchecked(dataType),
             dataAttributes: 0xC0
         )
     }
