@@ -171,7 +171,7 @@ batt 的 socket 方案唯一实质优势是 curl 可调试；代价是鉴权只�
 
 - **读类请求**（sensors、status、config 读）：任何本地已签名客户端放行
 - **写类请求**（改策略、手动风扇、充放电、daemon 管理）：校验调用方 euid（root 或 admin 组）**且**代码签名匹配；不满足时 CLI 引导 `sudo smctl ...`
-- 安全关键操作（如关闭温度护栏）额外要求显式 `--force`
+- 安全关键操作双重门控：温度护栏不可关闭；怠速以下转速需 `--force` **且** 配置文件显式 `[safety] allow_below_minimum = true`，二者缺一不可；上限转速任何情况下不可越过
 
 ### 7.3 API 面（XPC 协议草案）
 

@@ -175,7 +175,7 @@ struct FanSet: ParsableCommand {
     @Option(name: .long, help: "0-based fan index. Omit to set all fans.")
     var fan: Int?
 
-    @Flag(name: .long, help: "Do not clamp to the fan's reported min/max RPM.")
+    @Flag(name: .long, help: "Allow targets below the fan's minimum RPM (requires allow_below_minimum = true under [safety] in the daemon config; the max RPM is always a hard ceiling).")
     var force = false
 
     func run() throws {
