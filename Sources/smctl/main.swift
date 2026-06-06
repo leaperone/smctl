@@ -167,7 +167,7 @@ struct FanStatus: ParsableCommand {
 }
 
 struct FanSet: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "set", abstract: "Set a manual fan target in RPM (clamped to min/max unless --force).")
+    static let configuration = CommandConfiguration(commandName: "set", abstract: "Set a manual fan target in RPM, clamped to the fan's min/max.")
 
     @Argument(help: "Target fan speed in RPM.")
     var rpm: Double
@@ -347,7 +347,7 @@ struct Daemon: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "daemon",
         abstract: "Install, remove, and inspect smctld.",
-        subcommands: [DaemonInstall.self, DaemonUninstall.self, DaemonStatus.self, DaemonPing.self]
+        subcommands: [DaemonInstall.self, DaemonUninstall.self, DaemonRestart.self, DaemonStatus.self, DaemonPing.self]
     )
 }
 
@@ -357,6 +357,21 @@ struct DaemonPing: ParsableCommand {
     func run() throws {
         let ping: PingDTO = try DaemonClient().ping()
         print("smctld ok \(ping.version) \(CLIFormatters.iso8601.string(from: ping.timestamp))")
+    }
+}
+
+struct DaemonRestart: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "restart",
+        abstract: "Restart smctld so it picks up an upgraded binary (requires root)."
+    )
+
+    func run() throws {
+        guard geteuid() == 0 else {
+            throw ValidationError("daemon restart must be run as root. Try: sudo smctl daemon restart")
+        }
+        try runProcess("/bin/launchctl", ["kickstart", "-k", "system/\(SMCtlProtocolInfo.machServiceName)"])
+        print("smctld restarted.")
     }
 }
 
@@ -721,7 +736,41 @@ private final class DaemonClient {
         guard let data = box.data else {
             throw ValidationError("Daemon returned no data.")
         }
-        return try SMCtlProtocolCoding.decode(T.self, from: data)
+        let result = try SMCtlProtocolCoding.decode(T.self, from: data)
+        warnOnVersionSkew(result)
+        return result
+    }
+
+    /// Version-skew alarm: brew upgrades swap the binaries on disk but never restart
+    /// the running daemon, so safety fixes silently do not take effect (observed live:
+    /// a 0.1.2 daemon kept serving a 0.1.5 CLI for three releases). Checked once per
+    /// CLI invocation, piggybacking on the command's own reply when it carries a
+    /// version, otherwise via one extra ping.
+    private var skewChecked = false
+
+    private func warnOnVersionSkew<T>(_ result: T) {
+        guard !skewChecked else { return }
+        skewChecked = true  // set before any nested call() to prevent recursion
+
+        let daemonVersion: String?
+        if let ping = result as? PingDTO {
+            daemonVersion = ping.version
+        } else {
+            let ping: PingDTO? = try? call { proxy, reply in
+                proxy.daemonPing(withReply: reply)
+            }
+            daemonVersion = ping?.version
+        }
+        guard let daemonVersion, daemonVersion != SMCtlProtocolInfo.version else {
+            return
+        }
+        let warning = """
+        warning: smctl is \(SMCtlProtocolInfo.version) but the running smctld is \(daemonVersion).
+        Fixes in this version are NOT active until the daemon restarts:
+          sudo smctl daemon restart
+
+        """
+        FileHandle.standardError.write(Data(warning.utf8))
     }
 }
 
