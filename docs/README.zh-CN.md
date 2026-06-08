@@ -69,6 +69,8 @@ $ sudo .build/release/smctl daemon install
 
 充电限制和风扇控制由 root LaunchDaemon `smctld` 执行，CLI 通过 XPC 与之通信；只读传感器不需要 daemon 也不需要 root。
 
+Homebrew 安装会自动配置 shell 补全（bash/zsh/fish）和 `man smctl` 手册页。
+
 ## 安全设计
 
 在用户态控制风扇和充电，必须以最坏情况为设计前提。smctl 把这些当作一等不变量：

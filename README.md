@@ -71,6 +71,8 @@ Each [release](https://github.com/leaperone/smctl/releases) ships a zip with `sm
 
 Charge limiting and fan control are applied by `smctld`, a root LaunchDaemon. The CLI talks to it over XPC; reading sensors needs no daemon and no root.
 
+The Homebrew install sets up shell completions (bash/zsh/fish) and a `man smctl` page automatically.
+
 ## Safety by design
 
 Controlling fans and charging from userspace demands paranoia. smctl treats these as first-class invariants:
