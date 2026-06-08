@@ -80,6 +80,17 @@ Controlling fans and charging from userspace demands paranoia. smctl treats thes
 - **Verified writes.** Every SMC write is read back and verified (with a settle window for firmware that applies writes asynchronously) — failures surface as errors, never as silent no-ops.
 - **Graceful degradation.** If a macOS update changes SMC behavior, affected features degrade to read-only with an explicit message instead of pretending to work.
 
+## Privacy
+
+The daemon makes exactly one kind of outbound network request: a once-a-day check of the GitHub releases API to learn the latest version, which the CLI surfaces as an upgrade hint. Nothing else leaves your machine — no telemetry, no analytics. Turn it off with:
+
+```toml
+[update]
+check = false
+```
+
+in `/etc/smctl/config.toml` (then `sudo smctl daemon restart`). The CLI itself never makes network requests.
+
 ## Supported hardware
 
 - **Apple Silicon Macs, macOS 14+.**

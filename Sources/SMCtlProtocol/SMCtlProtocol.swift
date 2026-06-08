@@ -3,6 +3,24 @@ import Foundation
 public enum SMCtlProtocolInfo {
     public static let version = "0.1.6"
     public static let machServiceName = "one.leaper.smctl.daemon"
+
+    /// Numeric-component semver comparison, tolerant of a leading "v".
+    /// Non-numeric/garbage versions compare as not-newer (fail closed: no false alarm).
+    public static func isVersion(_ candidate: String, newerThan baseline: String) -> Bool {
+        func parts(_ s: String) -> [Int]? {
+            let trimmed = s.hasPrefix("v") ? String(s.dropFirst()) : s
+            let comps = trimmed.split(separator: ".").map { Int($0) }
+            guard comps.allSatisfy({ $0 != nil }) else { return nil }
+            return comps.map { $0! }
+        }
+        guard let a = parts(candidate), let b = parts(baseline) else { return false }
+        for i in 0..<max(a.count, b.count) {
+            let x = i < a.count ? a[i] : 0
+            let y = i < b.count ? b[i] : 0
+            if x != y { return x > y }
+        }
+        return false
+    }
 }
 
 @objc(SMCtlDaemonXPCProtocol)
@@ -44,11 +62,16 @@ public struct PingDTO: Codable, Equatable, Sendable {
     public var ok: Bool
     public var version: String
     public var timestamp: Date
+    /// Latest release tag the daemon has seen from its periodic check, or nil when
+    /// the check is disabled or has not run yet. A missing key decodes to nil, so a
+    /// newer CLI talking to an older daemon degrades gracefully.
+    public var latestVersion: String?
 
-    public init(ok: Bool, version: String, timestamp: Date) {
+    public init(ok: Bool, version: String, timestamp: Date, latestVersion: String? = nil) {
         self.ok = ok
         self.version = version
         self.timestamp = timestamp
+        self.latestVersion = latestVersion
     }
 }
 
