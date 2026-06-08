@@ -36,6 +36,8 @@ public protocol SMCtlDaemonXPCProtocol {
     func setChargeLimit(_ requestData: Data, withReply reply: @escaping (Data?, String?) -> Void)
     func setChargingEnabled(_ requestData: Data, withReply reply: @escaping (Data?, String?) -> Void)
     func setAdapterEnabled(_ requestData: Data, withReply reply: @escaping (Data?, String?) -> Void)
+    func getAlertStatus(withReply reply: @escaping (Data?, String?) -> Void)
+    func testAlert(_ requestData: Data, withReply reply: @escaping (Data?, String?) -> Void)
     func reloadConfig(withReply reply: @escaping (Data?, String?) -> Void)
 }
 
@@ -243,6 +245,58 @@ public struct SetFanAutoRequestDTO: Codable, Equatable, Sendable {
 }
 
 public struct SetFanProfileRequestDTO: Codable, Equatable, Sendable {
+    public var name: String
+
+    public init(name: String) {
+        self.name = name
+    }
+}
+
+public struct AlertRuleStateDTO: Codable, Equatable, Sendable {
+    public var name: String
+    public var status: String
+    public var lastFired: Date?
+    public var lastValue: Double?
+
+    public init(name: String, status: String, lastFired: Date?, lastValue: Double?) {
+        self.name = name
+        self.status = status
+        self.lastFired = lastFired
+        self.lastValue = lastValue
+    }
+}
+
+public struct AlertEventDTO: Codable, Equatable, Sendable {
+    public var ruleName: String
+    public var kind: String
+    public var trigger: String
+    public var reason: String
+    public var value: Double?
+    public var timestamp: Date
+
+    public init(ruleName: String, kind: String, trigger: String, reason: String, value: Double?, timestamp: Date) {
+        self.ruleName = ruleName
+        self.kind = kind
+        self.trigger = trigger
+        self.reason = reason
+        self.value = value
+        self.timestamp = timestamp
+    }
+}
+
+public struct AlertStatusDTO: Codable, Equatable, Sendable {
+    public var timestamp: Date
+    public var rules: [AlertRuleStateDTO]
+    public var recent: [AlertEventDTO]
+
+    public init(timestamp: Date, rules: [AlertRuleStateDTO], recent: [AlertEventDTO]) {
+        self.timestamp = timestamp
+        self.rules = rules
+        self.recent = recent
+    }
+}
+
+public struct TestAlertRequestDTO: Codable, Equatable, Sendable {
     public var name: String
 
     public init(name: String) {

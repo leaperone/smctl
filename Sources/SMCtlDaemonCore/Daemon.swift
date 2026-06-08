@@ -21,17 +21,25 @@ struct DaemonConfig: Codable, Equatable, Sendable {
     var fan: FanConfig
     var safety: SafetyConfig
     var update: UpdateConfig
+    var alerts: [AlertConfig]
 
     init(
         battery: BatteryConfig = BatteryConfig(),
         fan: FanConfig = FanConfig(),
         safety: SafetyConfig = SafetyConfig(),
-        update: UpdateConfig = UpdateConfig()
+        update: UpdateConfig = UpdateConfig(),
+        alerts: [AlertConfig] = []
     ) {
         self.battery = battery
         self.fan = fan
         self.safety = safety
         self.update = update
+        self.alerts = alerts
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case battery, fan, safety, update
+        case alerts = "alert"
     }
 
     init(from decoder: Decoder) throws {
@@ -40,6 +48,7 @@ struct DaemonConfig: Codable, Equatable, Sendable {
         fan = try container.decodeIfPresent(FanConfig.self, forKey: .fan) ?? FanConfig()
         safety = try container.decodeIfPresent(SafetyConfig.self, forKey: .safety) ?? SafetyConfig()
         update = try container.decodeIfPresent(UpdateConfig.self, forKey: .update) ?? UpdateConfig()
+        alerts = try container.decodeIfPresent([AlertConfig].self, forKey: .alerts) ?? []
     }
 }
 
@@ -206,6 +215,11 @@ public final class SmctlDaemon: @unchecked Sendable {
     private var runtimeFanProfile: String?
     // Stateful: carries the safety latch across ticks; ceiling refreshed from config.
     var safetyGuard = FanSafetyGuard()
+    // Stateful: carries per-rule debounce/cooldown across ticks.
+    var alertEngine = AlertEngine()
+    private let alertRunner = AlertActionRunner()
+    private var alertHistory: [AlertEvent] = []
+    private static let alertHistoryLimit = 50
     private var lastEvaluation: Date?
     private var lastError: String?
     private var timer: DispatchSourceTimer?
@@ -266,7 +280,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         let fanSource = DispatchSource.makeTimerSource(queue: queue)
         fanSource.schedule(deadline: .now() + .seconds(1), repeating: .seconds(1))
         fanSource.setEventHandler { [weak self] in
-            self?.evaluateFanSubsystemLocked()
+            self?.tickFanAndAlertsLocked()
         }
         fanSource.resume()
         queue.sync {
@@ -631,12 +645,21 @@ public final class SmctlDaemon: @unchecked Sendable {
         return capped
     }
 
-    func evaluateFanSubsystemLocked() {
+    /// One 1 Hz tick: read temperatures once, drive the fan subsystem, then the
+    /// alert engine. Alerts run even on fanless Macs (where the fan subsystem
+    /// early-returns) so temperature/write-error alerts still work there.
+    func tickFanAndAlertsLocked() {
+        let samples = temperatureSamplesLocked()
+        evaluateFanSubsystemLocked(samples: samples)
+        evaluateAlertsLocked(samples: samples)
+    }
+
+    func evaluateFanSubsystemLocked(samples providedSamples: [FanTemperatureSample]? = nil) {
         guard backend != nil, !capabilities.fans.isEmpty else {
             return
         }
 
-        let samples = temperatureSamplesLocked()
+        let samples = providedSamples ?? temperatureSamplesLocked()
         let profile = currentFanProfileLocked()
         // "Manual policy active" covers direct manual targets, residual Ftst/manual
         // modes, and curve profiles (which drive fans via manual mode every tick).
@@ -677,6 +700,85 @@ public final class SmctlDaemon: @unchecked Sendable {
         } catch {
             lastError = String(describing: error)
             logger.error("Fan policy evaluation failed: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// Evaluate alert rules against the current tick's metrics and dispatch any
+    /// edge-triggered events to the (isolated) action runner. Runs on the state
+    /// queue; the runner does all blocking work off-queue.
+    private func evaluateAlertsLocked(samples: [FanTemperatureSample]) {
+        let rules = config.alerts.compactMap(\.rule)
+        guard !rules.isEmpty else { return }
+        let latched = safetyGuard.isLatched
+        let input = AlertConditionInput(
+            samples: samples,
+            guardTripped: latched,
+            guardReason: latched ? "Fan safety guard latched (overheat or unreadable temperature sensors)" : nil,
+            writeError: lastError
+        )
+        let events = alertEngine.evaluate(rules: rules, input: input, now: Date())
+        guard !events.isEmpty else { return }
+        let actionByName = Dictionary(
+            config.alerts.map { ($0.name, $0.resolvedAction) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        for event in events {
+            recordAlertLocked(event)
+            alertRunner.run(event: event, action: actionByName[event.ruleName] ?? .log)
+        }
+    }
+
+    private func recordAlertLocked(_ event: AlertEvent) {
+        alertHistory.append(event)
+        if alertHistory.count > Self.alertHistoryLimit {
+            alertHistory.removeFirst(alertHistory.count - Self.alertHistoryLimit)
+        }
+    }
+
+    func alertStatus() -> AlertStatusDTO {
+        queue.sync {
+            let rules = config.alerts.compactMap(\.rule)
+            let now = Date()
+            let states = alertEngine.states(for: rules, now: now).map { state in
+                AlertRuleStateDTO(
+                    name: state.name,
+                    status: state.status.rawValue,
+                    lastFired: state.lastFired,
+                    lastValue: state.lastValue
+                )
+            }
+            let history = alertHistory.suffix(20).map { event in
+                AlertEventDTO(
+                    ruleName: event.ruleName,
+                    kind: event.kind.rawValue,
+                    trigger: event.triggerKind.rawValue,
+                    reason: event.reason,
+                    value: event.value,
+                    timestamp: event.timestamp
+                )
+            }
+            return AlertStatusDTO(timestamp: now, rules: states, recent: Array(history))
+        }
+    }
+
+    /// Fire one rule's action immediately, bypassing trigger evaluation, so an
+    /// operator can verify a freshly-configured webhook/exec actually works.
+    func testAlert(name: String) throws {
+        try queue.sync {
+            guard let config = config.alerts.first(where: { $0.name == name }) else {
+                throw DaemonError.unsupported("No alert named '\(name)' is configured.")
+            }
+            let trigger = config.rule?.trigger.kind ?? .temp
+            let event = AlertEvent(
+                ruleName: name,
+                kind: .fired,
+                triggerKind: trigger,
+                reason: "Test trigger via 'smctl alert test'",
+                value: nil,
+                timestamp: Date()
+            )
+            recordAlertLocked(event)
+            alertRunner.run(event: event, action: config.resolvedAction)
         }
     }
 
@@ -956,7 +1058,27 @@ public final class SmctlDaemon: @unchecked Sendable {
                 text += "weights = { \(pairs) }\n"
             }
         }
+        // Round-trip alert rules so a battery/fan write never silently drops the
+        // user's alert config (writeConfig rewrites the whole file).
+        for alert in config.alerts {
+            text += formatAlert(alert)
+        }
         try text.write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
+    private static func formatAlert(_ alert: AlertConfig) -> String {
+        var lines = ["", "[[alert]]", "name = \"\(alert.name)\"", "on = \"\(alert.on)\""]
+        if let sensor = alert.sensor { lines.append("sensor = \"\(sensor)\"") }
+        if let above = alert.above { lines.append("above = \(above)") }
+        if let forSeconds = alert.forSeconds { lines.append("for = \(forSeconds)") }
+        if let cooldown = alert.cooldown { lines.append("cooldown = \(cooldown)") }
+        if let resolve = alert.resolve { lines.append("resolve = \(resolve ? "true" : "false")") }
+        if let action = alert.action { lines.append("action = \"\(action)\"") }
+        if let url = alert.url { lines.append("url = \"\(url)\"") }
+        if let command = alert.command {
+            lines.append("command = [\(command.map { "\"\($0)\"" }.joined(separator: ", "))]")
+        }
+        return lines.joined(separator: "\n") + "\n"
     }
 
     private static func formatFanPoint(_ values: [FanPointValue]) -> String {
@@ -1040,6 +1162,17 @@ final class XPCService: NSObject, SMCtlDaemonXPCProtocol {
 
     func getDaemonStatus(withReply reply: @escaping (Data?, String?) -> Void) {
         send(daemon.daemonStatus(), reply)
+    }
+
+    func getAlertStatus(withReply reply: @escaping (Data?, String?) -> Void) {
+        send(daemon.alertStatus(), reply)
+    }
+
+    func testAlert(_ requestData: Data, withReply reply: @escaping (Data?, String?) -> Void) {
+        doWrite(reply) {
+            let request = try SMCtlProtocolCoding.decode(TestAlertRequestDTO.self, from: requestData)
+            try daemon.testAlert(name: request.name)
+        }
     }
 
     func setChargeLimit(_ requestData: Data, withReply reply: @escaping (Data?, String?) -> Void) {

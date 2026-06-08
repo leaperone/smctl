@@ -24,7 +24,7 @@ struct SMCtl: ParsableCommand {
         commandName: "smctl",
         abstract: "Mac hardware control utility.",
         version: SMCtlProtocolInfo.version,
-        subcommands: [Sensors.self, Fan.self, Battery.self, Power.self, Daemon.self, Debug.self]
+        subcommands: [Sensors.self, Fan.self, Battery.self, Power.self, Alert.self, Daemon.self, Debug.self]
     )
 }
 
@@ -428,6 +428,63 @@ private func watts(_ value: Double?) -> String {
     return "\(String(format: "%.2f", value)) W"
 }
 
+struct Alert: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "alert",
+        abstract: "Inspect and test temperature/event alerts (configured in /etc/smctl/config.toml).",
+        subcommands: [AlertStatus.self, AlertTest.self],
+        defaultSubcommand: AlertStatus.self
+    )
+}
+
+struct AlertStatus: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "status", abstract: "Per-rule state (armed/pending/cooling/firing) and recent events.")
+
+    @Flag(name: .long, help: "Print machine-readable JSON.")
+    var json = false
+
+    func run() throws {
+        let status: AlertStatusDTO = try DaemonClient().getAlertStatus()
+        if json {
+            print(try CLIJSON.encodeString(status))
+            return
+        }
+        printAlertStatus(status)
+    }
+}
+
+struct AlertTest: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "test", abstract: "Fire a configured alert's action immediately, to verify it works.")
+
+    @Argument(help: "Name of the alert rule to test.")
+    var name: String
+
+    func run() throws {
+        try DaemonClient().testAlert(name: name)
+        print("Fired action for alert '\(name)'. Check your webhook/command (or `log show --predicate 'subsystem == \"one.leaper.smctl\"'`).")
+    }
+}
+
+private func printAlertStatus(_ status: AlertStatusDTO) {
+    print("Alerts")
+    if status.rules.isEmpty {
+        print("  No alert rules configured. Add [[alert]] tables to /etc/smctl/config.toml.")
+    } else {
+        for rule in status.rules {
+            let fired = rule.lastFired.map { " last fired \(CLIFormatters.iso8601.string(from: $0))" } ?? ""
+            print("  \(rule.name): \(rule.status)\(fired)")
+        }
+    }
+    if !status.recent.isEmpty {
+        print("")
+        print("Recent events")
+        for event in status.recent.suffix(10) {
+            let when = CLIFormatters.iso8601.string(from: event.timestamp)
+            print("  \(when)  \(event.ruleName) \(event.kind): \(event.reason)")
+        }
+    }
+}
+
 struct Daemon: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "daemon",
@@ -739,6 +796,19 @@ private final class DaemonClient {
     func getDaemonStatus() throws -> DaemonStatusDTO {
         try call { proxy, reply in
             proxy.getDaemonStatus(withReply: reply)
+        }
+    }
+
+    func getAlertStatus() throws -> AlertStatusDTO {
+        try call { proxy, reply in
+            proxy.getAlertStatus(withReply: reply)
+        }
+    }
+
+    func testAlert(name: String) throws {
+        let data = try SMCtlProtocolCoding.encode(TestAlertRequestDTO(name: name))
+        let _: EmptyResponseDTO = try call { proxy, reply in
+            proxy.testAlert(data, withReply: reply)
         }
     }
 

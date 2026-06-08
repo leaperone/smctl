@@ -38,6 +38,7 @@ $ smctl sensors --watch            # live temperatures, fan RPM, package power
 | `smctl fan set 2500 [--fan N]` | Manual fan target |
 | `smctl fan profile quiet\|full\|auto\|<custom>` | Declarative fan curves (TOML), hysteresis + slew-rate limited |
 | `smctl power status [--watch] [--json]` | Thermal pressure, CPU throttling (% speed limit), package + input power |
+| `smctl alert status\|test <name>` | Temperature/event alerts → webhook, command, or log (configured in TOML) |
 | `smctl daemon install\|uninstall\|status\|ping` | Manage the privileged helper |
 
 Policies live in `/etc/smctl/config.toml` — declarative, diffable, dotfiles-friendly.
@@ -85,14 +86,53 @@ Controlling fans and charging from userspace demands paranoia. smctl treats thes
 
 ## Privacy
 
-The daemon makes exactly one kind of outbound network request: a once-a-day check of the GitHub releases API to learn the latest version, which the CLI surfaces as an upgrade hint. Nothing else leaves your machine — no telemetry, no analytics. Turn it off with:
+The daemon makes outbound network requests in exactly two cases, both under your control:
+
+1. **Update check** — a once-a-day check of the GitHub releases API to learn the latest version, surfaced by the CLI as an upgrade hint. On by default; turn it off with `[update] check = false`.
+2. **Alert webhooks** — only the webhook URLs *you* configure in `[[alert]]` rules. No alerts configured (the default) means no such requests.
+
+There is no telemetry and no analytics. The CLI itself never makes network requests — all outbound traffic originates in the daemon, from the two opt-in/opt-out cases above. To go fully offline, set:
 
 ```toml
 [update]
 check = false
 ```
 
-in `/etc/smctl/config.toml` (then `sudo smctl daemon restart`). The CLI itself never makes network requests.
+in `/etc/smctl/config.toml` (then `sudo smctl daemon restart`) and configure no webhook alerts.
+
+## Alerts
+
+The daemon already watches every temperature sensor once a second for the thermal safety guard. Alert rules hang off that same loop: when a condition holds, the daemon runs an action — a shell command, an HTTP webhook, or a log line. Useful for a headless Mac mini wired into Prometheus/Gotify/etc.
+
+Rules are declarative TOML in `/etc/smctl/config.toml`:
+
+```toml
+[[alert]]
+name = "cpu-hot"
+on = "temp"            # temp | guard | write-error
+sensor = "Tp09"        # a sensor key, or "any" for the hottest
+above = 85             # °C
+for = 30               # must hold this many seconds before firing (debounce)
+cooldown = 300         # silence re-firing for this many seconds
+resolve = true         # also fire once when the condition clears
+action = "webhook"     # webhook | exec | log
+url = "http://gotify.lan/message?token=..."
+
+[[alert]]
+name = "guard-tripped"
+on = "guard"           # the thermal safety guard forced fans back to auto
+action = "exec"
+command = ["/usr/local/bin/notify.sh", "{name}", "{reason}"]
+```
+
+`exec` commands receive the event as both substituted argv placeholders (`{name}` `{kind}` `{trigger}` `{reason}` `{value}`) and `SMCTL_ALERT_*` environment variables. Inspect and verify rules with:
+
+```console
+$ smctl alert status          # per-rule state + recent events
+$ smctl alert test cpu-hot    # fire the action now, to check your webhook/script
+```
+
+> **Security:** `exec` actions run as **root** (the daemon is root). The trust boundary is whoever can edit the root-owned `/etc/smctl/config.toml` — the same boundary as every other policy. Commands run via argv arrays only (no shell), so there is no command-injection surface, but treat write access to the config as equivalent to root.
 
 ## Supported hardware
 

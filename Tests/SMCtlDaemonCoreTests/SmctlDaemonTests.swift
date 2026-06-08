@@ -146,6 +146,57 @@ final class SmctlDaemonTests: XCTestCase {
         XCTAssertEqual(reloaded.config.battery.limit, "70-80")
     }
 
+    func testAlertConfigDecodesFromToml() throws {
+        try """
+        [battery]
+        limit = "80"
+
+        [[alert]]
+        name = "cpu-hot"
+        on = "temp"
+        sensor = "Tp09"
+        above = 85.0
+        for = 30.0
+        cooldown = 300.0
+        resolve = true
+        action = "webhook"
+        url = "http://gotify.lan/message"
+        """.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+        XCTAssertEqual(daemon.config.alerts.count, 1)
+        let alert = daemon.config.alerts.first
+        XCTAssertEqual(alert?.name, "cpu-hot")
+        XCTAssertEqual(alert?.above, 85)
+        XCTAssertEqual(alert?.forSeconds, 30)
+        XCTAssertEqual(alert?.rule?.trigger.kind, .temp)
+    }
+
+    func testWriteConfigPreservesAlerts() throws {
+        try """
+        [battery]
+        limit = "80"
+
+        [[alert]]
+        name = "cpu-hot"
+        on = "temp"
+        sensor = "Tp09"
+        above = 85.0
+        action = "exec"
+        command = ["/usr/local/bin/notify.sh", "{name}", "{value}"]
+        """.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        // A battery write rewrites the whole config file; the alert must survive.
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+        XCTAssertEqual(daemon.config.alerts.count, 1)
+        try daemon.setChargeLimit("70-80")
+
+        let reloaded = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+        XCTAssertEqual(reloaded.config.alerts.count, 1, "writeConfig must round-trip [[alert]] tables")
+        XCTAssertEqual(reloaded.config.alerts.first?.command, ["/usr/local/bin/notify.sh", "{name}", "{value}"])
+        XCTAssertEqual(reloaded.config.alerts.first?.resolvedAction, .exec(["/usr/local/bin/notify.sh", "{name}", "{value}"]))
+    }
+
     // MARK: - Helpers
 
     private func makeDaemon(backend: RecordingBackend, capabilities: Capabilities) -> SmctlDaemon {
@@ -160,6 +211,32 @@ final class SmctlDaemonTests: XCTestCase {
             capabilities: capabilities,
             configPath: configPath
         )
+    }
+}
+
+final class AlertActionRunnerTests: XCTestCase {
+    func testExecRunsSubprocessWithSubstitutedArgv() throws {
+        let marker = NSTemporaryDirectory() + "smctl-alert-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: marker + "-cpu-hot") }
+
+        let runner = AlertActionRunner()
+        let event = AlertEvent(
+            ruleName: "cpu-hot",
+            kind: .fired,
+            triggerKind: .temp,
+            reason: "test",
+            value: 92,
+            timestamp: Date()
+        )
+        // Filename carries {name}; if substitution works the file lands at <marker>-cpu-hot.
+        runner.run(event: event, action: .exec(["/usr/bin/touch", "\(marker)-{name}"]))
+
+        let expected = marker + "-cpu-hot"
+        let deadline = Date().addingTimeInterval(5)
+        while !FileManager.default.fileExists(atPath: expected), Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: expected), "exec action should run /usr/bin/touch with {name} substituted")
     }
 }
 

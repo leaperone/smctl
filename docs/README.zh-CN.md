@@ -36,6 +36,7 @@ $ smctl sensors --watch            # 实时温度、风扇转速、封装功耗
 | `smctl fan set 2500 [--fan N]` | 手动设定目标转速 |
 | `smctl fan profile quiet\|full\|auto\|<自定义>` | 声明式风扇曲线（TOML），带滞回和变速率限制 |
 | `smctl power status [--watch] [--json]` | 热压制状态、CPU 降频幅度（限速 %）、封装功耗与输入功率 |
+| `smctl alert status\|test <name>` | 温度/事件告警 → webhook、命令或日志（TOML 配置） |
 | `smctl daemon install\|uninstall\|status\|ping` | 管理特权 daemon |
 
 策略配置在 `/etc/smctl/config.toml`——声明式、可 diff、对 dotfiles 友好。
@@ -83,14 +84,47 @@ Homebrew 安装会自动配置 shell 补全（bash/zsh/fish）和 `man smctl` �
 
 ## 隐私
 
-daemon 只发起一种对外网络请求：每天一次查询 GitHub releases API 获取最新版本号，由 CLI 提示你升级。除此之外没有任何数据离开你的机器——无遥测、无统计。关闭方式：在 `/etc/smctl/config.toml` 写入
+daemon 仅在两种情况下发起对外网络请求，且都由你掌控：
+
+1. **更新检查**——每天一次查询 GitHub releases API 获取最新版本号，由 CLI 提示你升级。默认开启，可用 `[update] check = false` 关闭。
+2. **告警 webhook**——只发往*你自己*在 `[[alert]]` 规则里配置的 URL。不配告警（默认）就没有这类请求。
+
+无遥测、无统计。CLI 本身从不发起网络请求——所有对外流量都来自 daemon 的上述两种可开关情况。完全离线：在 `/etc/smctl/config.toml` 写入
 
 ```toml
 [update]
 check = false
 ```
 
-然后 `sudo smctl daemon restart`。CLI 本身从不发起网络请求。
+然后 `sudo smctl daemon restart`，并且不配置任何 webhook 告警。
+
+## 告警
+
+daemon 为了温度护栏，本就每秒扫描所有温度传感器。告警规则挂在同一个循环上：条件满足时 daemon 执行一个动作——shell 命令、HTTP webhook 或一条日志。适合把 Mac mini 服务器接进 Prometheus/Gotify 等告警体系。
+
+规则是 `/etc/smctl/config.toml` 里的声明式 TOML：
+
+```toml
+[[alert]]
+name = "cpu-hot"
+on = "temp"            # temp | guard | write-error
+sensor = "Tp09"        # 传感器键，或 "any" 取最热的一个
+above = 85             # ℃
+for = 30               # 持续满足这么多秒才触发（去抖）
+cooldown = 300         # 触发后静默这么多秒
+resolve = true         # 条件恢复时再发一条
+action = "webhook"     # webhook | exec | log
+url = "http://gotify.lan/message?token=..."
+```
+
+`exec` 命令会同时拿到占位符（`{name}` `{kind}` `{trigger}` `{reason}` `{value}`）和 `SMCTL_ALERT_*` 环境变量。检视与验证：
+
+```console
+$ smctl alert status          # 每条规则的状态 + 最近事件
+$ smctl alert test cpu-hot    # 立即触发动作，验证 webhook/脚本是否通
+```
+
+> **安全提示**：`exec` 动作以 **root** 运行（daemon 是 root）。信任边界 = 能编辑 root 拥有的 `/etc/smctl/config.toml` 的人——与其它所有策略一致。命令只走 argv 数组（不经 shell），无命令注入面，但应把「能改配置」视同 root 权限。
 
 ## 支持的硬件
 
