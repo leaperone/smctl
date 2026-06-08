@@ -63,6 +63,10 @@ let package = Package(
             dependencies: ["PolicyEngine"]
         ),
         .testTarget(
+            name: "SMCtlProtocolTests",
+            dependencies: ["SMCtlProtocol"]
+        ),
+        .testTarget(
             name: "SMCtlDaemonCoreTests",
             dependencies: ["SMCtlDaemonCore"]
         )

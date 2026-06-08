@@ -20,11 +20,18 @@ struct DaemonConfig: Codable, Equatable, Sendable {
     var battery: BatteryConfig
     var fan: FanConfig
     var safety: SafetyConfig
+    var update: UpdateConfig
 
-    init(battery: BatteryConfig = BatteryConfig(), fan: FanConfig = FanConfig(), safety: SafetyConfig = SafetyConfig()) {
+    init(
+        battery: BatteryConfig = BatteryConfig(),
+        fan: FanConfig = FanConfig(),
+        safety: SafetyConfig = SafetyConfig(),
+        update: UpdateConfig = UpdateConfig()
+    ) {
         self.battery = battery
         self.fan = fan
         self.safety = safety
+        self.update = update
     }
 
     init(from decoder: Decoder) throws {
@@ -32,6 +39,23 @@ struct DaemonConfig: Codable, Equatable, Sendable {
         battery = try container.decodeIfPresent(BatteryConfig.self, forKey: .battery) ?? BatteryConfig()
         fan = try container.decodeIfPresent(FanConfig.self, forKey: .fan) ?? FanConfig()
         safety = try container.decodeIfPresent(SafetyConfig.self, forKey: .safety) ?? SafetyConfig()
+        update = try container.decodeIfPresent(UpdateConfig.self, forKey: .update) ?? UpdateConfig()
+    }
+}
+
+struct UpdateConfig: Codable, Equatable, Sendable {
+    /// When true, the daemon contacts the GitHub releases API once a day to learn the
+    /// latest version, surfaced as a hint in the CLI. This is the only outbound network
+    /// request smctl makes; set to false for a fully offline daemon.
+    var check: Bool
+
+    init(check: Bool = true) {
+        self.check = check
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        check = try container.decodeIfPresent(Bool.self, forKey: .check) ?? true
     }
 }
 
@@ -186,6 +210,8 @@ public final class SmctlDaemon: @unchecked Sendable {
     private var lastError: String?
     private var timer: DispatchSourceTimer?
     private var fanTimer: DispatchSourceTimer?
+    private var updateTimer: DispatchSourceTimer?
+    private var latestKnownVersion: String?
     private var powerConnection: io_connect_t = 0
     private var powerNotificationPort: IONotificationPortRef?
     private var powerNotifier: io_object_t = 0
@@ -248,10 +274,50 @@ public final class SmctlDaemon: @unchecked Sendable {
             fanTimer = fanSource
             reconcileFanStartupLocked()
         }
+        startUpdateCheck()
+    }
+
+    /// Daily update check (opt-out via `[update] check = false`). First check is
+    /// delayed so it never competes with startup; the result is cached for the CLI
+    /// to surface. Network and parse failures are silent — this must never affect
+    /// the daemon's real job.
+    private func startUpdateCheck() {
+        guard config.update.check else { return }
+        let source = DispatchSource.makeTimerSource(queue: queue)
+        source.schedule(deadline: .now() + .seconds(10), repeating: .seconds(24 * 60 * 60))
+        source.setEventHandler { [weak self] in
+            self?.performUpdateCheck()
+        }
+        source.resume()
+        queue.sync { updateTimer = source }
+    }
+
+    private func performUpdateCheck() {
+        guard let url = URL(string: "https://api.github.com/repos/leaperone/smctl/releases/latest") else { return }
+        var request = URLRequest(url: url, timeoutInterval: 15)
+        request.setValue("smctl/\(SMCtlProtocolInfo.version)", forHTTPHeaderField: "User-Agent")
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        let task = URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
+            guard
+                let self,
+                let data,
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let tag = json["tag_name"] as? String
+            else { return }
+            self.queue.async {
+                self.latestKnownVersion = tag
+                if SMCtlProtocolInfo.isVersion(tag, newerThan: SMCtlProtocolInfo.version) {
+                    logger.notice("Update available: \(tag, privacy: .public) (running \(SMCtlProtocolInfo.version, privacy: .public))")
+                }
+            }
+        }
+        task.resume()
     }
 
     func ping() -> PingDTO {
-        PingDTO(ok: true, version: SMCtlProtocolInfo.version, timestamp: Date())
+        queue.sync {
+            PingDTO(ok: true, version: SMCtlProtocolInfo.version, timestamp: Date(), latestVersion: latestKnownVersion)
+        }
     }
 
     func daemonStatus() -> DaemonStatusDTO {
@@ -867,6 +933,9 @@ public final class SmctlDaemon: @unchecked Sendable {
         [safety]
         temp_ceiling = \(FanSafetyGuard(configuredCeilingCelsius: config.safety.temp_ceiling).configuredCeilingCelsius)
         allow_below_minimum = \(config.safety.allow_below_minimum ? "true" : "false")
+
+        [update]
+        check = \(config.update.check ? "true" : "false")
 
         """
         for curve in config.fan.curves {

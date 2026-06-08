@@ -78,6 +78,17 @@ $ sudo .build/release/smctl daemon install
 - **写入校验。** 每次 SMC 写入都会回读验证（带沉降窗口，兼容异步生效的固件）——失败会如实报错，绝不静默装作成功。
 - **优雅降级。** 如果 macOS 更新改变了 SMC 行为，受影响的功能会降级为只读并明确提示，而不是假装还能工作。
 
+## 隐私
+
+daemon 只发起一种对外网络请求：每天一次查询 GitHub releases API 获取最新版本号，由 CLI 提示你升级。除此之外没有任何数据离开你的机器——无遥测、无统计。关闭方式：在 `/etc/smctl/config.toml` 写入
+
+```toml
+[update]
+check = false
+```
+
+然后 `sudo smctl daemon restart`。CLI 本身从不发起网络请求。
+
 ## 支持的硬件
 
 - **Apple Silicon Mac，macOS 14+**

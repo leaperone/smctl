@@ -737,40 +737,50 @@ private final class DaemonClient {
             throw ValidationError("Daemon returned no data.")
         }
         let result = try SMCtlProtocolCoding.decode(T.self, from: data)
-        warnOnVersionSkew(result)
+        warnOnVersionIssues(result)
         return result
     }
 
-    /// Version-skew alarm: brew upgrades swap the binaries on disk but never restart
-    /// the running daemon, so safety fixes silently do not take effect (observed live:
-    /// a 0.1.2 daemon kept serving a 0.1.5 CLI for three releases). Checked once per
-    /// CLI invocation, piggybacking on the command's own reply when it carries a
-    /// version, otherwise via one extra ping.
-    private var skewChecked = false
+    /// Two stderr hints, checked once per CLI invocation, both sourced from the
+    /// daemon's ping (piggybacked on the command's own reply when it is a PingDTO,
+    /// otherwise via one extra ping):
+    ///   - version skew: brew swaps binaries but never restarts the daemon, so a
+    ///     stale daemon keeps serving safety fixes that are not actually active
+    ///     (observed live: a 0.1.2 daemon served a 0.1.5 CLI for three releases).
+    ///   - update available: the daemon's daily check found a newer release.
+    private var versionChecked = false
 
-    private func warnOnVersionSkew<T>(_ result: T) {
-        guard !skewChecked else { return }
-        skewChecked = true  // set before any nested call() to prevent recursion
+    private func warnOnVersionIssues<T>(_ result: T) {
+        guard !versionChecked else { return }
+        versionChecked = true  // set before any nested call() to prevent recursion
 
-        let daemonVersion: String?
-        if let ping = result as? PingDTO {
-            daemonVersion = ping.version
+        let ping: PingDTO?
+        if let p = result as? PingDTO {
+            ping = p
         } else {
-            let ping: PingDTO? = try? call { proxy, reply in
+            ping = try? call { proxy, reply in
                 proxy.daemonPing(withReply: reply)
             }
-            daemonVersion = ping?.version
         }
-        guard let daemonVersion, daemonVersion != SMCtlProtocolInfo.version else {
-            return
-        }
-        let warning = """
-        warning: smctl is \(SMCtlProtocolInfo.version) but the running smctld is \(daemonVersion).
-        Fixes in this version are NOT active until the daemon restarts:
-          sudo smctl daemon restart
+        guard let ping else { return }
 
-        """
-        FileHandle.standardError.write(Data(warning.utf8))
+        if ping.version != SMCtlProtocolInfo.version {
+            emit("""
+            warning: smctl is \(SMCtlProtocolInfo.version) but the running smctld is \(ping.version).
+            Fixes in this version are NOT active until the daemon restarts:
+              sudo smctl daemon restart
+            """)
+        } else if let latest = ping.latestVersion,
+                  SMCtlProtocolInfo.isVersion(latest, newerThan: SMCtlProtocolInfo.version) {
+            emit("""
+            note: smctl \(latest) is available (you have \(SMCtlProtocolInfo.version)). Upgrade:
+              brew upgrade smctl && sudo smctl daemon restart
+            """)
+        }
+    }
+
+    private func emit(_ message: String) {
+        FileHandle.standardError.write(Data((message + "\n\n").utf8))
     }
 }
 
