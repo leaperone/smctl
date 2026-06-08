@@ -183,7 +183,9 @@ subscribeEvents(handler)        // 状态变化推送（GUI/watch 模式共用�
 // 策略（写）
 setFanPolicy(profile|curve)  setFanManual(fan, rpm)  setFanAuto(fan)
 setChargeLimit(range)  setChargingEnabled(bool)  setAdapterEnabled(bool)
-startCalibration() / cancelCalibration()
+startCalibration() / cancelCalibration()   // 计划中，未实现：必须在 daemon 内跑
+                                           // （暂停 maintain loop、跨睡眠/重启持久化校准阶段），
+                                           // 前台 CLI 实现会与 maintain loop 抢充电控制权；待 MacBook 真机验证
 setConfig(key, value) / reloadConfig()
 ```
 

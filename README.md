@@ -115,7 +115,8 @@ Capability detection is done at runtime — on unsupported hardware, commands te
 ## Roadmap
 
 - Homebrew tap, then homebrew-core
-- `smctl battery calibrate`, thermal-throttling visibility (`smctl power`)
+- Thermal-throttling visibility (`smctl power`)
+- `smctl battery calibrate` — planned, pending validation on a MacBook (calibration must run inside the daemon to avoid fighting the maintain loop, and needs real battery hardware to verify)
 - Menu bar app (the daemon already speaks XPC; a GUI is just another client)
 
 ## Documentation

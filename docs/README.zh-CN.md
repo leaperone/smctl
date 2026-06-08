@@ -113,7 +113,8 @@ check = false
 ## 路线图
 
 - Homebrew tap → homebrew-core
-- `smctl battery calibrate`、热压制可见性（`smctl power`）
+- 热压制可见性（`smctl power`）
+- `smctl battery calibrate` —— 计划中，待 MacBook 真机验证（校准必须在 daemon 内运行以避免与 maintain loop 打架，且需要真实电池硬件验证）
 - 菜单栏 App（daemon 已经说 XPC，GUI 只是另一个客户端）
 
 ## 文档
