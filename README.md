@@ -37,6 +37,7 @@ $ smctl sensors --watch            # live temperatures, fan RPM, package power
 | `smctl fan status` | Per-fan actual/target/min/max RPM and control mode |
 | `smctl fan set 2500 [--fan N]` | Manual fan target |
 | `smctl fan profile quiet\|full\|auto\|<custom>` | Declarative fan curves (TOML), hysteresis + slew-rate limited |
+| `smctl power status [--watch] [--json]` | Thermal pressure, CPU throttling (% speed limit), package + input power |
 | `smctl daemon install\|uninstall\|status\|ping` | Manage the privileged helper |
 
 Policies live in `/etc/smctl/config.toml` — declarative, diffable, dotfiles-friendly.

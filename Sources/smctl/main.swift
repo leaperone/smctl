@@ -24,7 +24,7 @@ struct SMCtl: ParsableCommand {
         commandName: "smctl",
         abstract: "Mac hardware control utility.",
         version: SMCtlProtocolInfo.version,
-        subcommands: [Sensors.self, Fan.self, Battery.self, Daemon.self, Debug.self]
+        subcommands: [Sensors.self, Fan.self, Battery.self, Power.self, Daemon.self, Debug.self]
     )
 }
 
@@ -341,6 +341,91 @@ struct Discharge: ParsableCommand {
             }
         }
     }
+}
+
+struct Power: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "power",
+        abstract: "Thermal pressure, CPU throttling, and power draw.",
+        subcommands: [PowerStatus.self],
+        defaultSubcommand: PowerStatus.self
+    )
+}
+
+struct PowerStatus: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "status",
+        abstract: "Show thermal pressure, CPU throttling, and power draw (no root, no daemon)."
+    )
+
+    @Flag(name: .long, help: "Print machine-readable JSON.")
+    var json = false
+
+    @Flag(name: .long, help: "Refresh every second until interrupted.")
+    var watch = false
+
+    func run() throws {
+        let reader = PowerReader(backend: try SMCConnection())
+
+        repeat {
+            let snapshot = reader.snapshot()
+            if json {
+                print(try CLIJSON.encodeString(snapshot))
+            } else {
+                if watch {
+                    print("\u{001B}[2J\u{001B}[H", terminator: "")
+                }
+                printPower(snapshot)
+            }
+
+            if watch {
+                fflush(stdout)
+                sleep(1)
+            }
+        } while watch
+    }
+}
+
+private func printPower(_ snapshot: PowerSnapshot) {
+    print("smctl power  \(CLIFormatters.iso8601.string(from: snapshot.timestamp))")
+    print("")
+    print("  Thermal pressure   \(snapshot.thermalPressure.rawValue)")
+    print("  CPU throttling     \(throttleDescription(snapshot.cpu))")
+    print("  Package power      \(watts(snapshot.packagePowerWatts))")
+    print("  Input              \(inputDescription(snapshot))")
+}
+
+private func throttleDescription(_ cpu: CPUThrottleStatus) -> String {
+    guard cpu.recorded else {
+        return "none"
+    }
+    var parts: [String] = []
+    if let speed = cpu.speedLimitPercent {
+        let throttled = max(0, 100 - speed)
+        parts.append(throttled > 0 ? "speed \(speed)% (\(throttled)% throttled)" : "speed \(speed)%")
+    }
+    if let scheduler = cpu.schedulerLimitPercent {
+        parts.append("scheduler \(scheduler)%")
+    }
+    if let cpus = cpu.availableCPUs {
+        parts.append("cores \(cpus)")
+    }
+    return parts.isEmpty ? "recorded (no detail)" : parts.joined(separator: ", ")
+}
+
+private func inputDescription(_ snapshot: PowerSnapshot) -> String {
+    let power = watts(snapshot.inputPowerWatts)
+    guard let voltage = snapshot.inputVoltage, let current = snapshot.inputCurrent else {
+        return power
+    }
+    return "\(power)  (\(String(format: "%.2f", voltage)) V, \(String(format: "%.2f", current)) A)"
+}
+
+private func watts(_ value: Double?) -> String {
+    guard let value else {
+        return "unavailable"
+    }
+    return "\(String(format: "%.2f", value)) W"
 }
 
 struct Daemon: ParsableCommand {
