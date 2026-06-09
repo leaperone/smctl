@@ -222,6 +222,7 @@ public final class SmctlDaemon: @unchecked Sendable {
     private static let alertHistoryLimit = 50
     private var lastEvaluation: Date?
     private var lastError: String?
+    private var lastWriteError: String?
     private var timer: DispatchSourceTimer?
     private var fanTimer: DispatchSourceTimer?
     private var updateTimer: DispatchSourceTimer?
@@ -409,7 +410,9 @@ public final class SmctlDaemon: @unchecked Sendable {
         try queue.sync {
             try rejectIfSafetyLatchedLocked()
             let target = try normalizedFanRPM(index: index, rpm: rpm, force: force)
-            let result = try fanControllerLocked().setManual(index: index, rpm: target)
+            let result = try writeSMCOperationLocked {
+                try fanControllerLocked().setManual(index: index, rpm: target)
+            }
             ftstGate.enterManual(index: index)
             manualFanTargets[index] = target
             fanCurveEngines.removeAll()
@@ -590,7 +593,7 @@ public final class SmctlDaemon: @unchecked Sendable {
             throw DaemonError.unsupported("Charging control keys are not available on this Mac/system.")
         }
         for write in enabled ? group.enableWrites : group.disableWrites {
-            try backend.writeKey(write.key, bytes: write.bytes)
+            try writeSMCKeyLocked(write.key, bytes: write.bytes, backend: backend)
         }
     }
 
@@ -602,7 +605,29 @@ public final class SmctlDaemon: @unchecked Sendable {
             throw DaemonError.unsupported("Adapter control keys are not available on this Mac/system.")
         }
         for write in enabled ? group.enableWrites : group.disableWrites {
-            try backend.writeKey(write.key, bytes: write.bytes)
+            try writeSMCKeyLocked(write.key, bytes: write.bytes, backend: backend)
+        }
+    }
+
+    private func writeSMCKeyLocked(_ key: String, bytes: [UInt8], backend: any SMCWriteBackend) throws {
+        do {
+            try backend.writeKey(key, bytes: bytes)
+            lastWriteError = nil
+        } catch {
+            lastWriteError = "\(key): \(String(describing: error))"
+            throw error
+        }
+    }
+
+    @discardableResult
+    private func writeSMCOperationLocked<T>(_ operation: () throws -> T) throws -> T {
+        do {
+            let result = try operation()
+            lastWriteError = nil
+            return result
+        } catch {
+            lastWriteError = String(describing: error)
+            throw error
         }
     }
 
@@ -714,7 +739,7 @@ public final class SmctlDaemon: @unchecked Sendable {
             samples: samples,
             guardTripped: latched,
             guardReason: latched ? "Fan safety guard latched (overheat or unreadable temperature sensors)" : nil,
-            writeError: lastError
+            writeError: lastWriteError
         )
         let events = alertEngine.evaluate(rules: rules, input: input, now: Date())
         guard !events.isEmpty else { return }
@@ -799,7 +824,9 @@ public final class SmctlDaemon: @unchecked Sendable {
         }
         let controller = try fanControllerLocked()
         for (index, rpm) in manualFanTargets.sorted(by: { $0.key < $1.key }) {
-            _ = try controller.setManual(index: index, rpm: rpm)
+            _ = try writeSMCOperationLocked {
+                try controller.setManual(index: index, rpm: rpm)
+            }
             ftstGate.enterManual(index: index)
         }
     }
@@ -817,7 +844,9 @@ public final class SmctlDaemon: @unchecked Sendable {
             let evaluation = try engine.evaluate(curve: curve, samples: samples, now: Date())
             fanCurveEngines[fan.index] = engine
             let target = min(maximum, max(minimum, evaluation.targetRPM))
-            _ = try controller.setManual(index: fan.index, rpm: target)
+            _ = try writeSMCOperationLocked {
+                try controller.setManual(index: fan.index, rpm: target)
+            }
             ftstGate.enterManual(index: fan.index)
         }
     }
@@ -866,7 +895,9 @@ public final class SmctlDaemon: @unchecked Sendable {
             let laterRestores = ordered.suffix(from: offset + 1)
             let otherManual = ftstGate.otherManualFansRemain(afterLeaving: index)
                 || laterRestores.isEmpty == false
-            try controller.setAuto(index: index, otherManualFansRemaining: otherManual)
+            try writeSMCOperationLocked {
+                try controller.setAuto(index: index, otherManualFansRemaining: otherManual)
+            }
             _ = ftstGate.leaveManual(index: index)
             manualFanTargets.removeValue(forKey: index)
         }

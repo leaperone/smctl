@@ -197,6 +197,47 @@ final class SmctlDaemonTests: XCTestCase {
         XCTAssertEqual(reloaded.config.alerts.first?.resolvedAction, .exec(["/usr/local/bin/notify.sh", "{name}", "{value}"]))
     }
 
+    // MARK: - Alert write-error signal
+
+    func testWriteErrorAlertIgnoresGeneralDaemonError() {
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+        daemon.config.alerts = [AlertConfig(name: "writes", on: "write-error", cooldown: 0, action: "log")]
+
+        daemon.evaluateLocked()
+        XCTAssertNotNil(daemon.daemonStatus().lastError, "test setup should create a general daemon error")
+
+        daemon.tickFanAndAlertsLocked()
+
+        XCTAssertTrue(daemon.alertStatus().recent.isEmpty, "write-error alerts must not fire from generic lastError")
+    }
+
+    func testWriteErrorAlertFiresForSMCWriteFailureAndClearsAfterSuccess() throws {
+        let backend = RecordingBackend()
+        backend.values["BUIC"] = [85]
+        backend.values["CH0B"] = [0]
+        backend.values["CH0C"] = [0]
+        backend.values["AC-W"] = [1]
+        backend.failingWriteKeys = ["CH0B"]
+        let daemon = makeDaemon(backend: backend, capabilities: .oneFanWithCharging)
+        daemon.config.alerts = [AlertConfig(name: "writes", on: "write-error", cooldown: 0, action: "log")]
+
+        try daemon.setChargeLimit("70-80")
+        XCTAssertNotNil(daemon.daemonStatus().lastError)
+
+        daemon.tickFanAndAlertsLocked()
+        var status = daemon.alertStatus()
+        XCTAssertEqual(status.recent.count, 1)
+        XCTAssertEqual(status.recent.first?.trigger, "write-error")
+        XCTAssertEqual(status.recent.first?.reason.contains("CH0B"), true)
+
+        backend.failingWriteKeys = []
+        try daemon.setChargingEnabled(true)
+        daemon.tickFanAndAlertsLocked()
+
+        status = daemon.alertStatus()
+        XCTAssertEqual(status.rules.first?.status, "armed")
+    }
+
     // MARK: - Helpers
 
     private func makeDaemon(backend: RecordingBackend, capabilities: Capabilities) -> SmctlDaemon {
@@ -274,6 +315,7 @@ private extension Capabilities {
 private final class RecordingBackend: SMCWriteBackend {
     var values: [String: [UInt8]] = [:]
     var writes: [(key: String, bytes: [UInt8])] = []
+    var failingWriteKeys: Set<String> = []
 
     func readKeyInfo(_ key: String) throws -> SMCKeyInfo {
         guard let bytes = values[key] else {
@@ -297,6 +339,9 @@ private final class RecordingBackend: SMCWriteBackend {
     }
 
     func writeRawValue(_ key: String, bytes: [UInt8]) throws {
+        if failingWriteKeys.contains(key) {
+            throw SMCError.badCommand
+        }
         writes.append((key, bytes))
         values[key] = bytes
     }
