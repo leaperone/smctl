@@ -69,7 +69,7 @@ struct AlertConfig: Codable, Equatable, Sendable {
     /// The engine rule, or nil when the config is malformed (unknown trigger kind
     /// or empty name) — invalid rules are dropped, never crash the daemon.
     var rule: AlertRule? {
-        guard !name.isEmpty, let kind = AlertTriggerKind(rawValue: on) else { return nil }
+        guard validationProblem == nil, let kind = AlertTriggerKind(rawValue: on) else { return nil }
         return AlertRule(
             name: name,
             trigger: AlertTrigger(kind: kind, sensor: sensor, above: above),
@@ -90,6 +90,87 @@ struct AlertConfig: Codable, Equatable, Sendable {
         default:
             return .log
         }
+    }
+
+    var definition: AlertRuleDefinitionDTO {
+        let problem = validationProblem
+        return AlertRuleDefinitionDTO(
+            name: name,
+            on: on,
+            sensor: sensor,
+            above: above,
+            forSeconds: forSeconds,
+            cooldown: cooldown,
+            resolve: resolve ?? false,
+            action: resolvedActionName,
+            actionTarget: actionTargetSummary,
+            valid: problem == nil,
+            problem: problem,
+            warnings: actionWarnings
+        )
+    }
+
+    private var validationProblem: String? {
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "missing name"
+        }
+        guard let kind = AlertTriggerKind(rawValue: on) else {
+            return on.isEmpty ? "missing trigger" : "unknown trigger '\(on)'"
+        }
+        if kind == .temp, above == nil {
+            return "temp trigger requires 'above'"
+        }
+        return nil
+    }
+
+    private var resolvedActionName: String {
+        switch resolvedAction {
+        case .webhook:
+            return "webhook"
+        case .exec:
+            return "exec"
+        case .log:
+            return "log"
+        }
+    }
+
+    private var actionTargetSummary: String? {
+        switch resolvedAction {
+        case .webhook(let urlString):
+            return Self.redactedURLSummary(urlString)
+        case .exec(let command):
+            guard let executable = command.first else { return nil }
+            let extraArgs = max(0, command.count - 1)
+            return extraArgs == 0 ? executable : "\(executable) (+\(extraArgs) args)"
+        case .log:
+            return nil
+        }
+    }
+
+    private var actionWarnings: [String] {
+        switch action {
+        case "webhook" where (url ?? "").isEmpty:
+            return ["webhook action missing url; using log"]
+        case "exec" where command?.isEmpty != false:
+            return ["exec action missing command; using log"]
+        case nil, "log":
+            return []
+        case "webhook", "exec":
+            return []
+        case let unknown?:
+            return ["unknown action '\(unknown)'; using log"]
+        }
+    }
+
+    private static func redactedURLSummary(_ urlString: String) -> String {
+        guard var components = URLComponents(string: urlString) else {
+            return "invalid URL"
+        }
+        components.user = nil
+        components.password = nil
+        components.query = nil
+        components.fragment = nil
+        return components.string ?? "invalid URL"
     }
 }
 

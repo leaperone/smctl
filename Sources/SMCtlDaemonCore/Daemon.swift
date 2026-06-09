@@ -782,7 +782,12 @@ public final class SmctlDaemon: @unchecked Sendable {
                     timestamp: event.timestamp
                 )
             }
-            return AlertStatusDTO(timestamp: now, rules: states, recent: Array(history))
+            return AlertStatusDTO(
+                timestamp: now,
+                definitions: config.alerts.map(\.definition),
+                rules: states,
+                recent: Array(history)
+            )
         }
     }
 

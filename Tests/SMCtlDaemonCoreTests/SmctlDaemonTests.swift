@@ -197,6 +197,44 @@ final class SmctlDaemonTests: XCTestCase {
         XCTAssertEqual(reloaded.config.alerts.first?.resolvedAction, .exec(["/usr/local/bin/notify.sh", "{name}", "{value}"]))
     }
 
+    func testAlertStatusIncludesDefinitionsAndInvalidRules() throws {
+        try """
+        [[alert]]
+        name = "cpu-hot"
+        on = "temp"
+        sensor = "Tp09"
+        above = 85.0
+        for = 30.0
+        cooldown = 300.0
+        resolve = true
+        action = "webhook"
+        url = "https://gotify.lan/message?token=secret"
+
+        [[alert]]
+        name = "broken"
+        on = "temp"
+        action = "exec"
+        command = ["/usr/local/bin/notify.sh", "secret-token"]
+        """.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+        let status = daemon.alertStatus()
+
+        XCTAssertEqual(status.rules.map(\.name), ["cpu-hot"], "only valid rules should enter the alert engine")
+        XCTAssertEqual(status.definitions?.count, 2)
+        let valid = status.definitions?.first { $0.name == "cpu-hot" }
+        XCTAssertEqual(valid?.valid, true)
+        XCTAssertEqual(valid?.action, "webhook")
+        XCTAssertEqual(valid?.actionTarget, "https://gotify.lan/message")
+        XCTAssertFalse(valid?.actionTarget?.contains("secret") ?? true, "status must not leak webhook query tokens")
+
+        let broken = status.definitions?.first { $0.name == "broken" }
+        XCTAssertEqual(broken?.valid, false)
+        XCTAssertEqual(broken?.problem, "temp trigger requires 'above'")
+        XCTAssertEqual(broken?.actionTarget, "/usr/local/bin/notify.sh (+1 args)")
+        XCTAssertFalse(broken?.actionTarget?.contains("secret") ?? true, "status must not leak exec argv secrets")
+    }
+
     // MARK: - Alert write-error signal
 
     func testWriteErrorAlertIgnoresGeneralDaemonError() {
