@@ -432,9 +432,26 @@ struct Alert: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "alert",
         abstract: "Inspect and test temperature/event alerts (configured in /etc/smctl/config.toml).",
-        subcommands: [AlertStatus.self, AlertTest.self],
+        subcommands: [AlertList.self, AlertStatus.self, AlertTest.self],
         defaultSubcommand: AlertStatus.self
     )
+}
+
+struct AlertList: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "list", abstract: "Show configured alert rules and read-safe action summaries.")
+
+    @Flag(name: .long, help: "Print machine-readable JSON.")
+    var json = false
+
+    func run() throws {
+        let status: AlertStatusDTO = try DaemonClient().getAlertStatus()
+        let definitions = status.definitions ?? []
+        if json {
+            print(try CLIJSON.encodeString(definitions))
+            return
+        }
+        printAlertDefinitions(definitions)
+    }
 }
 
 struct AlertStatus: ParsableCommand {
@@ -468,7 +485,11 @@ struct AlertTest: ParsableCommand {
 private func printAlertStatus(_ status: AlertStatusDTO) {
     print("Alerts")
     if status.rules.isEmpty {
-        print("  No alert rules configured. Add [[alert]] tables to /etc/smctl/config.toml.")
+        if status.definitions?.isEmpty == false {
+            print("  No valid alert rules. Run `smctl alert list` to inspect config problems.")
+        } else {
+            print("  No alert rules configured. Add [[alert]] tables to /etc/smctl/config.toml.")
+        }
     } else {
         for rule in status.rules {
             let fired = rule.lastFired.map { " last fired \(CLIFormatters.iso8601.string(from: $0))" } ?? ""
@@ -483,6 +504,61 @@ private func printAlertStatus(_ status: AlertStatusDTO) {
             print("  \(when)  \(event.ruleName) \(event.kind): \(event.reason)")
         }
     }
+}
+
+private func printAlertDefinitions(_ definitions: [AlertRuleDefinitionDTO]) {
+    print("Alert rules")
+    guard !definitions.isEmpty else {
+        print("  No alert rules configured. Add [[alert]] tables to /etc/smctl/config.toml.")
+        return
+    }
+
+    for definition in definitions {
+        let name = definition.name.isEmpty ? "<unnamed>" : definition.name
+        if definition.valid {
+            print("  \(name): \(alertTriggerDescription(definition)); action \(alertActionDescription(definition))")
+        } else {
+            print("  \(name): invalid - \(definition.problem ?? "unknown problem")")
+        }
+        for warning in definition.warnings {
+            print("    warning: \(warning)")
+        }
+    }
+}
+
+private func alertTriggerDescription(_ definition: AlertRuleDefinitionDTO) -> String {
+    var parts = [definition.on]
+    if let sensor = definition.sensor, !sensor.isEmpty {
+        parts.append("sensor \(sensor)")
+    }
+    if let above = definition.above {
+        parts.append("above \(formatNumber(above))C")
+    }
+    if let forSeconds = definition.forSeconds {
+        parts.append("for \(formatSeconds(forSeconds))")
+    }
+    if let cooldown = definition.cooldown {
+        parts.append("cooldown \(formatSeconds(cooldown))")
+    }
+    if definition.resolve {
+        parts.append("resolve")
+    }
+    return parts.joined(separator: ", ")
+}
+
+private func alertActionDescription(_ definition: AlertRuleDefinitionDTO) -> String {
+    if let target = definition.actionTarget, !target.isEmpty {
+        return "\(definition.action) \(target)"
+    }
+    return definition.action
+}
+
+private func formatSeconds(_ value: Double) -> String {
+    "\(formatNumber(value))s"
+}
+
+private func formatNumber(_ value: Double) -> String {
+    value.rounded() == value ? String(Int(value)) : String(format: "%.1f", value)
 }
 
 struct Daemon: ParsableCommand {

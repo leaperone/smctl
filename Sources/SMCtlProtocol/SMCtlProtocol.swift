@@ -266,6 +266,51 @@ public struct AlertRuleStateDTO: Codable, Equatable, Sendable {
     }
 }
 
+public struct AlertRuleDefinitionDTO: Codable, Equatable, Sendable {
+    public var name: String
+    public var on: String
+    public var sensor: String?
+    public var above: Double?
+    public var forSeconds: Double?
+    public var cooldown: Double?
+    public var resolve: Bool
+    public var action: String
+    /// Redacted, read-safe action target. Webhook query strings and exec args are
+    /// intentionally not exposed over the unauthenticated status XPC call.
+    public var actionTarget: String?
+    public var valid: Bool
+    public var problem: String?
+    public var warnings: [String]
+
+    public init(
+        name: String,
+        on: String,
+        sensor: String?,
+        above: Double?,
+        forSeconds: Double?,
+        cooldown: Double?,
+        resolve: Bool,
+        action: String,
+        actionTarget: String?,
+        valid: Bool,
+        problem: String?,
+        warnings: [String] = []
+    ) {
+        self.name = name
+        self.on = on
+        self.sensor = sensor
+        self.above = above
+        self.forSeconds = forSeconds
+        self.cooldown = cooldown
+        self.resolve = resolve
+        self.action = action
+        self.actionTarget = actionTarget
+        self.valid = valid
+        self.problem = problem
+        self.warnings = warnings
+    }
+}
+
 public struct AlertEventDTO: Codable, Equatable, Sendable {
     public var ruleName: String
     public var kind: String
@@ -286,11 +331,18 @@ public struct AlertEventDTO: Codable, Equatable, Sendable {
 
 public struct AlertStatusDTO: Codable, Equatable, Sendable {
     public var timestamp: Date
+    public var definitions: [AlertRuleDefinitionDTO]?
     public var rules: [AlertRuleStateDTO]
     public var recent: [AlertEventDTO]
 
-    public init(timestamp: Date, rules: [AlertRuleStateDTO], recent: [AlertEventDTO]) {
+    public init(
+        timestamp: Date,
+        definitions: [AlertRuleDefinitionDTO]? = nil,
+        rules: [AlertRuleStateDTO],
+        recent: [AlertEventDTO]
+    ) {
         self.timestamp = timestamp
+        self.definitions = definitions
         self.rules = rules
         self.recent = recent
     }

@@ -38,7 +38,7 @@ $ smctl sensors --watch            # live temperatures, fan RPM, package power
 | `smctl fan set 2500 [--fan N]` | Manual fan target |
 | `smctl fan profile quiet\|full\|auto\|<custom>` | Declarative fan curves (TOML), hysteresis + slew-rate limited |
 | `smctl power status [--watch] [--json]` | Thermal pressure, CPU throttling (% speed limit), package + input power |
-| `smctl alert status\|test <name>` | Temperature/event alerts → webhook, command, or log (configured in TOML) |
+| `smctl alert list\|status\|test <name>` | Temperature/event alerts → webhook, command, or log (configured in TOML) |
 | `smctl daemon install\|uninstall\|status\|ping` | Manage the privileged helper |
 
 Policies live in `/etc/smctl/config.toml` — declarative, diffable, dotfiles-friendly.
@@ -128,9 +128,12 @@ command = ["/usr/local/bin/notify.sh", "{name}", "{reason}"]
 `exec` commands receive the event as both substituted argv placeholders (`{name}` `{kind}` `{trigger}` `{reason}` `{value}`) and `SMCTL_ALERT_*` environment variables. Inspect and verify rules with:
 
 ```console
+$ smctl alert list            # configured rules, validity, and redacted action targets
 $ smctl alert status          # per-rule state + recent events
 $ smctl alert test cpu-hot    # fire the action now, to check your webhook/script
 ```
+
+`alert list` deliberately redacts webhook query strings and exec arguments in human and JSON output, so tokens in `/etc/smctl/config.toml` do not leak through the read-only status API.
 
 > **Security:** `exec` actions run as **root** (the daemon is root). The trust boundary is whoever can edit the root-owned `/etc/smctl/config.toml` — the same boundary as every other policy. Commands run via argv arrays only (no shell), so there is no command-injection surface, but treat write access to the config as equivalent to root.
 
