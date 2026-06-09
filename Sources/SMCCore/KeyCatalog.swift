@@ -103,7 +103,7 @@ public struct KeyCatalog {
     public init(
         temperatureCandidates: [String] = KeyCatalog.defaultTemperatureCandidates,
         batteryCandidates: [String] = ["BUIC", "B0AC", "B0AV", "PPBR", "AC-W"],
-        powerCandidates: [String] = ["PDTR", "ID0R", "VD0R"],
+        powerCandidates: [String] = ["PDTR", "PSTR", "ID0R", "VD0R"],
         chargingControlCandidates: [SMCControlKeyGroup] = KeyCatalog.defaultChargingControlCandidates,
         adapterControlCandidates: [SMCControlKeyGroup] = KeyCatalog.defaultAdapterControlCandidates
     ) {
