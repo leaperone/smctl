@@ -1288,7 +1288,7 @@ final class XPCService: NSObject, SMCtlDaemonXPCProtocol {
         }
     }
 
-    private static func userIsAdmin(_ uid: uid_t) -> Bool {
+    static func userIsAdmin(_ uid: uid_t) -> Bool {
         guard let admin = getgrnam("admin") else {
             return false
         }
@@ -1298,7 +1298,9 @@ final class XPCService: NSObject, SMCtlDaemonXPCProtocol {
 
         var count: Int32 = 64
         var groups = [gid_t](repeating: 0, count: Int(count))
-        let baseGroup = Int32(passwd.pointee.pw_gid)
+        // bitPattern: system accounts use "negative" ids (nobody's gid -2 is
+        // 4294967294 as gid_t); a checked Int32() conversion traps on them.
+        let baseGroup = Int32(bitPattern: passwd.pointee.pw_gid)
         let result = groups.withUnsafeMutableBufferPointer { buffer in
             getgrouplist(passwd.pointee.pw_name, baseGroup, buffer.baseAddress, &count)
         }
