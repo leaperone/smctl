@@ -100,11 +100,58 @@ final class ChargeStateMachineTests: XCTestCase {
         XCTAssertEqual(try ChargeLimit.parse("stop"), .disabled)
     }
 
+    func testForceDischargeCutsAdapterAboveBandAndRestoresInside() {
+        let limit = ChargeLimit(upperBound: 60, lowerDelta: 2)
+        let now = Date()
+
+        // Above the band with adapter on: cut it (plus the regular charge disable
+        // is already latched here, chargingAllowed: false).
+        XCTAssertEqual(
+            evaluate(limit: limit, percent: 80, chargingAllowed: false, adapterEnabled: true, forceDischarge: true, now: now),
+            [.setAdapterEnabled(false)]
+        )
+        // Still above: adapter already cut, nothing to do.
+        XCTAssertEqual(
+            evaluate(limit: limit, percent: 70, chargingAllowed: false, adapterEnabled: false, forceDischarge: true, now: now),
+            []
+        )
+        // Reached the upper bound: hand the adapter back.
+        XCTAssertEqual(
+            evaluate(limit: limit, percent: 60, chargingAllowed: false, adapterEnabled: false, forceDischarge: true, now: now),
+            [.setAdapterEnabled(true)]
+        )
+        // Inside the band with adapter on: steady state.
+        XCTAssertEqual(
+            evaluate(limit: limit, percent: 59, chargingAllowed: false, adapterEnabled: true, forceDischarge: true, now: now),
+            []
+        )
+    }
+
+    func testForceDischargeDoesNothingWhenAdapterStateUnknown() {
+        let limit = ChargeLimit(upperBound: 60, lowerDelta: 2)
+        XCTAssertEqual(
+            evaluate(limit: limit, percent: 80, chargingAllowed: false, adapterEnabled: nil, forceDischarge: true, now: Date()),
+            []
+        )
+    }
+
+    func testWithoutForceDischargeThePolicyNeverTouchesTheAdapter() {
+        // A manual one-shot `discharge` owns the adapter then; the maintain loop
+        // re-enabling it would break the discharge mid-flight.
+        let limit = ChargeLimit(upperBound: 60, lowerDelta: 2)
+        XCTAssertEqual(
+            evaluate(limit: limit, percent: 80, chargingAllowed: false, adapterEnabled: false, forceDischarge: false, now: Date()),
+            []
+        )
+    }
+
     private func evaluate(
         limit: ChargeLimit,
         percent: Int,
         chargingAllowed: Bool,
         pluggedIn: Bool = true,
+        adapterEnabled: Bool? = nil,
+        forceDischarge: Bool = false,
         now: Date
     ) -> [BatteryPolicyAction] {
         var machine = ChargeStateMachine(period: 10)
@@ -113,9 +160,11 @@ final class ChargeStateMachineTests: XCTestCase {
             observation: BatteryObservation(
                 chargePercent: percent,
                 isChargingAllowed: chargingAllowed,
-                isPluggedIn: pluggedIn
+                isPluggedIn: pluggedIn,
+                isAdapterEnabled: adapterEnabled
             ),
-            now: now
+            now: now,
+            forceDischarge: forceDischarge
         ).actions
     }
 }

@@ -100,11 +100,15 @@ public struct BatteryObservation: Codable, Equatable, Sendable {
     public var isChargingAllowed: Bool
     /// Whether wall power is present (AC-W).
     public var isPluggedIn: Bool
+    /// Whether the SMC currently allows adapter power input (CHIE / CH0I status).
+    /// nil when adapter control is unsupported or unreadable.
+    public var isAdapterEnabled: Bool?
 
-    public init(chargePercent: Int, isChargingAllowed: Bool, isPluggedIn: Bool = true) {
+    public init(chargePercent: Int, isChargingAllowed: Bool, isPluggedIn: Bool = true, isAdapterEnabled: Bool? = nil) {
         self.chargePercent = min(100, max(0, chargePercent))
         self.isChargingAllowed = isChargingAllowed
         self.isPluggedIn = isPluggedIn
+        self.isAdapterEnabled = isAdapterEnabled
     }
 
     /// Best available approximation of "actively charging": power present and charging allowed.
@@ -146,7 +150,8 @@ public struct ChargeStateMachine: Sendable {
     public mutating func evaluate(
         limit: ChargeLimit,
         observation: BatteryObservation,
-        now: Date
+        now: Date,
+        forceDischarge: Bool = false
     ) -> ChargeEvaluation {
         let slept = lastEvaluation.map { now.timeIntervalSince($0) > period * missedBeatMultiplier } ?? false
         lastEvaluation = now
@@ -182,6 +187,20 @@ public struct ChargeStateMachine: Sendable {
             actions.append(.setChargingEnabled(false))
         }
 
+        // Force-discharge: when enabled, the policy owns the adapter switch — cut
+        // adapter power while above the band so the battery drains down to it, and
+        // restore once inside. Acts only when the adapter state is readable, and
+        // never below the upper bound, so it cannot fight the charge dead-band.
+        // When disabled the policy never touches the adapter: a manual one-shot
+        // `discharge` owns it then.
+        if forceDischarge {
+            if effectiveObservation.chargePercent > limit.upperBound, effectiveObservation.isAdapterEnabled == true {
+                actions.append(.setAdapterEnabled(false))
+            } else if effectiveObservation.chargePercent <= limit.upperBound, effectiveObservation.isAdapterEnabled == false {
+                actions.append(.setAdapterEnabled(true))
+            }
+        }
+
         return ChargeEvaluation(
             actions: actions,
             sleptSinceLastEvaluation: slept,
@@ -193,9 +212,10 @@ public struct ChargeStateMachine: Sendable {
     public mutating func evaluate<C: PolicyClock>(
         limit: ChargeLimit,
         observation: BatteryObservation,
-        clock: C
+        clock: C,
+        forceDischarge: Bool = false
     ) -> ChargeEvaluation {
-        evaluate(limit: limit, observation: observation, now: clock.now)
+        evaluate(limit: limit, observation: observation, now: clock.now, forceDischarge: forceDischarge)
     }
 }
 

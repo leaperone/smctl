@@ -238,7 +238,7 @@ struct Battery: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "battery",
         abstract: "Inspect and control battery charge policy through smctld.",
-        subcommands: [BatteryStatus.self, Maintain.self, Charge.self, Discharge.self]
+        subcommands: [BatteryStatus.self, Maintain.self, Charge.self, Discharge.self, Charging.self, Adapter.self]
     )
 }
 
@@ -264,14 +264,22 @@ struct Maintain: ParsableCommand {
     @Argument(help: "Charge limit: 80, 70-80, or stop.")
     var limit: String
 
+    @Flag(name: .long, help: "Actively discharge down to the limit by cutting adapter power while above it (unreliable in clamshell mode).")
+    var forceDischarge = false
+
     func run() throws {
         let client = DaemonClient()
-        let normalized = limit.lowercased() == "stop" ? "100" : limit
-        try client.setChargeLimit(normalized)
+        let trimmed = limit.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let isStopping = ["stop", "off", "disabled", "100"].contains(trimmed)
+        let normalized = isStopping ? "100" : limit
+        let effectiveForceDischarge = !isStopping && forceDischarge
+        try client.setChargeLimit(normalized, forceDischarge: effectiveForceDischarge)
         if normalized == "100" {
             _ = try? client.setChargingEnabled(true)
             _ = try? client.setAdapterEnabled(true)
             print("Battery charge limiting stopped; charging and adapter power were restored when supported.")
+        } else if effectiveForceDischarge {
+            print("Battery maintain policy set to \(limit) with force-discharge: adapter power is cut while above the limit.")
         } else {
             print("Battery maintain policy set to \(limit).")
         }
@@ -293,6 +301,54 @@ struct Charge: ParsableCommand {
         _ = try? client.setAdapterEnabled(true)
         try client.setChargingEnabled(true)
         print("Charging enabled with upper target \(target)%.")
+    }
+}
+
+struct Charging: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "charging", abstract: "Manually allow or block battery charging.")
+
+    @Argument(help: "on or off.")
+    var setting: String
+
+    func run() throws {
+        let enabled = try parseOnOff(setting)
+        let client = DaemonClient()
+        try client.setChargingEnabled(enabled)
+        print("Charging \(enabled ? "enabled" : "disabled").")
+        // A maintain policy re-evaluates every few seconds and will overwrite a
+        // manual toggle that disagrees with it — warn instead of silently losing.
+        if let status: BatteryStatusDTO = try? client.getBatteryStatus(), status.upperBound < 100 {
+            print("Note: maintain \(status.configuredLimit) is active and may override this on its next evaluation. Use 'smctl battery maintain stop' first for manual control.")
+        }
+    }
+}
+
+struct Adapter: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "adapter", abstract: "Manually enable or cut adapter power input.")
+
+    @Argument(help: "on or off.")
+    var setting: String
+
+    func run() throws {
+        let enabled = try parseOnOff(setting)
+        let client = DaemonClient()
+        try client.setAdapterEnabled(enabled)
+        if enabled {
+            print("Adapter power enabled.")
+        } else {
+            print("Adapter power cut: the Mac now runs on battery even while plugged in. Restore with 'smctl battery adapter on'.")
+        }
+    }
+}
+
+private func parseOnOff(_ setting: String) throws -> Bool {
+    switch setting.lowercased() {
+    case "on":
+        return true
+    case "off":
+        return false
+    default:
+        throw ValidationError("Expected 'on' or 'off', got '\(setting)'.")
     }
 }
 
@@ -344,6 +400,10 @@ struct Discharge: ParsableCommand {
                 print("Target reached; restoring adapter power.")
                 return
             }
+            // Re-assert the cut every poll: SMC firmware can silently re-enable
+            // adapter power (observed on M2 when the charging-enable key is
+            // written while a cut is active), which would stall the discharge.
+            try client.setAdapterEnabled(false)
         }
     }
 }
@@ -571,7 +631,7 @@ struct Daemon: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "daemon",
         abstract: "Install, remove, and inspect smctld.",
-        subcommands: [DaemonInstall.self, DaemonUninstall.self, DaemonRestart.self, DaemonStatus.self, DaemonPing.self]
+        subcommands: [DaemonInstall.self, DaemonUninstall.self, DaemonRestart.self, DaemonStatus.self, DaemonPing.self, DaemonLogs.self]
     )
 }
 
@@ -620,6 +680,30 @@ struct DaemonStatus: ParsableCommand {
 
     private func format(_ value: Double) -> String {
         String(format: "%.0f", value)
+    }
+}
+
+struct DaemonLogs: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "logs", abstract: "Show recent smctld log messages (wraps `log show`).")
+
+    @Option(name: .long, help: "How far back to look, e.g. 10m, 1h, 2d.")
+    var last: String = "1h"
+
+    func run() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/log")
+        process.arguments = [
+            "show",
+            "--last", last,
+            "--predicate", "subsystem == \"one.leaper.smctl\"",
+            "--style", "compact",
+            "--info"
+        ]
+        try process.run()
+        process.waitUntilExit()
+        if process.terminationStatus != 0 {
+            throw ValidationError("log show exited with status \(process.terminationStatus); check the --last value (e.g. 10m, 1h, 2d).")
+        }
     }
 }
 
@@ -717,13 +801,23 @@ private func printBatteryStatus(_ status: BatteryStatusDTO) {
     }
     print("  charging: \(status.isCharging.map { $0 ? "enabled" : "disabled" } ?? "unknown")")
     print("  plugged in: \(status.pluggedIn.map { $0 ? "yes" : "no" } ?? "unknown")")
-    print("  maintain: \(status.configuredLimit) (lower \(status.lowerBound)%, upper \(status.upperBound)%)")
+    if let minutes = status.timeToFullMinutes {
+        print("  time to full: \(hoursMinutes(minutes))")
+    } else if let minutes = status.timeToEmptyMinutes {
+        print("  time remaining: \(hoursMinutes(minutes))")
+    }
+    let forceSuffix = status.forceDischarge == true ? ", force-discharge" : ""
+    print("  maintain: \(status.configuredLimit) (lower \(status.lowerBound)%, upper \(status.upperBound)%\(forceSuffix))")
     print("  sleep policy: \(status.sleepPolicy)")
     print("  charging control: \(status.chargingControlGroup ?? "unsupported")")
     print("  adapter control: \(status.adapterControlGroup ?? "unsupported")")
     if let message = status.message {
         print("  note: \(message)")
     }
+}
+
+private func hoursMinutes(_ minutes: Int) -> String {
+    minutes < 60 ? "\(minutes)m" : "\(minutes / 60)h \(minutes % 60)m"
 }
 
 private func printFansStatus(_ status: FansStatusDTO) {
@@ -894,8 +988,8 @@ private final class DaemonClient {
         }
     }
 
-    func setChargeLimit(_ limit: String) throws {
-        let data = try SMCtlProtocolCoding.encode(SetChargeLimitRequestDTO(limit: limit))
+    func setChargeLimit(_ limit: String, forceDischarge: Bool = false) throws {
+        let data = try SMCtlProtocolCoding.encode(SetChargeLimitRequestDTO(limit: limit, forceDischarge: forceDischarge))
         let _: EmptyResponseDTO = try call { proxy, reply in
             proxy.setChargeLimit(data, withReply: reply)
         }

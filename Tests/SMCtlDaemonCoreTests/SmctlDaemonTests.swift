@@ -146,6 +146,21 @@ final class SmctlDaemonTests: XCTestCase {
         XCTAssertEqual(reloaded.config.battery.limit, "70-80")
     }
 
+    func testForceDischargeRoundtripsAndStopsWithDisabledLimit() throws {
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+        try daemon.setChargeLimit("70-80", forceDischarge: true)
+
+        let reloaded = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+        XCTAssertEqual(reloaded.config.battery.limit, "70-80")
+        XCTAssertTrue(reloaded.config.battery.force_discharge, "writeConfig must persist battery.force_discharge")
+
+        try reloaded.setChargeLimit("100", forceDischarge: true)
+
+        let stopped = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+        XCTAssertEqual(stopped.config.battery.limit, "100")
+        XCTAssertFalse(stopped.config.battery.force_discharge, "disabled charge limiting cannot keep force-discharge armed")
+    }
+
     func testAlertConfigDecodesFromToml() throws {
         try """
         [battery]

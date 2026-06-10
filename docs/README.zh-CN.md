@@ -29,15 +29,16 @@ $ smctl sensors --watch            # 实时温度、风扇转速、封装功耗
 | 命令 | 作用 |
 |---|---|
 | `smctl sensors [--watch] [--json]` | 按传感器分组的温度、风扇转速/模式、电池、封装功耗 |
-| `smctl battery status` | 电量、充电状态、当前限充配置 |
-| `smctl battery maintain 80` / `70-80` / `stop` | 带死区的充电限制（不会在阈值附近反复充放） |
+| `smctl battery status` | 电量、充电状态、当前限充配置、剩余时间估计 |
+| `smctl battery maintain 80` / `70-80` / `stop` | 带死区的充电限制；加 `--force-discharge` 可主动放电到区间 |
+| `smctl battery charging on\|off` / `adapter on\|off` | 手动切换充电许可与适配器供电 |
 | `smctl battery charge 90` / `discharge 40` | 一次性充到目标 / 监督放电到目标 |
 | `smctl fan status` | 每个风扇的实际/目标/最小/最大转速和控制模式 |
 | `smctl fan set 2500 [--fan N]` | 手动设定目标转速 |
 | `smctl fan profile quiet\|full\|auto\|<自定义>` | 声明式风扇曲线（TOML），带滞回和变速率限制 |
 | `smctl power status [--watch] [--json]` | 热压制状态、CPU 降频幅度（限速 %）、封装功耗与输入功率 |
 | `smctl alert list\|status\|test <name>` | 温度/事件告警 → webhook、命令或日志（TOML 配置） |
-| `smctl daemon install\|uninstall\|status\|ping` | 管理特权 daemon |
+| `smctl daemon install\|uninstall\|status\|ping\|logs` | 管理特权 daemon 并查看最近日志 |
 
 策略配置在 `/etc/smctl/config.toml`——声明式、可 diff、对 dotfiles 友好。
 
