@@ -31,15 +31,16 @@ $ smctl sensors --watch            # live temperatures, fan RPM, package power
 | Command | What it does |
 |---|---|
 | `smctl sensors [--watch] [--json]` | Temperatures by sensor group, fan RPM/mode, battery, package power |
-| `smctl battery status` | Charge level, charging state, configured limit |
-| `smctl battery maintain 80` / `70-80` / `stop` | Charge limit with dead-band (no charge/discharge flapping) |
+| `smctl battery status` | Charge level, charging state, configured limit, time estimate |
+| `smctl battery maintain 80` / `70-80` / `stop` | Charge limit with dead-band; add `--force-discharge` to drain down to the band |
+| `smctl battery charging on\|off` / `adapter on\|off` | Manual charging and adapter-power toggles |
 | `smctl battery charge 90` / `discharge 40` | One-shot top-up or supervised discharge |
 | `smctl fan status` | Per-fan actual/target/min/max RPM and control mode |
 | `smctl fan set 2500 [--fan N]` | Manual fan target |
 | `smctl fan profile quiet\|full\|auto\|<custom>` | Declarative fan curves (TOML), hysteresis + slew-rate limited |
 | `smctl power status [--watch] [--json]` | Thermal pressure, CPU throttling (% speed limit), system/package + input power |
 | `smctl alert list\|status\|test <name>` | Temperature/event alerts → webhook, command, or log (configured in TOML) |
-| `smctl daemon install\|uninstall\|status\|ping` | Manage the privileged helper |
+| `smctl daemon install\|uninstall\|status\|ping\|logs` | Manage the privileged helper and inspect recent daemon logs |
 
 Policies live in `/etc/smctl/config.toml` — declarative, diffable, dotfiles-friendly.
 

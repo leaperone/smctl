@@ -91,6 +91,12 @@ public struct BatteryStatusDTO: Codable, Equatable, Sendable {
     public var upperBound: Int
     public var sleepPolicy: String
     public var message: String?
+    /// IOKit power-source estimates in minutes; nil when unknown, still
+    /// calculating, or talking to an older daemon (missing keys decode to nil).
+    public var timeToEmptyMinutes: Int?
+    public var timeToFullMinutes: Int?
+    /// Whether maintain actively discharges down to the band (nil from older daemons).
+    public var forceDischarge: Bool?
 
     public init(
         timestamp: Date,
@@ -105,7 +111,10 @@ public struct BatteryStatusDTO: Codable, Equatable, Sendable {
         lowerBound: Int,
         upperBound: Int,
         sleepPolicy: String,
-        message: String?
+        message: String?,
+        timeToEmptyMinutes: Int? = nil,
+        timeToFullMinutes: Int? = nil,
+        forceDischarge: Bool? = nil
     ) {
         self.timestamp = timestamp
         self.chargePercent = chargePercent
@@ -120,6 +129,9 @@ public struct BatteryStatusDTO: Codable, Equatable, Sendable {
         self.upperBound = upperBound
         self.sleepPolicy = sleepPolicy
         self.message = message
+        self.timeToEmptyMinutes = timeToEmptyMinutes
+        self.timeToFullMinutes = timeToFullMinutes
+        self.forceDischarge = forceDischarge
     }
 }
 
@@ -178,9 +190,13 @@ public struct DaemonStatusDTO: Codable, Equatable, Sendable {
 
 public struct SetChargeLimitRequestDTO: Codable, Equatable, Sendable {
     public var limit: String
+    /// Actively discharge down to the band by cutting adapter power while above
+    /// the upper bound. Optional so requests from older CLIs decode to nil (off).
+    public var forceDischarge: Bool?
 
-    public init(limit: String) {
+    public init(limit: String, forceDischarge: Bool? = nil) {
         self.limit = limit
+        self.forceDischarge = forceDischarge
     }
 }
 

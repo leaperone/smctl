@@ -72,11 +72,15 @@ struct BatteryConfig: Codable, Equatable, Sendable {
     var limit: String
     var sleep_policy: String
     var magsafe_led: Bool
+    /// When true, maintain actively discharges down to the band by cutting
+    /// adapter power while above the upper bound (unreliable in clamshell mode).
+    var force_discharge: Bool
 
-    init(limit: String = "100", sleep_policy: String = "strict", magsafe_led: Bool = true) {
+    init(limit: String = "100", sleep_policy: String = "strict", magsafe_led: Bool = true, force_discharge: Bool = false) {
         self.limit = limit
         self.sleep_policy = sleep_policy
         self.magsafe_led = magsafe_led
+        self.force_discharge = force_discharge
     }
 
     // Defensive decoding: missing keys fall back to defaults. Synthesized decoding
@@ -87,6 +91,7 @@ struct BatteryConfig: Codable, Equatable, Sendable {
         limit = try container.decodeIfPresent(String.self, forKey: .limit) ?? "100"
         sleep_policy = try container.decodeIfPresent(String.self, forKey: .sleep_policy) ?? "strict"
         magsafe_led = try container.decodeIfPresent(Bool.self, forKey: .magsafe_led) ?? true
+        force_discharge = try container.decodeIfPresent(Bool.self, forKey: .force_discharge) ?? false
     }
 }
 
@@ -376,18 +381,30 @@ public final class SmctlDaemon: @unchecked Sendable {
 
     func reloadConfig() {
         queue.sync {
+            let wasForcing = config.battery.force_discharge
             config = Self.loadConfig(path: configPath)
             let policy = (try? SleepPolicy.parse(config.battery.sleep_policy)) ?? .strict
             sleepMachine.setPolicy(policy)
+            if wasForcing, !config.battery.force_discharge, readAdapterEnabledLocked() == false {
+                try? applyAdapterLocked(true)
+            }
             evaluateLocked()
         }
     }
 
-    func setChargeLimit(_ limit: String) throws {
-        _ = try ChargeLimit.parse(limit)
+    func setChargeLimit(_ limit: String, forceDischarge: Bool = false) throws {
+        let parsedLimit = try ChargeLimit.parse(limit)
+        let effectiveForceDischarge = parsedLimit.isLimiting && forceDischarge
         try queue.sync {
+            let wasForcing = config.battery.force_discharge
             config.battery.limit = limit
+            config.battery.force_discharge = effectiveForceDischarge
             try Self.writeConfig(config, path: configPath)
+            // Leaving force-discharge with the adapter cut would strand the Mac
+            // on battery; hand the adapter back before the policy stops owning it.
+            if wasForcing, !effectiveForceDischarge, readAdapterEnabledLocked() == false {
+                try? applyAdapterLocked(true)
+            }
             evaluateLocked()
         }
     }
@@ -521,7 +538,12 @@ public final class SmctlDaemon: @unchecked Sendable {
         }
         let now = Date()
         let limit = currentChargeLimitLocked()
-        let evaluation = chargeMachine.evaluate(limit: limit, observation: observation, now: now)
+        let evaluation = chargeMachine.evaluate(
+            limit: limit,
+            observation: observation,
+            now: now,
+            forceDischarge: config.battery.force_discharge
+        )
         do {
             try applyActionsLocked(evaluation.actions)
             lastEvaluation = now
@@ -547,12 +569,20 @@ public final class SmctlDaemon: @unchecked Sendable {
         return BatteryObservation(
             chargePercent: Int(charge.rounded()),
             isChargingAllowed: chargingAllowed,
-            isPluggedIn: pluggedIn
+            isPluggedIn: pluggedIn,
+            isAdapterEnabled: readAdapterEnabledLocked()
         )
     }
 
     private func readChargingEnabledLocked() -> Bool? {
         guard let group = capabilities.chargingControl, let value = try? backend?.readValue(group.statusKey) else {
+            return nil
+        }
+        return value.bytes.allSatisfy { $0 == 0 }
+    }
+
+    private func readAdapterEnabledLocked() -> Bool? {
+        guard let group = capabilities.adapterControl, let value = try? backend?.readValue(group.statusKey) else {
             return nil
         }
         return value.bytes.allSatisfy { $0 == 0 }
@@ -980,6 +1010,7 @@ public final class SmctlDaemon: @unchecked Sendable {
             statusMessage = nil
         }
 
+        let timeEstimate = PowerSourceTimeEstimate.read()
         return BatteryStatusDTO(
             timestamp: Date(),
             chargePercent: observation?.chargePercent,
@@ -993,7 +1024,10 @@ public final class SmctlDaemon: @unchecked Sendable {
             lowerBound: limit.lowerBound,
             upperBound: limit.upperBound,
             sleepPolicy: sleepMachine.policy.rawValue,
-            message: statusMessage
+            message: statusMessage,
+            timeToEmptyMinutes: timeEstimate.toEmpty,
+            timeToFullMinutes: timeEstimate.toFull,
+            forceDischarge: config.battery.force_discharge
         )
     }
 
@@ -1064,6 +1098,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         limit = "\(config.battery.limit)"
         sleep_policy = "\(config.battery.sleep_policy)"
         magsafe_led = \(config.battery.magsafe_led ? "true" : "false")
+        force_discharge = \(config.battery.force_discharge ? "true" : "false")
 
         [fan]
         profile = "\(config.fan.profile)"
@@ -1214,7 +1249,7 @@ final class XPCService: NSObject, SMCtlDaemonXPCProtocol {
     func setChargeLimit(_ requestData: Data, withReply reply: @escaping (Data?, String?) -> Void) {
         doWrite(reply) {
             let request = try SMCtlProtocolCoding.decode(SetChargeLimitRequestDTO.self, from: requestData)
-            try daemon.setChargeLimit(request.limit)
+            try daemon.setChargeLimit(request.limit, forceDischarge: request.forceDischarge ?? false)
         }
     }
 
