@@ -506,11 +506,13 @@ public struct FanSafetyDecision: Equatable, Sendable {
 
 public struct FanSafetyGuard: Codable, Equatable, Sendable {
     /// Calibrated against field data: Apple Silicon junction hot-spot sensors (Tp0E/Tp3P
-    /// class) routinely sit at 95–103C under ordinary compile load while the silicon is
-    /// rated to ~110C. 95C made manual control unusable under any load; 100C still trips
-    /// well before firmware-level throttling/shutdown territory.
+    /// class) can sit above 100C under ordinary sustained load. Non-hotspot sensors keep
+    /// the stricter base ceiling; Tp* sensors get a narrow allowance and still hard-trip.
     public static let defaultCeilingCelsius = 100.0
     public static let hardMaximumCeilingCelsius = 105.0
+    public static let hotSpotSensorPrefix = "Tp"
+    public static let hotSpotAllowanceCelsius = 10.0
+    public static let hotSpotHardMaximumCeilingCelsius = 110.0
     /// The latch releases only after cooling this far below the ceiling, so a trip
     /// cannot be immediately re-armed into a hot system.
     public static let releaseHysteresisCelsius = 5.0
@@ -538,11 +540,14 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
     /// guard is the only thermal floor (thermalmonitord is hands-off), so *no readable
     /// temperature* counts as unsafe — blind manual control is never allowed.
     public mutating func evaluate(samples: [FanTemperatureSample], manualPolicyActive: Bool) -> FanSafetyDecision {
-        let peak = samples.map(\.celsius).max()
-
-        // Latch release requires a credible reading comfortably below the ceiling.
-        if isLatched, let peak, peak <= configuredCeilingCelsius - Self.releaseHysteresisCelsius {
+        // Latch release requires credible readings comfortably below each sensor's
+        // own effective ceiling. Hotspot-class Tp* readings use a higher ceiling
+        // than board/skin/proximity sensors.
+        if isLatched, !samples.isEmpty, samples.allSatisfy({ sample in
+            sample.celsius <= effectiveCeiling(for: sample) - Self.releaseHysteresisCelsius
+        }) {
             isLatched = false
+            consecutiveOverCeiling = 0
         }
 
         guard manualPolicyActive else {
@@ -551,7 +556,7 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
             return FanSafetyDecision(forceAuto: false)
         }
 
-        guard let peak else {
+        guard !samples.isEmpty else {
             isLatched = true
             consecutiveOverCeiling = 0
             return FanSafetyDecision(
@@ -559,13 +564,21 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
                 reason: "no readable temperature sensors while fans are under manual control"
             )
         }
-        if peak >= configuredCeilingCelsius {
+        let offender = samples.compactMap { sample -> (sample: FanTemperatureSample, ceiling: Double)? in
+            let ceiling = effectiveCeiling(for: sample)
+            guard sample.celsius >= ceiling else { return nil }
+            return (sample, ceiling)
+        }.max { lhs, rhs in
+            (lhs.sample.celsius - lhs.ceiling) < (rhs.sample.celsius - rhs.ceiling)
+        }
+
+        if let offender {
             consecutiveOverCeiling += 1
             if consecutiveOverCeiling >= Self.consecutiveTripsRequired {
                 isLatched = true
                 return FanSafetyDecision(
                     forceAuto: true,
-                    reason: "temperature \(peak)C held at/above safety ceiling \(configuredCeilingCelsius)C for \(consecutiveOverCeiling) consecutive checks"
+                    reason: "temperature \(offender.sample.sensor) \(offender.sample.celsius)C held at/above safety ceiling \(offender.ceiling)C for \(consecutiveOverCeiling) consecutive checks"
                 )
             }
         } else {
@@ -578,6 +591,16 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
             )
         }
         return FanSafetyDecision(forceAuto: false)
+    }
+
+    private func effectiveCeiling(for sample: FanTemperatureSample) -> Double {
+        guard sample.sensor.hasPrefix(Self.hotSpotSensorPrefix) else {
+            return configuredCeilingCelsius
+        }
+        return min(
+            configuredCeilingCelsius + Self.hotSpotAllowanceCelsius,
+            Self.hotSpotHardMaximumCeilingCelsius
+        )
     }
 }
 

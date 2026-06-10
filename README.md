@@ -80,7 +80,7 @@ The Homebrew install sets up shell completions (bash/zsh/fish) and a `man smctl`
 Controlling fans and charging from userspace demands paranoia. smctl treats these as first-class invariants:
 
 - **Never leave a brick.** Uninstalling, stopping, or killing the daemon restores system control of fans and charging — enforced by termination hooks, startup reconciliation, and launchd restart.
-- **Thermal safety guard.** While fans are under manual control, smctl monitors all temperature sensors every second. Sustained readings above the ceiling (default 100 °C, hard-capped at 105 °C, cannot be disabled) force fans back to system control and latch out manual control until things cool down. Losing temperature visibility counts as unsafe.
+- **Thermal safety guard.** While fans are under manual control, smctl monitors all temperature sensors every second. Sustained readings above the ceiling force fans back to system control and latch out manual control until things cool down. The base ceiling defaults to 100 °C and is hard-capped at 105 °C; Apple Silicon `Tp*` hot-spot sensors get a narrow allowance up to 110 °C because they can run hotter than board/skin/proximity sensors under ordinary load. The guard cannot be disabled, and losing temperature visibility counts as unsafe.
 - **Verified writes.** Every SMC write is read back and verified (with a settle window for firmware that applies writes asynchronously) — failures surface as errors, never as silent no-ops.
 - **Graceful degradation.** If a macOS update changes SMC behavior, affected features degrade to read-only with an explicit message instead of pretending to work.
 
