@@ -22,6 +22,39 @@ final class FanSafetyGuardTests: XCTestCase {
         XCTAssertTrue(clamped.evaluate(samples: [sample(105)], manualPolicyActive: true).forceAuto)
     }
 
+    func testAppleSiliconHotspotSensorsHaveDedicatedCeiling() {
+        var guardrail = FanSafetyGuard()
+
+        XCTAssertFalse(
+            guardrail.evaluate(samples: [sample(105.859375, sensor: "Tp3P")], manualPolicyActive: true).forceAuto
+        )
+        XCTAssertFalse(
+            guardrail.evaluate(samples: [sample(105.859375, sensor: "Tp3P")], manualPolicyActive: true).forceAuto
+        )
+        XCTAssertFalse(guardrail.isLatched)
+    }
+
+    func testAppleSiliconHotspotSensorsStillTripAtHardCeiling() {
+        var guardrail = FanSafetyGuard()
+
+        XCTAssertFalse(
+            guardrail.evaluate(samples: [sample(110, sensor: "Tp3P")], manualPolicyActive: true).forceAuto
+        )
+        let decision = guardrail.evaluate(samples: [sample(110, sensor: "Tp3P")], manualPolicyActive: true)
+        XCTAssertTrue(decision.forceAuto)
+        XCTAssertTrue(guardrail.isLatched)
+        XCTAssertTrue(decision.reason?.contains("Tp3P") ?? false)
+        XCTAssertTrue(decision.reason?.contains("110") ?? false)
+    }
+
+    func testNonHotspotSensorsKeepBaseCeiling() {
+        var guardrail = FanSafetyGuard()
+
+        XCTAssertFalse(guardrail.evaluate(samples: [sample(100, sensor: "TC0P")], manualPolicyActive: true).forceAuto)
+        XCTAssertTrue(guardrail.evaluate(samples: [sample(100, sensor: "TC0P")], manualPolicyActive: true).forceAuto)
+        XCTAssertTrue(guardrail.isLatched)
+    }
+
     func testTransientSpikeDoesNotTrip() {
         // A single hot-spot spike between cool readings must not trip the guard.
         var guardrail = FanSafetyGuard()
@@ -63,6 +96,20 @@ final class FanSafetyGuardTests: XCTestCase {
         XCTAssertFalse(guardrail.isLatched)
     }
 
+    func testHotspotLatchUsesHotspotReleaseThreshold() {
+        var guardrail = FanSafetyGuard()  // Tp* effective ceiling 110, release at 105
+
+        _ = guardrail.evaluate(samples: [sample(110, sensor: "Tp3P")], manualPolicyActive: true)
+        _ = guardrail.evaluate(samples: [sample(110, sensor: "Tp3P")], manualPolicyActive: true)
+        XCTAssertTrue(guardrail.isLatched)
+
+        XCTAssertTrue(guardrail.evaluate(samples: [sample(106, sensor: "Tp3P")], manualPolicyActive: true).forceAuto)
+        XCTAssertTrue(guardrail.isLatched)
+
+        XCTAssertFalse(guardrail.evaluate(samples: [sample(105, sensor: "Tp3P")], manualPolicyActive: true).forceAuto)
+        XCTAssertFalse(guardrail.isLatched)
+    }
+
     func testLatchReleasesWhileSystemInControl() {
         // After a trip the daemon clears policy (manualPolicyActive becomes false);
         // the latch must still release on cool readings so the user is not locked out.
@@ -72,6 +119,9 @@ final class FanSafetyGuardTests: XCTestCase {
         XCTAssertTrue(guardrail.isLatched)
 
         _ = guardrail.evaluate(samples: [sample(94)], manualPolicyActive: false)
+        XCTAssertFalse(guardrail.isLatched)
+
+        XCTAssertFalse(guardrail.evaluate(samples: [sample(101)], manualPolicyActive: true).forceAuto)
         XCTAssertFalse(guardrail.isLatched)
     }
 
@@ -84,7 +134,7 @@ final class FanSafetyGuardTests: XCTestCase {
         XCTAssertFalse(reconciler.shouldRestoreAuto(hasLocalManualPolicy: false, fanModes: [0: 0, 1: 3], ftstValue: 0))
     }
 
-    private func sample(_ celsius: Double) -> FanTemperatureSample {
-        FanTemperatureSample(sensor: "cpu", celsius: celsius)
+    private func sample(_ celsius: Double, sensor: String = "cpu") -> FanTemperatureSample {
+        FanTemperatureSample(sensor: sensor, celsius: celsius)
     }
 }
