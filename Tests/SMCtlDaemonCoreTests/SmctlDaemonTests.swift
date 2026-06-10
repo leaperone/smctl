@@ -293,6 +293,19 @@ final class SmctlDaemonTests: XCTestCase {
     }
 }
 
+final class XPCAuthorizationTests: XCTestCase {
+    func testUserIsAdminHandlesSystemAccountsWithNegativeIDs() {
+        // nobody is uid/gid -2 (4294967294 as uid_t). The group lookup must not
+        // trap converting such ids to Int32 — a non-admin caller crashing the
+        // daemon is a local DoS (regression test for a real crash).
+        XCTAssertFalse(XPCService.userIsAdmin(uid_t(bitPattern: -2)))
+    }
+
+    func testUserIsAdminReturnsFalseForUnknownUID() {
+        XCTAssertFalse(XPCService.userIsAdmin(54321))
+    }
+}
+
 final class AlertActionRunnerTests: XCTestCase {
     func testExecRunsSubprocessWithSubstitutedArgv() throws {
         let marker = NSTemporaryDirectory() + "smctl-alert-\(UUID().uuidString)"

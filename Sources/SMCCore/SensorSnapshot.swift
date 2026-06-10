@@ -61,16 +61,17 @@ public final class SensorReader {
             temperatures: readTemperatures(keys: capabilities.temperatureKeys),
             fans: readFans(capabilities.fans),
             battery: readNamedReadings([
-                ("BUIC", "Charge", "%"),
-                ("B0AC", "Current", "A"),
-                ("B0AV", "Voltage", "V"),
-                ("PPBR", "Battery Power", "W"),
-                ("AC-W", "Adapter Power", "W")
+                ("BUIC", "Charge", "%", 1),
+                ("B0AC", "Current", "A", 0.001),  // si16 in mA
+                ("B0AV", "Voltage", "V", 0.001),  // ui16 in mV
+                ("PPBR", "Battery Power", "W", 1),
+                ("AC-W", "Adapter Power", "W", 1)
             ], availableKeys: capabilities.batteryKeys),
             power: readNamedReadings([
-                ("PDTR", "Package Power", "W"),
-                ("ID0R", "Input Current", "A"),
-                ("VD0R", "Input Voltage", "V")
+                ("PDTR", "Package Power", "W", 1),
+                ("PSTR", "System Power", "W", 1),
+                ("ID0R", "Input Current", "A", 1),
+                ("VD0R", "Input Voltage", "V", 1)
             ], availableKeys: capabilities.powerKeys)
         )
     }
@@ -112,18 +113,18 @@ public final class SensorReader {
         }
     }
 
-    private func readNamedReadings(_ readings: [(String, String, String)], availableKeys: [String]) -> [NamedReading] {
+    private func readNamedReadings(_ readings: [(String, String, String, Double)], availableKeys: [String]) -> [NamedReading] {
         let available = Set(availableKeys)
-        return readings.compactMap { key, name, unit in
+        return readings.compactMap { key, name, unit, scale in
             guard available.contains(key), let value = try? backend.readValue(key) else {
                 return nil
             }
 
             switch value.decoded {
             case .number(let number):
-                return NamedReading(key: key, name: name, value: number, rawBytes: nil, unit: unit, dataType: value.info.dataTypeString)
+                return NamedReading(key: key, name: name, value: number * scale, rawBytes: nil, unit: unit, dataType: value.info.dataTypeString)
             case .unsigned(let unsigned):
-                return NamedReading(key: key, name: name, value: Double(unsigned), rawBytes: nil, unit: unit, dataType: value.info.dataTypeString)
+                return NamedReading(key: key, name: name, value: Double(unsigned) * scale, rawBytes: nil, unit: unit, dataType: value.info.dataTypeString)
             case .bytes(let bytes):
                 return NamedReading(key: key, name: name, value: nil, rawBytes: bytes, unit: nil, dataType: value.info.dataTypeString)
             case nil:

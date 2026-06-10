@@ -62,8 +62,12 @@ public struct PowerSnapshot: Codable, Equatable, Sendable {
     public var timestamp: Date
     public var thermalPressure: ThermalPressure
     public var cpu: CPUThrottleStatus
-    /// PDTR — package power in watts.
+    /// PDTR — DC-in total power in watts. Legitimately ~0 when running on
+    /// battery (it measures adapter delivery, not consumption).
     public var packagePowerWatts: Double?
+    /// PSTR — system total power in watts. Meaningful on both AC and battery;
+    /// the better "what is the machine drawing" signal on portables.
+    public var systemPowerWatts: Double?
     /// VD0R — DC input voltage in volts.
     public var inputVoltage: Double?
     /// ID0R — DC input current in amps.
@@ -74,6 +78,7 @@ public struct PowerSnapshot: Codable, Equatable, Sendable {
         thermalPressure: ThermalPressure,
         cpu: CPUThrottleStatus,
         packagePowerWatts: Double?,
+        systemPowerWatts: Double?,
         inputVoltage: Double?,
         inputCurrent: Double?
     ) {
@@ -81,6 +86,7 @@ public struct PowerSnapshot: Codable, Equatable, Sendable {
         self.thermalPressure = thermalPressure
         self.cpu = cpu
         self.packagePowerWatts = packagePowerWatts
+        self.systemPowerWatts = systemPowerWatts
         self.inputVoltage = inputVoltage
         self.inputCurrent = inputCurrent
     }
@@ -92,7 +98,7 @@ public struct PowerSnapshot: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case timestamp, thermalPressure, cpu, packagePowerWatts
+        case timestamp, thermalPressure, cpu, packagePowerWatts, systemPowerWatts
         case inputVoltage, inputCurrent, inputPowerWatts
     }
 
@@ -102,6 +108,7 @@ public struct PowerSnapshot: Codable, Equatable, Sendable {
         try container.encode(thermalPressure, forKey: .thermalPressure)
         try container.encode(cpu, forKey: .cpu)
         try container.encodeIfPresent(packagePowerWatts, forKey: .packagePowerWatts)
+        try container.encodeIfPresent(systemPowerWatts, forKey: .systemPowerWatts)
         try container.encodeIfPresent(inputVoltage, forKey: .inputVoltage)
         try container.encodeIfPresent(inputCurrent, forKey: .inputCurrent)
         try container.encodeIfPresent(inputPowerWatts, forKey: .inputPowerWatts)
@@ -113,6 +120,7 @@ public struct PowerSnapshot: Codable, Equatable, Sendable {
         thermalPressure = try container.decode(ThermalPressure.self, forKey: .thermalPressure)
         cpu = try container.decode(CPUThrottleStatus.self, forKey: .cpu)
         packagePowerWatts = try container.decodeIfPresent(Double.self, forKey: .packagePowerWatts)
+        systemPowerWatts = try container.decodeIfPresent(Double.self, forKey: .systemPowerWatts)
         inputVoltage = try container.decodeIfPresent(Double.self, forKey: .inputVoltage)
         inputCurrent = try container.decodeIfPresent(Double.self, forKey: .inputCurrent)
     }
@@ -180,6 +188,7 @@ public final class PowerReader {
             thermalPressure: ThermalPressure(thermalStateProvider()),
             cpu: cpu,
             packagePowerWatts: numericValue("PDTR"),
+            systemPowerWatts: numericValue("PSTR"),
             inputVoltage: numericValue("VD0R"),
             inputCurrent: numericValue("ID0R")
         )

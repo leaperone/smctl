@@ -117,6 +117,11 @@ struct Sensors: ParsableCommand {
 
         for reading in readings {
             if let value = reading.value {
+                // AC-W reports -1 when no adapter is attached.
+                if reading.key == "AC-W", value < 0 {
+                    print("  \(reading.name) (\(reading.key)): not connected")
+                    continue
+                }
                 let suffix = reading.unit.map { " \($0)" } ?? ""
                 print("  \(reading.name) (\(reading.key)): \(format(value, digits: 2))\(suffix)")
             } else if let rawBytes = reading.rawBytes {
@@ -392,6 +397,7 @@ private func printPower(_ snapshot: PowerSnapshot) {
     print("  Thermal pressure   \(snapshot.thermalPressure.rawValue)")
     print("  CPU throttling     \(throttleDescription(snapshot.cpu))")
     print("  Package power      \(watts(snapshot.packagePowerWatts))")
+    print("  System power       \(watts(snapshot.systemPowerWatts))")
     print("  Input              \(inputDescription(snapshot))")
 }
 
