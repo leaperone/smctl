@@ -85,19 +85,23 @@ Homebrew 安装会自动配置 shell 补全（bash/zsh/fish）和 `man smctl` �
 
 ## 隐私
 
-daemon 仅在两种情况下发起对外网络请求，且都由你掌控：
+daemon 仅在以下情况下发起对外网络请求，且都由你掌控：
 
 1. **更新检查**——每天一次查询 GitHub releases API 获取最新版本号，由 CLI 提示你升级。默认开启，可用 `[update] check = false` 关闭。
 2. **告警 webhook**——只发往*你自己*在 `[[alert]]` 规则里配置的 URL。不配告警（默认）就没有这类请求。
+3. **Sentry 崩溃/错误上报**——只有当你在 `[sentry]` 里配置 DSN 时才启用。默认空 DSN 会让 SDK 完全不启动。smctl 设置 `sendDefaultPii = false`，也不会启用性能追踪，除非你显式配置 `traces_sample_rate`。
 
-无遥测、无统计。CLI 本身从不发起网络请求——所有对外流量都来自 daemon 的上述两种可开关情况。完全离线：在 `/etc/smctl/config.toml` 写入
+无产品分析。CLI 本身从不发起网络请求——所有对外流量都来自 daemon 的上述可开关情况。完全离线：在 `/etc/smctl/config.toml` 写入
 
 ```toml
 [update]
 check = false
+
+[sentry]
+dsn = ""
 ```
 
-然后 `sudo smctl daemon restart`，并且不配置任何 webhook 告警。
+然后 `sudo smctl daemon restart`，并且不配置任何 webhook 告警。也可以用 `SMCTL_SENTRY_DISABLED=1` 在 daemon 进程层硬关闭 Sentry。
 
 ## 告警
 

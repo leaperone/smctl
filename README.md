@@ -87,19 +87,23 @@ Controlling fans and charging from userspace demands paranoia. smctl treats thes
 
 ## Privacy
 
-The daemon makes outbound network requests in exactly two cases, both under your control:
+The daemon makes outbound network requests in these cases, all under your control:
 
 1. **Update check** — a once-a-day check of the GitHub releases API to learn the latest version, surfaced by the CLI as an upgrade hint. On by default; turn it off with `[update] check = false`.
 2. **Alert webhooks** — only the webhook URLs *you* configure in `[[alert]]` rules. No alerts configured (the default) means no such requests.
+3. **Sentry crash/error reporting** — only when you configure a DSN under `[sentry]`. The default empty DSN disables the SDK entirely. smctl sets `sendDefaultPii = false` and does not enable performance tracing unless you opt in with `traces_sample_rate`.
 
-There is no telemetry and no analytics. The CLI itself never makes network requests — all outbound traffic originates in the daemon, from the two opt-in/opt-out cases above. To go fully offline, set:
+There is no product analytics. The CLI itself never makes network requests — all outbound traffic originates in the daemon, from the opt-in/opt-out cases above. To go fully offline, set:
 
 ```toml
 [update]
 check = false
+
+[sentry]
+dsn = ""
 ```
 
-in `/etc/smctl/config.toml` (then `sudo smctl daemon restart`) and configure no webhook alerts.
+in `/etc/smctl/config.toml` (then `sudo smctl daemon restart`) and configure no webhook alerts. You can also hard-disable Sentry for the daemon process with `SMCTL_SENTRY_DISABLED=1`.
 
 ## Alerts
 

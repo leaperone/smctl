@@ -21,6 +21,7 @@ struct DaemonConfig: Codable, Equatable, Sendable {
     var fan: FanConfig
     var safety: SafetyConfig
     var update: UpdateConfig
+    var sentry: SentryConfig
     var alerts: [AlertConfig]
 
     init(
@@ -28,17 +29,19 @@ struct DaemonConfig: Codable, Equatable, Sendable {
         fan: FanConfig = FanConfig(),
         safety: SafetyConfig = SafetyConfig(),
         update: UpdateConfig = UpdateConfig(),
+        sentry: SentryConfig = SentryConfig(),
         alerts: [AlertConfig] = []
     ) {
         self.battery = battery
         self.fan = fan
         self.safety = safety
         self.update = update
+        self.sentry = sentry
         self.alerts = alerts
     }
 
     enum CodingKeys: String, CodingKey {
-        case battery, fan, safety, update
+        case battery, fan, safety, update, sentry
         case alerts = "alert"
     }
 
@@ -48,14 +51,15 @@ struct DaemonConfig: Codable, Equatable, Sendable {
         fan = try container.decodeIfPresent(FanConfig.self, forKey: .fan) ?? FanConfig()
         safety = try container.decodeIfPresent(SafetyConfig.self, forKey: .safety) ?? SafetyConfig()
         update = try container.decodeIfPresent(UpdateConfig.self, forKey: .update) ?? UpdateConfig()
+        sentry = try container.decodeIfPresent(SentryConfig.self, forKey: .sentry) ?? SentryConfig()
         alerts = try container.decodeIfPresent([AlertConfig].self, forKey: .alerts) ?? []
     }
 }
 
 struct UpdateConfig: Codable, Equatable, Sendable {
     /// When true, the daemon contacts the GitHub releases API once a day to learn the
-    /// latest version, surfaced as a hint in the CLI. This is the only outbound network
-    /// request smctl makes; set to false for a fully offline daemon.
+    /// latest version, surfaced as a hint in the CLI. Set to false for a fully offline
+    /// daemon when Sentry and alert webhooks are also unconfigured.
     var check: Bool
 
     init(check: Bool = true) {
@@ -65,6 +69,31 @@ struct UpdateConfig: Codable, Equatable, Sendable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         check = try container.decodeIfPresent(Bool.self, forKey: .check) ?? true
+    }
+}
+
+struct SentryConfig: Codable, Equatable, Sendable {
+    /// Empty means disabled. The project DSN is intentionally config-owned so public
+    /// builds do not phone home unless the operator opts in.
+    var dsn: String
+    var environment: String
+    var debug: Bool
+    var traces_sample_rate: Double
+
+    init(dsn: String = "", environment: String = "production", debug: Bool = false, traces_sample_rate: Double = 0) {
+        self.dsn = dsn
+        self.environment = environment
+        self.debug = debug
+        self.traces_sample_rate = traces_sample_rate
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        dsn = try container.decodeIfPresent(String.self, forKey: .dsn) ?? ""
+        environment = try container.decodeIfPresent(String.self, forKey: .environment) ?? "production"
+        debug = try container.decodeIfPresent(Bool.self, forKey: .debug) ?? false
+        let sampleRate = try container.decodeIfPresent(Double.self, forKey: .traces_sample_rate) ?? 0
+        traces_sample_rate = min(max(sampleRate, 0), 1)
     }
 }
 
@@ -383,6 +412,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         queue.sync {
             let wasForcing = config.battery.force_discharge
             config = Self.loadConfig(path: configPath)
+            SentryReporter.startIfConfigured(config: config.sentry)
             let policy = (try? SleepPolicy.parse(config.battery.sleep_policy)) ?? .strict
             sleepMachine.setPolicy(policy)
             if wasForcing, !config.battery.force_discharge, readAdapterEnabledLocked() == false {
@@ -515,6 +545,7 @@ public final class SmctlDaemon: @unchecked Sendable {
             } catch {
                 lastError = String(describing: error)
                 logger.error("Sleep event handling failed: \(String(describing: error), privacy: .public)")
+                SentryReporter.capture(error, context: "Sleep event handling failed")
             }
             return evaluation
         }
@@ -552,6 +583,7 @@ public final class SmctlDaemon: @unchecked Sendable {
             lastEvaluation = now
             lastError = String(describing: error)
             logger.error("Battery policy evaluation failed: \(String(describing: error), privacy: .public)")
+            SentryReporter.capture(error, context: "Battery policy evaluation failed")
         }
     }
 
@@ -738,6 +770,7 @@ public final class SmctlDaemon: @unchecked Sendable {
             } catch {
                 lastError = String(describing: error)
                 logger.error("Fan safety restore failed: \(String(describing: error), privacy: .public)")
+                SentryReporter.capture(error, context: "Fan safety restore failed")
             }
             return
         }
@@ -755,6 +788,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         } catch {
             lastError = String(describing: error)
             logger.error("Fan policy evaluation failed: \(String(describing: error), privacy: .public)")
+            SentryReporter.capture(error, context: "Fan policy evaluation failed")
         }
     }
 
@@ -961,6 +995,7 @@ public final class SmctlDaemon: @unchecked Sendable {
                 // (e.g. Macs Fan Control); surface it — never swallow a failed restore.
                 lastError = String(describing: error)
                 logger.error("Startup fan restore failed (external fan controller running?): \(String(describing: error), privacy: .public)")
+                SentryReporter.capture(error, context: "Startup fan restore failed")
             }
         }
     }
@@ -1109,6 +1144,12 @@ public final class SmctlDaemon: @unchecked Sendable {
 
         [update]
         check = \(config.update.check ? "true" : "false")
+
+        [sentry]
+        dsn = "\(config.sentry.dsn)"
+        environment = "\(config.sentry.environment)"
+        debug = \(config.sentry.debug ? "true" : "false")
+        traces_sample_rate = \(config.sentry.traces_sample_rate)
 
         """
         for curve in config.fan.curves {
