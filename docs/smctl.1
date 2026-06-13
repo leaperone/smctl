@@ -126,11 +126,18 @@ Declarative policy configuration.
 .I /Library/LaunchDaemons/one.leaper.smctl.daemon.plist
 The installed LaunchDaemon.
 .SH PRIVACY
-The daemon makes one outbound request: a daily check of the GitHub releases API
-for the latest version, surfaced by the CLI as an upgrade hint. Disable it with
+The CLI itself does not make network requests. The daemon can make outbound
+requests for the daily GitHub releases update check, user-configured alert
+webhooks, and optional Sentry crash/error reporting when
+.B [sentry]
+.B dsn
+is configured. Disable the update check with
 .B check = false
 under
-.BR [update] .
+.BR [update] ,
+leave
+.B [sentry] dsn
+empty, and configure no webhook alerts for a fully offline daemon.
 .SH EXIT STATUS
 .B smctl
 exits 0 on success and non-zero on error (64 for usage and validation errors).

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import XCTest
 @testable import SMCtlDaemonCore
 @testable import SMCCore
@@ -9,6 +10,7 @@ final class SmctlDaemonTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
+        setenv("SMCTL_SENTRY_DISABLED", "1", 1)
         configPath = NSTemporaryDirectory() + "smctl-test-\(UUID().uuidString).toml"
     }
 
@@ -16,6 +18,7 @@ final class SmctlDaemonTests: XCTestCase {
         if let configPath {
             try? FileManager.default.removeItem(atPath: configPath)
         }
+        unsetenv("SMCTL_SENTRY_DISABLED")
         super.tearDown()
     }
 
@@ -185,6 +188,54 @@ final class SmctlDaemonTests: XCTestCase {
         XCTAssertEqual(alert?.above, 85)
         XCTAssertEqual(alert?.forSeconds, 30)
         XCTAssertEqual(alert?.rule?.trigger.kind, .temp)
+    }
+
+    func testSentryConfigDecodesFromToml() throws {
+        try """
+        [sentry]
+        dsn = "https://public@example.invalid/1"
+        environment = "staging"
+        debug = true
+        traces_sample_rate = 0.25
+        """.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+        XCTAssertEqual(daemon.config.sentry.dsn, "https://public@example.invalid/1")
+        XCTAssertEqual(daemon.config.sentry.environment, "staging")
+        XCTAssertTrue(daemon.config.sentry.debug)
+        XCTAssertEqual(daemon.config.sentry.traces_sample_rate, 0.25)
+    }
+
+    func testSentrySampleRateIsClamped() throws {
+        try """
+        [sentry]
+        traces_sample_rate = 2.0
+        """.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+        XCTAssertEqual(daemon.config.sentry.traces_sample_rate, 1)
+    }
+
+    func testWriteConfigPreservesSentry() throws {
+        try """
+        [battery]
+        limit = "80"
+
+        [sentry]
+        dsn = "https://public@example.invalid/1"
+        environment = "staging"
+        debug = true
+        traces_sample_rate = 0.5
+        """.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+        try daemon.setChargeLimit("70-80")
+
+        let reloaded = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+        XCTAssertEqual(reloaded.config.sentry.dsn, "https://public@example.invalid/1")
+        XCTAssertEqual(reloaded.config.sentry.environment, "staging")
+        XCTAssertTrue(reloaded.config.sentry.debug)
+        XCTAssertEqual(reloaded.config.sentry.traces_sample_rate, 0.5)
     }
 
     func testWriteConfigPreservesAlerts() throws {

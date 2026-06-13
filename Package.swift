@@ -16,7 +16,8 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
-        .package(url: "https://github.com/LebJe/TOMLKit.git", from: "0.6.0")
+        .package(url: "https://github.com/LebJe/TOMLKit.git", from: "0.6.0"),
+        .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.17.1")
     ],
     targets: [
         .target(
@@ -33,6 +34,7 @@ let package = Package(
                 "SMCCore",
                 "PolicyEngine",
                 "SMCtlProtocol",
+                .product(name: "Sentry", package: "sentry-cocoa"),
                 .product(name: "TOMLKit", package: "TOMLKit")
             ],
             linkerSettings: [
