@@ -180,7 +180,7 @@ struct FanCurveConfig: Codable, Equatable, Sendable {
         points = try container.decode([[FanPointValue]].self, forKey: .points)
         hysteresis = try container.decodeLenientDoubleIfPresent(forKey: .hysteresis) ?? 0
         slew_rate = try container.decodeLenientDoubleIfPresent(forKey: .slew_rate)
-        weights = try container.decodeIfPresent([String: Double].self, forKey: .weights)
+        weights = try container.decodeLenientDoubleDictionaryIfPresent(forKey: .weights)
     }
 }
 
@@ -231,6 +231,29 @@ extension KeyedDecodingContainer {
         if let integer = try? decode(Int.self, forKey: key) { return Double(integer) }
         return try decode(Double.self, forKey: key)
     }
+
+    /// Same integer leniency for a `[String: Double]` field (fan curve weights):
+    /// `weights = { cpu = 2 }` decodes the values as Int and would otherwise throw,
+    /// discarding the whole config.
+    func decodeLenientDoubleDictionaryIfPresent(forKey key: Key) throws -> [String: Double]? {
+        guard contains(key) else { return nil }
+        if let value = try? decode([String: Double].self, forKey: key) { return value }
+        if let integers = try? decode([String: Int].self, forKey: key) { return integers.mapValues(Double.init) }
+        // Mixed integer/float entries: decode value-by-value (a wrong type still throws).
+        let nested = try nestedContainer(keyedBy: LenientDictKey.self, forKey: key)
+        var result: [String: Double] = [:]
+        for entry in nested.allKeys {
+            result[entry.stringValue] = try nested.decodeLenientDoubleIfPresent(forKey: entry)
+        }
+        return result
+    }
+}
+
+private struct LenientDictKey: CodingKey {
+    var stringValue: String
+    var intValue: Int?
+    init?(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue: Int) { self.stringValue = String(intValue); self.intValue = intValue }
 }
 
 struct SafetyConfig: Codable, Equatable, Sendable {

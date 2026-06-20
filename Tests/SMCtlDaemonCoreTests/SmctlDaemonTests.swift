@@ -371,6 +371,38 @@ final class SmctlDaemonTests: XCTestCase {
         XCTAssertEqual(curve.points, [[.number(0), .maximum], [.number(105), .number(2000)]])
     }
 
+    func testFanCurveWeightsAcceptIntegerValues() throws {
+        // Integer weights are the natural way to write them and must not throw and
+        // discard the whole config (gap caught in preflight review).
+        try """
+        [[fan.curves]]
+        name = "test"
+        sensors = ["Tp01", "Tg05"]
+        points = [[0.0, "max"]]
+        weights = { Tp01 = 2, Tg05 = 1 }
+        """.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+
+        XCTAssertFalse(daemon.daemonStatus().lastError?.contains("failed to parse") ?? false)
+        XCTAssertEqual(daemon.config.fan.curves.first?.weights, ["Tp01": 2, "Tg05": 1])
+    }
+
+    func testFanCurveWeightsAcceptMixedIntegerAndFloat() throws {
+        try """
+        [[fan.curves]]
+        name = "test"
+        sensors = ["Tp01", "Tg05"]
+        points = [[0.0, "max"]]
+        weights = { Tp01 = 2, Tg05 = 1.5 }
+        """.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+
+        XCTAssertFalse(daemon.daemonStatus().lastError?.contains("failed to parse") ?? false)
+        XCTAssertEqual(daemon.config.fan.curves.first?.weights, ["Tp01": 2, "Tg05": 1.5])
+    }
+
     func testFanCurveOmittingHysteresisDefaultsToZero() throws {
         // `hysteresis` used to be required — omitting it threw keyNotFound and reset
         // the whole config.
