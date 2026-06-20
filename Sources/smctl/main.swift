@@ -18,6 +18,29 @@ private enum CLIFormatters {
     static let iso8601 = LockedISO8601Formatter()
 }
 
+// MARK: - Daemon install path resolution (#8)
+
+/// Real path of the running executable, independent of how it was launched. Under a
+/// PATH lookup argv[0] is just "smctl", so the old argv[0]-based resolution fell back
+/// to the working directory and `daemon install` could not find smctld (#8).
+func currentExecutablePath() -> String? {
+    var size: UInt32 = 0
+    _ = _NSGetExecutablePath(nil, &size)  // first call reports the required buffer size
+    guard size > 0 else { return nil }
+    var buffer = [CChar](repeating: 0, count: Int(size))
+    guard _NSGetExecutablePath(&buffer, &size) == 0 else { return nil }
+    return String(cString: buffer)
+}
+
+/// smctld sits next to smctl. Pure and testable. The path is deliberately left
+/// un-resolved — the stable /opt/homebrew/bin symlink, not the versioned Cellar
+/// target — so the LaunchDaemon keeps pointing at a valid binary across `brew upgrade`.
+func smctldPath(besideExecutable executablePath: String, fileExists: (String) -> Bool) -> String? {
+    let directory = URL(fileURLWithPath: executablePath).deletingLastPathComponent()
+    let candidate = directory.appendingPathComponent("smctld").standardizedFileURL.path
+    return fileExists(candidate) ? candidate : nil
+}
+
 @main
 struct SMCtl: ParsableCommand {
     static let configuration = CommandConfiguration(
@@ -727,16 +750,16 @@ struct DaemonInstall: ParsableCommand {
     static let plistPath = "/Library/LaunchDaemons/one.leaper.smctl.daemon.plist"
 
     private static func currentSmctldPath() throws -> String {
-        let rawCommand = CommandLine.arguments[0]
-        let command = rawCommand.hasPrefix("/")
-            ? URL(fileURLWithPath: rawCommand)
-            : URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(rawCommand)
-        let directory = command.deletingLastPathComponent()
-        let candidate = directory.appendingPathComponent("smctld").standardizedFileURL.path
-        if FileManager.default.isExecutableFile(atPath: candidate) {
-            return candidate
+        guard
+            let executable = currentExecutablePath(),
+            let path = smctldPath(
+                besideExecutable: executable,
+                fileExists: { FileManager.default.isExecutableFile(atPath: $0) }
+            )
+        else {
+            throw ValidationError("Could not find smctld next to the current smctl executable.")
         }
-        throw ValidationError("Could not find smctld next to the current smctl executable.")
+        return path
     }
 
     private static func plist(smctldPath: String) -> String {
