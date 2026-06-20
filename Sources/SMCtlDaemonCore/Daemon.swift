@@ -92,7 +92,7 @@ struct SentryConfig: Codable, Equatable, Sendable {
         dsn = try container.decodeIfPresent(String.self, forKey: .dsn) ?? ""
         environment = try container.decodeIfPresent(String.self, forKey: .environment) ?? "production"
         debug = try container.decodeIfPresent(Bool.self, forKey: .debug) ?? false
-        let sampleRate = try container.decodeIfPresent(Double.self, forKey: .traces_sample_rate) ?? 0
+        let sampleRate = try container.decodeLenientDoubleIfPresent(forKey: .traces_sample_rate) ?? 0
         traces_sample_rate = min(max(sampleRate, 0), 1)
     }
 }
@@ -166,6 +166,22 @@ struct FanCurveConfig: Codable, Equatable, Sendable {
         self.slew_rate = slew_rate
         self.weights = weights
     }
+
+    enum CodingKeys: String, CodingKey {
+        case name, sensors, points, hysteresis, slew_rate, weights
+    }
+
+    // Custom decoding so `hysteresis`/`slew_rate` are optional (default rather than
+    // keyNotFound) and accept TOML integers — see decodeLenientDoubleIfPresent (#9).
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        sensors = try container.decodeIfPresent([String].self, forKey: .sensors) ?? []
+        points = try container.decode([[FanPointValue]].self, forKey: .points)
+        hysteresis = try container.decodeLenientDoubleIfPresent(forKey: .hysteresis) ?? 0
+        slew_rate = try container.decodeLenientDoubleIfPresent(forKey: .slew_rate)
+        weights = try container.decodeIfPresent([String: Double].self, forKey: .weights)
+    }
 }
 
 enum FanPointValue: Codable, Equatable, Sendable {
@@ -176,6 +192,13 @@ enum FanPointValue: Codable, Equatable, Sendable {
         let container = try decoder.singleValueContainer()
         if let number = try? container.decode(Double.self) {
             self = .number(number)
+            return
+        }
+        // TOML keeps integers and floats as distinct types, so `[50, "max"]` decodes
+        // the 50 as Int, not Double. Accept it as a number instead of falling through
+        // to the String branch and rejecting the whole curve.
+        if let integer = try? container.decode(Int.self) {
+            self = .number(Double(integer))
             return
         }
         let string = try container.decode(String.self).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -197,6 +220,19 @@ enum FanPointValue: Codable, Equatable, Sendable {
     }
 }
 
+/// TOML keeps integers and floats as distinct types. A hand-written `100` for a
+/// Double config field would otherwise throw a type mismatch and — via loadConfig's
+/// catch — silently reset the entire config to defaults (issue #9). Accept integers
+/// as Doubles; a genuinely wrong type still surfaces as a decoding error.
+extension KeyedDecodingContainer {
+    func decodeLenientDoubleIfPresent(forKey key: Key) throws -> Double? {
+        guard contains(key) else { return nil }
+        if let value = try? decode(Double.self, forKey: key) { return value }
+        if let integer = try? decode(Int.self, forKey: key) { return Double(integer) }
+        return try decode(Double.self, forKey: key)
+    }
+}
+
 struct SafetyConfig: Codable, Equatable, Sendable {
     var temp_ceiling: Double
     /// Advanced opt-in: allows `fan set --force` to target below the fan's reported
@@ -211,7 +247,7 @@ struct SafetyConfig: Codable, Equatable, Sendable {
     // Defensive decoding — see BatteryConfig.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        temp_ceiling = try container.decodeIfPresent(Double.self, forKey: .temp_ceiling)
+        temp_ceiling = try container.decodeLenientDoubleIfPresent(forKey: .temp_ceiling)
             ?? FanSafetyGuard.defaultCeilingCelsius
         allow_below_minimum = try container.decodeIfPresent(Bool.self, forKey: .allow_below_minimum) ?? false
     }
@@ -256,6 +292,10 @@ public final class SmctlDaemon: @unchecked Sendable {
     private static let alertHistoryLimit = 50
     private var lastEvaluation: Date?
     private var lastError: String?
+    /// Set when the on-disk config fails to parse. The daemon keeps running on
+    /// defaults, so without this the failure was invisible — `daemon status` showed
+    /// `last error: -` while silently ignoring the user's config (issue #9).
+    private var configError: String?
     private var lastWriteError: String?
     private var timer: DispatchSourceTimer?
     private var fanTimer: DispatchSourceTimer?
@@ -376,7 +416,9 @@ public final class SmctlDaemon: @unchecked Sendable {
                 periodSeconds: SmctlDaemon.period,
                 configPath: configPath,
                 lastEvaluation: lastEvaluation,
-                lastError: lastError
+                // A config parse failure is more actionable than a transient runtime
+                // error and persists until the user fixes the file, so it wins.
+                lastError: configError ?? lastError
             )
         }
     }
@@ -411,7 +453,9 @@ public final class SmctlDaemon: @unchecked Sendable {
     func reloadConfig() {
         queue.sync {
             let wasForcing = config.battery.force_discharge
-            config = Self.loadConfig(path: configPath)
+            let loaded = Self.loadConfig(path: configPath)
+            config = loaded.config
+            configError = loaded.error
             SentryReporter.startIfConfigured(config: config.sentry)
             let policy = (try? SleepPolicy.parse(config.battery.sleep_policy)) ?? .strict
             sleepMachine.setPolicy(policy)
@@ -1112,16 +1156,16 @@ public final class SmctlDaemon: @unchecked Sendable {
         return "unknown"
     }
 
-    private static func loadConfig(path: String) -> DaemonConfig {
+    private static func loadConfig(path: String) -> (config: DaemonConfig, error: String?) {
         guard FileManager.default.fileExists(atPath: path) else {
-            return DaemonConfig()
+            return (DaemonConfig(), nil)
         }
         do {
             let text = try String(contentsOfFile: path, encoding: .utf8)
-            return try TOMLDecoder().decode(DaemonConfig.self, from: text)
+            return (try TOMLDecoder().decode(DaemonConfig.self, from: text), nil)
         } catch {
             logger.error("Unable to parse \(path, privacy: .public): \(String(describing: error), privacy: .public)")
-            return DaemonConfig()
+            return (DaemonConfig(), "config at \(path) failed to parse, running on defaults: \(String(describing: error))")
         }
     }
 

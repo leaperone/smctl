@@ -342,6 +342,70 @@ final class SmctlDaemonTests: XCTestCase {
         XCTAssertEqual(status.rules.first?.status, "armed")
     }
 
+    // MARK: - Config decoding tolerance (issue #9)
+
+    func testDoubleConfigFieldsAcceptTomlIntegers() throws {
+        // TOML keeps integers distinct from floats, so a natural `temp_ceiling = 95`
+        // / `points = [[105, 2000]]` used to throw a type mismatch and silently reset
+        // the ENTIRE config to defaults.
+        try """
+        [safety]
+        temp_ceiling = 95
+
+        [[fan.curves]]
+        name = "test"
+        sensors = []
+        points = [[0, "max"], [105, 2000]]
+        hysteresis = 3
+        """.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+
+        XCTAssertFalse(
+            daemon.daemonStatus().lastError?.contains("failed to parse") ?? false,
+            "a valid integer config must not be reported as a parse error"
+        )
+        XCTAssertEqual(daemon.config.safety.temp_ceiling, 95)
+        let curve = try XCTUnwrap(daemon.config.fan.curves.first)
+        XCTAssertEqual(curve.hysteresis, 3)
+        XCTAssertEqual(curve.points, [[.number(0), .maximum], [.number(105), .number(2000)]])
+    }
+
+    func testFanCurveOmittingHysteresisDefaultsToZero() throws {
+        // `hysteresis` used to be required — omitting it threw keyNotFound and reset
+        // the whole config.
+        try """
+        [[fan.curves]]
+        name = "test"
+        sensors = []
+        points = [[0.0, "max"]]
+        """.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+
+        XCTAssertFalse(daemon.daemonStatus().lastError?.contains("failed to parse") ?? false)
+        XCTAssertEqual(daemon.config.fan.curves.first?.hysteresis, 0)
+    }
+
+    func testMalformedConfigSurfacesInDaemonStatusAndFallsBackToDefaults() throws {
+        // Part 2: a genuine type error must be visible in `daemon status`, not
+        // silently swallowed while the daemon runs on defaults.
+        try """
+        [safety]
+        temp_ceiling = "boom"
+        """.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+
+        let status = daemon.daemonStatus()
+        XCTAssertEqual(
+            daemon.config.safety.temp_ceiling, FanSafetyGuard.defaultCeilingCelsius,
+            "unparseable config must fall back to defaults, not crash"
+        )
+        let reported = try XCTUnwrap(status.lastError, "config parse failure must surface in status")
+        XCTAssertTrue(reported.contains("failed to parse"), "status should explain the failure: \(reported)")
+    }
+
     // MARK: - Helpers
 
     private func makeDaemon(backend: RecordingBackend, capabilities: Capabilities) -> SmctlDaemon {
