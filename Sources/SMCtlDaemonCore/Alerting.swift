@@ -57,9 +57,9 @@ struct AlertConfig: Codable, Equatable, Sendable {
         name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
         on = try container.decodeIfPresent(String.self, forKey: .on) ?? ""
         sensor = try container.decodeIfPresent(String.self, forKey: .sensor)
-        above = try container.decodeIfPresent(Double.self, forKey: .above)
-        forSeconds = try container.decodeIfPresent(Double.self, forKey: .forSeconds)
-        cooldown = try container.decodeIfPresent(Double.self, forKey: .cooldown)
+        above = try container.decodeLenientDoubleIfPresent(forKey: .above)
+        forSeconds = try container.decodeLenientDoubleIfPresent(forKey: .forSeconds)
+        cooldown = try container.decodeLenientDoubleIfPresent(forKey: .cooldown)
         resolve = try container.decodeIfPresent(Bool.self, forKey: .resolve)
         action = try container.decodeIfPresent(String.self, forKey: .action)
         url = try container.decodeIfPresent(String.self, forKey: .url)

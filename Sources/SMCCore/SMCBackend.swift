@@ -82,7 +82,7 @@ public extension SMCWriteBackend {
                 for verifyAttempt in 1...retryPolicy.verifyReads {
                     let readBack = try readValue(key)
                     actual = readBack.bytes
-                    if Array(actual.prefix(bytes.count)) == bytes {
+                    if smcWriteVerified(expected: bytes, actual: actual, dataType: info.dataType) {
                         return
                     }
                     if verifyAttempt < retryPolicy.verifyReads {
@@ -102,4 +102,32 @@ public extension SMCWriteBackend {
 
         throw lastError ?? SMCError.writeVerificationFailed(key: key, expected: bytes, actual: [])
     }
+}
+
+/// Whether a written value read back as the value we wrote.
+///
+/// SMC float (`flt`) writes are quantized: the firmware clears low mantissa bits,
+/// so a read-back of an interpolated fan target differs from the written bytes by
+/// a fraction of an RPM. An exact byte compare therefore reports a write failure
+/// on every policy cycle (issue #11), flooding the log and masking real failures.
+/// For `flt` keys we compare the decoded floats within a tolerance; every other
+/// type must still match exactly so a genuinely failed write is never hidden.
+func smcWriteVerified(expected: [UInt8], actual: [UInt8], dataType: UInt32) -> Bool {
+    let actualPrefix = Array(actual.prefix(expected.count))
+    if actualPrefix == expected {
+        return true
+    }
+    let types = FourCharCode.normalizedStrings(dataType)
+    guard types.contains("flt ") || types.contains("flt") else {
+        return false
+    }
+    guard
+        let written = (try? SMCDataDecoder.decode(key: "", bytes: expected, dataType: dataType))?.doubleValue,
+        let readBack = (try? SMCDataDecoder.decode(key: "", bytes: actualPrefix, dataType: dataType))?.doubleValue
+    else {
+        return false
+    }
+    // Quantization is well under 1 RPM; the relative term keeps headroom for large
+    // values without ever approaching the gap a genuinely failed write would show.
+    return abs(written - readBack) <= max(1.0, abs(written) * 0.001)
 }
