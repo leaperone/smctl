@@ -172,6 +172,7 @@ Capability detection is done at runtime — on unsupported hardware, commands te
 
 - [中文项目文档](docs/README.zh-CN.md) — vision, research notes, and roadmap (Chinese)
 - [Fan profile cookbook](docs/fan-profiles.md) — design, apply, verify, and troubleshoot custom fan curves (Chinese)
+- [Display control research](docs/research-display-control.md) — scope, risks, and staged command design for future external-display hardware control (Chinese)
 - [Architecture & design](docs/design.md) (Chinese)
 - [Field notes: M4 Mac mini](docs/field-notes-m4-mini.md) — real-hardware findings, including SMC asynchronous-write behavior (Chinese)
 
