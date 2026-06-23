@@ -40,7 +40,7 @@ $ smctl sensors --watch            # 实时温度、风扇转速、封装功耗
 | `smctl alert list\|status\|test <name>` | 温度/事件告警 → webhook、命令或日志（TOML 配置） |
 | `smctl daemon install\|uninstall\|status\|ping\|logs` | 管理特权 daemon 并查看最近日志 |
 
-策略配置在 `/etc/smctl/config.toml`——声明式、可 diff、对 dotfiles 友好。
+策略配置在 `/etc/smctl/config.toml`——声明式、可 diff、对 dotfiles 友好。自定义风扇曲线的完整方法见 [风扇曲线教程](fan-profiles.md)。
 
 ## 安装
 
@@ -163,6 +163,7 @@ $ smctl alert test cpu-hot    # 立即触发动作，验证 webhook/脚本是否
 ## 文档
 
 - [架构与技术设计](design.md)
+- [风扇曲线设计教程](fan-profiles.md)
 - [真机实测笔记：M4 Mac mini](field-notes-m4-mini.md)——含 SMC 异步写入等一手发现
 - [项目调研与规划笔记](project-notes.zh-CN.md)
 

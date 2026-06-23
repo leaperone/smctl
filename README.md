@@ -42,7 +42,7 @@ $ smctl sensors --watch            # live temperatures, fan RPM, package power
 | `smctl alert list\|status\|test <name>` | Temperature/event alerts → webhook, command, or log (configured in TOML) |
 | `smctl daemon install\|uninstall\|status\|ping\|logs` | Manage the privileged helper and inspect recent daemon logs |
 
-Policies live in `/etc/smctl/config.toml` — declarative, diffable, dotfiles-friendly.
+Policies live in `/etc/smctl/config.toml` — declarative, diffable, dotfiles-friendly. For a step-by-step custom fan curve guide, see the [fan profile cookbook](docs/fan-profiles.md) (Chinese).
 
 ## Install
 
@@ -171,6 +171,7 @@ Capability detection is done at runtime — on unsupported hardware, commands te
 ## Documentation
 
 - [中文项目文档](docs/README.zh-CN.md) — vision, research notes, and roadmap (Chinese)
+- [Fan profile cookbook](docs/fan-profiles.md) — design, apply, verify, and troubleshoot custom fan curves (Chinese)
 - [Architecture & design](docs/design.md) (Chinese)
 - [Field notes: M4 Mac mini](docs/field-notes-m4-mini.md) — real-hardware findings, including SMC asynchronous-write behavior (Chinese)
 
