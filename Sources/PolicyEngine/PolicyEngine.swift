@@ -330,6 +330,7 @@ public struct FanCurve: Codable, Equatable, Sendable {
     public var points: [FanCurvePoint]
     public var hysteresisCelsius: Double
     public var slewRateRPMPerSecond: Double?
+    public var fallSlewRateRPMPerSecond: Double?
 
     public init(
         name: String,
@@ -337,7 +338,8 @@ public struct FanCurve: Codable, Equatable, Sendable {
         sensorWeights: [String: Double] = [:],
         points: [FanCurvePoint],
         hysteresisCelsius: Double = 0,
-        slewRateRPMPerSecond: Double? = nil
+        slewRateRPMPerSecond: Double? = nil,
+        fallSlewRateRPMPerSecond: Double? = nil
     ) throws {
         let sortedPoints = points.sorted { $0.temperatureCelsius < $1.temperatureCelsius }
         guard sortedPoints.count >= 2 else {
@@ -352,6 +354,7 @@ public struct FanCurve: Codable, Equatable, Sendable {
         self.points = sortedPoints
         self.hysteresisCelsius = max(0, hysteresisCelsius)
         self.slewRateRPMPerSecond = slewRateRPMPerSecond.map { max(0, $0) }
+        self.fallSlewRateRPMPerSecond = fallSlewRateRPMPerSecond.map { max(0, $0) }
     }
 
     public static func quiet(maxRPM: Double) -> FanCurve {
@@ -368,7 +371,8 @@ public struct FanCurve: Codable, Equatable, Sendable {
                 FanCurvePoint(105, maxRPM)
             ],
             hysteresisCelsius: 3,
-            slewRateRPMPerSecond: 400
+            slewRateRPMPerSecond: 400,
+            fallSlewRateRPMPerSecond: 180
         )
     }
 
@@ -416,18 +420,19 @@ public struct FanCurveEngine: Sendable {
         now: Date
     ) throws -> FanCurveEvaluation {
         let aggregated = try Self.aggregate(samples: samples, sensors: curve.sensors, weights: curve.sensorWeights)
-        let effectiveTemperature: Double
-        if
-            let previous = lastEffectiveTemperature,
-            abs(aggregated - previous) <= curve.hysteresisCelsius
-        {
-            effectiveTemperature = previous
-        } else {
-            effectiveTemperature = aggregated
-        }
+        let effectiveTemperature = Self.hysteresisAdjustedTemperature(
+            aggregated: aggregated,
+            previous: lastEffectiveTemperature,
+            hysteresis: curve.hysteresisCelsius
+        )
 
         let interpolated = Self.interpolate(points: curve.points, temperature: effectiveTemperature)
-        let target = slewLimitedTarget(rawTarget: interpolated, slewRate: curve.slewRateRPMPerSecond, now: now)
+        let target = slewLimitedTarget(
+            rawTarget: interpolated,
+            riseSlewRate: curve.slewRateRPMPerSecond,
+            fallSlewRate: curve.fallSlewRateRPMPerSecond,
+            now: now
+        )
 
         lastEffectiveTemperature = effectiveTemperature
         lastRPM = target
@@ -438,6 +443,19 @@ public struct FanCurveEngine: Sendable {
             unclampedRPM: interpolated,
             targetRPM: target
         )
+    }
+
+    static func hysteresisAdjustedTemperature(aggregated: Double, previous: Double?, hysteresis: Double) -> Double {
+        guard let previous, hysteresis > 0 else {
+            return aggregated
+        }
+        if aggregated >= previous {
+            return aggregated
+        }
+        if aggregated >= previous - hysteresis {
+            return previous
+        }
+        return aggregated
     }
 
     public static func interpolate(points: [FanCurvePoint], temperature: Double) -> Double {
@@ -497,19 +515,26 @@ public struct FanCurveEngine: Sendable {
         return selected.map(\.celsius).max() ?? 0
     }
 
-    private func slewLimitedTarget(rawTarget: Double, slewRate: Double?, now: Date) -> Double {
+    private func slewLimitedTarget(rawTarget: Double, riseSlewRate: Double?, fallSlewRate: Double?, now: Date) -> Double {
         guard
-            let slewRate,
-            slewRate > 0,
             let lastRPM,
             let lastEvaluationDate
         else {
             return rawTarget
         }
-        let maxDelta = slewRate * max(0, now.timeIntervalSince(lastEvaluationDate))
+        let elapsed = max(0, now.timeIntervalSince(lastEvaluationDate))
         if rawTarget > lastRPM {
+            guard let slewRate = riseSlewRate, slewRate > 0 else {
+                return rawTarget
+            }
+            let maxDelta = slewRate * elapsed
             return min(rawTarget, lastRPM + maxDelta)
         }
+        let slewRate = fallSlewRate ?? riseSlewRate
+        guard let slewRate, slewRate > 0 else {
+            return rawTarget
+        }
+        let maxDelta = slewRate * elapsed
         return max(rawTarget, lastRPM - maxDelta)
     }
 }

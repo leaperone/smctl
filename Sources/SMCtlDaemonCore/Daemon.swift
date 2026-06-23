@@ -149,6 +149,7 @@ struct FanCurveConfig: Codable, Equatable, Sendable {
     var points: [[FanPointValue]]
     var hysteresis: Double
     var slew_rate: Double?
+    var fall_slew_rate: Double?
     var weights: [String: Double]?
 
     init(
@@ -157,6 +158,7 @@ struct FanCurveConfig: Codable, Equatable, Sendable {
         points: [[FanPointValue]],
         hysteresis: Double = 0,
         slew_rate: Double? = nil,
+        fall_slew_rate: Double? = nil,
         weights: [String: Double]? = nil
     ) {
         self.name = name
@@ -164,15 +166,16 @@ struct FanCurveConfig: Codable, Equatable, Sendable {
         self.points = points
         self.hysteresis = hysteresis
         self.slew_rate = slew_rate
+        self.fall_slew_rate = fall_slew_rate
         self.weights = weights
     }
 
     enum CodingKeys: String, CodingKey {
-        case name, sensors, points, hysteresis, slew_rate, weights
+        case name, sensors, points, hysteresis, slew_rate, fall_slew_rate, weights
     }
 
-    // Custom decoding so `hysteresis`/`slew_rate` are optional (default rather than
-    // keyNotFound) and accept TOML integers — see decodeLenientDoubleIfPresent (#9).
+    // Custom decoding so optional numeric tuning fields default rather than throwing
+    // keyNotFound and accept TOML integers — see decodeLenientDoubleIfPresent (#9).
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         name = try container.decode(String.self, forKey: .name)
@@ -180,6 +183,7 @@ struct FanCurveConfig: Codable, Equatable, Sendable {
         points = try container.decode([[FanPointValue]].self, forKey: .points)
         hysteresis = try container.decodeLenientDoubleIfPresent(forKey: .hysteresis) ?? 0
         slew_rate = try container.decodeLenientDoubleIfPresent(forKey: .slew_rate)
+        fall_slew_rate = try container.decodeLenientDoubleIfPresent(forKey: .fall_slew_rate)
         weights = try container.decodeLenientDoubleDictionaryIfPresent(forKey: .weights)
     }
 }
@@ -1019,7 +1023,8 @@ public final class SmctlDaemon: @unchecked Sendable {
                 sensorWeights: curve.weights ?? [:],
                 points: points,
                 hysteresisCelsius: curve.hysteresis,
-                slewRateRPMPerSecond: curve.slew_rate
+                slewRateRPMPerSecond: curve.slew_rate,
+                fallSlewRateRPMPerSecond: curve.fall_slew_rate
             )
         }
     }
@@ -1231,6 +1236,9 @@ public final class SmctlDaemon: @unchecked Sendable {
             """
             if let slewRate = curve.slew_rate {
                 text += "slew_rate = \(slewRate)\n"
+            }
+            if let fallSlewRate = curve.fall_slew_rate {
+                text += "fall_slew_rate = \(fallSlewRate)\n"
             }
             if let weights = curve.weights, !weights.isEmpty {
                 let pairs = weights.sorted { $0.key < $1.key }.map { "\"\($0.key)\" = \($0.value)" }.joined(separator: ", ")
