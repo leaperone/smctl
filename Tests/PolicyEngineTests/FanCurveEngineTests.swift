@@ -33,7 +33,7 @@ final class FanCurveEngineTests: XCTestCase {
         )
     }
 
-    func testHysteresisIsBidirectionalDeadZone() throws {
+    func testHysteresisFollowsHeatingAndHoldsCooldown() throws {
         let curve = try FanCurve(
             name: "custom",
             points: [
@@ -53,7 +53,7 @@ final class FanCurveEngineTests: XCTestCase {
             samples: [FanTemperatureSample(sensor: "cpu", celsius: 62.9)],
             now: Date(timeIntervalSince1970: 1)
         )
-        let outsideUp = try engine.evaluate(
+        let furtherUp = try engine.evaluate(
             curve: curve,
             samples: [FanTemperatureSample(sensor: "cpu", celsius: 63.1)],
             now: Date(timeIntervalSince1970: 2)
@@ -65,15 +65,15 @@ final class FanCurveEngineTests: XCTestCase {
         )
         let outsideDown = try engine.evaluate(
             curve: curve,
-            samples: [FanTemperatureSample(sensor: "cpu", celsius: 59)],
+            samples: [FanTemperatureSample(sensor: "cpu", celsius: 59.9)],
             now: Date(timeIntervalSince1970: 4)
         )
 
         XCTAssertEqual(first.effectiveTemperature, 60, accuracy: 0.01)
-        XCTAssertEqual(insideUp.effectiveTemperature, 60, accuracy: 0.01)
-        XCTAssertEqual(outsideUp.effectiveTemperature, 63.1, accuracy: 0.01)
+        XCTAssertEqual(insideUp.effectiveTemperature, 62.9, accuracy: 0.01)
+        XCTAssertEqual(furtherUp.effectiveTemperature, 63.1, accuracy: 0.01)
         XCTAssertEqual(insideDown.effectiveTemperature, 63.1, accuracy: 0.01)
-        XCTAssertEqual(outsideDown.effectiveTemperature, 59, accuracy: 0.01)
+        XCTAssertEqual(outsideDown.effectiveTemperature, 59.9, accuracy: 0.01)
     }
 
     func testSlewRateLimitsRpmChangesPerSecondInBothDirections() throws {
@@ -109,5 +109,38 @@ final class FanCurveEngineTests: XCTestCase {
         XCTAssertEqual(up.targetRPM, 2000, accuracy: 0.01)
         XCTAssertEqual(down.unclampedRPM, 1000, accuracy: 0.01)
         XCTAssertEqual(down.targetRPM, 1500, accuracy: 0.01)
+    }
+
+    func testFallSlewRateCanBeSlowerThanRiseSlewRate() throws {
+        let curve = try FanCurve(
+            name: "custom",
+            points: [
+                FanCurvePoint(50, 1000),
+                FanCurvePoint(90, 5000)
+            ],
+            slewRateRPMPerSecond: 1000,
+            fallSlewRateRPMPerSecond: 200
+        )
+        var engine = FanCurveEngine()
+        let start = Date(timeIntervalSince1970: 0)
+
+        _ = try engine.evaluate(
+            curve: curve,
+            samples: [FanTemperatureSample(sensor: "cpu", celsius: 50)],
+            now: start
+        )
+        let up = try engine.evaluate(
+            curve: curve,
+            samples: [FanTemperatureSample(sensor: "cpu", celsius: 90)],
+            now: start.addingTimeInterval(1)
+        )
+        let down = try engine.evaluate(
+            curve: curve,
+            samples: [FanTemperatureSample(sensor: "cpu", celsius: 50)],
+            now: start.addingTimeInterval(2)
+        )
+
+        XCTAssertEqual(up.targetRPM, 2000, accuracy: 0.01)
+        XCTAssertEqual(down.targetRPM, 1800, accuracy: 0.01)
     }
 }

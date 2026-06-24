@@ -357,6 +357,8 @@ final class SmctlDaemonTests: XCTestCase {
         sensors = []
         points = [[0, "max"], [105, 2000]]
         hysteresis = 3
+        slew_rate = 600
+        fall_slew_rate = 180
         """.write(toFile: configPath, atomically: true, encoding: .utf8)
 
         let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
@@ -368,6 +370,8 @@ final class SmctlDaemonTests: XCTestCase {
         XCTAssertEqual(daemon.config.safety.temp_ceiling, 95)
         let curve = try XCTUnwrap(daemon.config.fan.curves.first)
         XCTAssertEqual(curve.hysteresis, 3)
+        XCTAssertEqual(curve.slew_rate, 600)
+        XCTAssertEqual(curve.fall_slew_rate, 180)
         XCTAssertEqual(curve.points, [[.number(0), .maximum], [.number(105), .number(2000)]])
     }
 

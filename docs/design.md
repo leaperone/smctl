@@ -124,8 +124,8 @@ locked ──直写 modeKey=1 成功──► manual          （M1/M5 路径）
 ### 5.4 风扇曲线引擎（PolicyEngine）
 
 - 曲线 = 折线段：`[(温度, RPM), ...]`，输入为**多传感器加权聚合值**（可配权重，默认取 max）
-- **滞回**：双阈值死区（升温越过 T 才升档，降温越过 T−delta 才降档），杜绝转速抖动——与充电状态机共用同一个 hysteresis 抽象
-- **变化率限制**：RPM 目标变化做 slew rate 限制，避免风扇忽高忽低的体感噪音
+- **滞回**：升温及时跟随，降温必须低于上次有效温度一段 `hysteresis` 后才下调，避免临界点附近反复升降
+- **变化率限制**：RPM 目标变化做 slew rate 限制，支持升速与降速分开配置；降速通常更慢，避免“刚转起来又马上掉下去”的体感噪音
 - profile：`quiet` / `auto` / `full` / 自定义曲线，TOML 定义
 
 ### 5.5 唤醒恢复
@@ -207,6 +207,8 @@ name = "custom"
 sensors = ["cpu", "gpu"]   # 聚合：默认 max，可加权
 points = [[50, 0], [65, 2000], [80, 4000], [95, "max"]]
 hysteresis = 3             # ℃
+slew_rate = 600            # RPM/s, rising target
+fall_slew_rate = 180       # RPM/s, falling target; defaults to slew_rate when omitted
 
 [safety]
 temp_ceiling = 100         # 温度护栏（℃），不可关闭，硬上限 105；连续 2 tick 超限才触发
