@@ -2,3 +2,4 @@
 .swiftpm/
 DerivedData/
 dist/
+.claude/worktrees/

@@ -37,6 +37,7 @@ $ smctl sensors --watch            # 实时温度、风扇转速、封装功耗
 | `smctl fan set 2500 [--fan N]` | 手动设定目标转速 |
 | `smctl fan profile quiet\|full\|auto\|<自定义>` | 声明式风扇曲线（TOML），带滞回和变速率限制 |
 | `smctl power status [--watch] [--json]` | 热压制状态、CPU 降频幅度（限速 %）、封装功耗与输入功率 |
+| `smctl display list` / `brightness [0-100]` / `power on\|off` | 外接显示器亮度与电源（DDC/CI）；关闭后显示器仍留在 macOS 布局中，窗口不会被重排 |
 | `smctl alert list\|status\|test <name>` | 温度/事件告警 → webhook、命令或日志（TOML 配置） |
 | `smctl daemon install\|uninstall\|status\|ping\|logs` | 管理特权 daemon 并查看最近日志 |
 

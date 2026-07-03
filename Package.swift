@@ -29,6 +29,14 @@ let package = Package(
         .target(name: "PolicyEngine"),
         .target(name: "SMCtlProtocol"),
         .target(
+            name: "DisplayDDC",
+            linkerSettings: [
+                .linkedFramework("IOKit"),
+                .linkedFramework("CoreGraphics"),
+                .linkedFramework("CoreDisplay")
+            ]
+        ),
+        .target(
             name: "SMCtlDaemonCore",
             dependencies: [
                 "SMCCore",
@@ -53,6 +61,7 @@ let package = Package(
             dependencies: [
                 "SMCCore",
                 "SMCtlProtocol",
+                "DisplayDDC",
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
             ]
         ),
@@ -74,7 +83,7 @@ let package = Package(
         ),
         .testTarget(
             name: "smctlTests",
-            dependencies: ["smctl"]
+            dependencies: ["smctl", "DisplayDDC"]
         )
     ]
 )
