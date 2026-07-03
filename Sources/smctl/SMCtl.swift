@@ -47,7 +47,7 @@ struct SMCtl: ParsableCommand {
         commandName: "smctl",
         abstract: "Mac hardware control utility.",
         version: SMCtlProtocolInfo.version,
-        subcommands: [Sensors.self, Fan.self, Battery.self, Power.self, Alert.self, Daemon.self, Debug.self]
+        subcommands: [Sensors.self, Fan.self, Battery.self, Power.self, Display.self, Alert.self, Daemon.self, Debug.self]
     )
 }
 
@@ -1143,7 +1143,7 @@ private final class XPCResultBox: @unchecked Sendable {
     var error: String?
 }
 
-private enum CLIJSON {
+enum CLIJSON {
     static func encodeString<T: Encodable>(_ value: T) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
