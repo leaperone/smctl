@@ -165,6 +165,7 @@ $ smctl alert test cpu-hot    # 立即触发动作，验证 webhook/脚本是否
 
 - [架构与技术设计](design.md)
 - [风扇曲线设计教程](fan-profiles.md)
+- [显示器控制调研](research-display-control.md)——外接显示器硬件控制、DDC/CI、EDID、诊断面和分阶段命令设计
 - [真机实测笔记：M4 Mac mini](field-notes-m4-mini.md)——含 SMC 异步写入等一手发现
 - [项目调研与规划笔记](project-notes.zh-CN.md)
 
