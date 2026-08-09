@@ -678,8 +678,11 @@ public final class SmctlDaemon: @unchecked Sendable {
     }
 
     private func readChargingEnabledLocked() -> Bool? {
+        // Mirror the adapter-fallback in applyChargingLocked: when the charge
+        // keys are unavailable, adapter power is what gates charging, so it is
+        // also what reports the charging state.
         guard let group = capabilities.chargingControl, let value = try? backend?.readValue(group.statusKey) else {
-            return nil
+            return capabilities.adapterControl != nil ? readAdapterEnabledLocked() : nil
         }
         return value.bytes.allSatisfy { $0 == 0 }
     }
@@ -722,8 +725,18 @@ public final class SmctlDaemon: @unchecked Sendable {
         guard let backend else {
             throw DaemonError.unsupported("AppleSMC is not available.")
         }
+        // macOS 27 / Apple Silicon: the charge-inhibit keys (CHLS, CH0J) are
+        // refused by the AppleSMC kernel driver with kIOReturnNotPrivileged for
+        // every userspace caller, root included. Adapter power control (CHIE) is
+        // still writable and produces the same observable result — cutting the
+        // adapter stops the charge and lets the pack sail down. Fall back to it
+        // so charge limiting keeps working where it otherwise could not.
         guard let group = capabilities.chargingControl else {
-            throw DaemonError.unsupported("Charging control keys are not available on this Mac/system.")
+            guard capabilities.adapterControl != nil else {
+                throw DaemonError.unsupported("Charging control keys are not available on this Mac/system.")
+            }
+            try applyAdapterLocked(enabled)
+            return
         }
         for write in enabled ? group.enableWrites : group.disableWrites {
             try writeSMCKeyLocked(write.key, bytes: write.bytes, backend: backend)
@@ -1111,6 +1124,8 @@ public final class SmctlDaemon: @unchecked Sendable {
             statusMessage = message
         } else if observation == nil {
             statusMessage = "No readable battery was found. Battery commands are read-only or unsupported on this Mac."
+        } else if capabilities.chargingControl == nil, capabilities.adapterControl != nil {
+            statusMessage = "Charging control keys are unavailable; using adapter power control instead (the Mac runs on battery while the limit holds)."
         } else if capabilities.chargingControl == nil {
             statusMessage = "Charging control keys are unavailable; policy writes are unsupported on this Mac/system."
         } else {

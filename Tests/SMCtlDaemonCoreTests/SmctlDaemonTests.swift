@@ -93,6 +93,52 @@ final class SmctlDaemonTests: XCTestCase {
         )
     }
 
+    func testChargeLimitFallsBackToAdapterWhenChargingKeysUnavailable() throws {
+        let backend = RecordingBackend()
+        backend.values["BUIC"] = [85]          // charge percent (ui8)
+        backend.values["CHIE"] = [0]           // adapter enabled
+        backend.values["AC-W"] = [1]           // plugged in
+        let daemon = makeDaemon(backend: backend, capabilities: .oneFanAdapterOnly)
+
+        try daemon.setChargeLimit("70-80")     // 85% > upper bound 80
+
+        XCTAssertTrue(
+            backend.writes.contains { $0.key == "CHIE" && $0.bytes == [0x08] },
+            "adapter power must be cut when the charge keys are unavailable; writes: \(backend.writes)"
+        )
+    }
+
+    func testChargeLimitRestoresAdapterBelowLowerBound() throws {
+        let backend = RecordingBackend()
+        backend.values["BUIC"] = [50]          // below the 60 lower bound
+        backend.values["CHIE"] = [0x08]        // adapter currently cut
+        backend.values["AC-W"] = [1]
+        let daemon = makeDaemon(backend: backend, capabilities: .oneFanAdapterOnly)
+
+        try daemon.setChargeLimit("60-70")
+
+        XCTAssertTrue(
+            backend.writes.contains { $0.key == "CHIE" && $0.bytes == [0x00] },
+            "adapter power must be restored below the lower bound; writes: \(backend.writes)"
+        )
+    }
+
+    func testChargeLimitStillUnsupportedWithNoControlKeysAtAll() throws {
+        let backend = RecordingBackend()
+        backend.values["BUIC"] = [85]
+        backend.values["AC-W"] = [1]
+        var capabilities = Capabilities.oneFanAdapterOnly
+        capabilities.adapterControl = nil       // neither mechanism available
+        let daemon = makeDaemon(backend: backend, capabilities: capabilities)
+
+        try daemon.setChargeLimit("70-80")
+
+        XCTAssertTrue(
+            backend.writes.isEmpty,
+            "no control keys means no writes at all; writes: \(backend.writes)"
+        )
+    }
+
     // MARK: - Below-minimum gating
 
     func testBelowMinimumIsClampedWithoutForce() throws {
@@ -521,6 +567,23 @@ private extension Capabilities {
             requiredKeys: ["CH0B", "CH0C"],
             enableWrites: [SMCKeyWrite(key: "CH0B", bytes: [0]), SMCKeyWrite(key: "CH0C", bytes: [0])],
             disableWrites: [SMCKeyWrite(key: "CH0B", bytes: [2]), SMCKeyWrite(key: "CH0C", bytes: [2])]
+        )
+        capabilities.batteryKeys = ["BUIC", "AC-W"]
+        return capabilities
+    }
+
+    /// macOS 27 / Apple Silicon shape: the charge-inhibit keys are refused by the
+    /// AppleSMC kernel driver, so capability detection leaves `chargingControl`
+    /// nil, but adapter power control is still writable.
+    static var oneFanAdapterOnly: Capabilities {
+        var capabilities = Capabilities.oneFan
+        capabilities.chargingControl = nil
+        capabilities.adapterControl = SMCControlKeyGroup(
+            identifier: "tahoe-adapter",
+            statusKey: "CHIE",
+            requiredKeys: ["CHIE"],
+            enableWrites: [SMCKeyWrite(key: "CHIE", bytes: [0x00])],
+            disableWrites: [SMCKeyWrite(key: "CHIE", bytes: [0x08])]
         )
         capabilities.batteryKeys = ["BUIC", "AC-W"]
         return capabilities
