@@ -3,9 +3,3 @@
 DerivedData/
 dist/
 .claude/worktrees/
-
-# Local planning artifacts
-/.planning/
-
-# Local Git worktrees
-/.worktrees/

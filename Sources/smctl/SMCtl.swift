@@ -4,6 +4,14 @@ import SMCCore
 import SMCtlClient
 import SMCtlProtocol
 
+private func mapDaemonClient<T>(_ body: () throws -> T) throws -> T {
+    do {
+        return try body()
+    } catch let error as SMCtlClientError {
+        throw ValidationError(error.localizedDescription)
+    }
+}
+
 private final class LockedISO8601Formatter: @unchecked Sendable {
     private let formatter = ISO8601DateFormatter()
     private let lock = NSLock()
@@ -186,7 +194,7 @@ struct FanStatus: ParsableCommand {
     var json = false
 
     func run() throws {
-        let status: FansStatusDTO = try DaemonClient().getFans()
+        let status: FansStatusDTO = try mapDaemonClient { try DaemonClient().getFans() }
         if json {
             print(try CLIJSON.encodeString(status))
             return
@@ -216,7 +224,7 @@ struct FanSet: ParsableCommand {
         if let fan {
             indices = [fan]
         } else {
-            let status = try client.getFans()
+            let status = try mapDaemonClient { try client.getFans() }
             indices = status.fans.map(\.index)
             guard !indices.isEmpty else {
                 print("No fans were reported by smctld.")
@@ -224,7 +232,7 @@ struct FanSet: ParsableCommand {
             }
         }
         for index in indices {
-            try client.setFanManual(index: index, rpm: rpm, force: force)
+            try mapDaemonClient { try client.setFanManual(index: index, rpm: rpm, force: force) }
         }
         print("Fan target set to \(formatRPM(rpm))\(fan.map { " on fan \($0)" } ?? " on all fans").")
     }
@@ -237,7 +245,7 @@ struct FanAuto: ParsableCommand {
     var fan: Int?
 
     func run() throws {
-        try DaemonClient().setFanAuto(index: fan)
+        try mapDaemonClient { try DaemonClient().setFanAuto(index: fan) }
         if let fan {
             print("Fan \(fan) restored to system auto control.")
         } else {
@@ -253,7 +261,7 @@ struct FanProfile: ParsableCommand {
     var name: String
 
     func run() throws {
-        try DaemonClient().setFanProfile(name)
+        try mapDaemonClient { try DaemonClient().setFanProfile(name) }
         print("Fan profile set to \(name).")
     }
 }
@@ -273,7 +281,7 @@ struct BatteryStatus: ParsableCommand {
     var json = false
 
     func run() throws {
-        let status: BatteryStatusDTO = try DaemonClient().getBatteryStatus()
+        let status: BatteryStatusDTO = try mapDaemonClient { try DaemonClient().getBatteryStatus() }
         if json {
             print(try CLIJSON.encodeString(status))
             return
@@ -297,7 +305,7 @@ struct Maintain: ParsableCommand {
         let isStopping = ["stop", "off", "disabled", "100"].contains(trimmed)
         let normalized = isStopping ? "100" : limit
         let effectiveForceDischarge = !isStopping && forceDischarge
-        try client.setChargeLimit(normalized, forceDischarge: effectiveForceDischarge)
+        try mapDaemonClient { try client.setChargeLimit(normalized, forceDischarge: effectiveForceDischarge) }
         if normalized == "100" {
             _ = try? client.setChargingEnabled(true)
             _ = try? client.setAdapterEnabled(true)
@@ -321,9 +329,9 @@ struct Charge: ParsableCommand {
             throw ValidationError("Charge target must be between 0 and 100.")
         }
         let client = DaemonClient()
-        try client.setChargeLimit(String(target))
+        try mapDaemonClient { try client.setChargeLimit(String(target)) }
         _ = try? client.setAdapterEnabled(true)
-        try client.setChargingEnabled(true)
+        try mapDaemonClient { try client.setChargingEnabled(true) }
         print("Charging enabled with upper target \(target)%.")
     }
 }
@@ -337,7 +345,7 @@ struct Charging: ParsableCommand {
     func run() throws {
         let enabled = try parseOnOff(setting)
         let client = DaemonClient()
-        try client.setChargingEnabled(enabled)
+        try mapDaemonClient { try client.setChargingEnabled(enabled) }
         print("Charging \(enabled ? "enabled" : "disabled").")
         // A maintain policy re-evaluates every few seconds and will overwrite a
         // manual toggle that disagrees with it — warn instead of silently losing.
@@ -356,7 +364,7 @@ struct Adapter: ParsableCommand {
     func run() throws {
         let enabled = try parseOnOff(setting)
         let client = DaemonClient()
-        try client.setAdapterEnabled(enabled)
+        try mapDaemonClient { try client.setAdapterEnabled(enabled) }
         if enabled {
             print("Adapter power enabled.")
         } else {
@@ -394,7 +402,7 @@ struct Discharge: ParsableCommand {
             }
         }
 
-        let initial: BatteryStatusDTO = try client.getBatteryStatus()
+        let initial: BatteryStatusDTO = try mapDaemonClient { try client.getBatteryStatus() }
         guard initial.adapterControlSupported else {
             print("Adapter cutoff keys are unavailable on this Mac/system; active discharge is unsupported.")
             return
@@ -408,13 +416,13 @@ struct Discharge: ParsableCommand {
             return
         }
 
-        try client.setAdapterEnabled(false)
+        try mapDaemonClient { try client.setAdapterEnabled(false) }
         shouldRestoreAdapter = true
         print("Adapter disabled for foreground discharge to \(target)%. Press Ctrl-C to restore adapter power.")
 
         while true {
             sleep(10)
-            let status: BatteryStatusDTO = try client.getBatteryStatus()
+            let status: BatteryStatusDTO = try mapDaemonClient { try client.getBatteryStatus() }
             guard let current = status.chargePercent else {
                 print("Battery became unreadable; restoring adapter power.")
                 return
@@ -427,7 +435,7 @@ struct Discharge: ParsableCommand {
             // Re-assert the cut every poll: SMC firmware can silently re-enable
             // adapter power (observed on M2 when the charging-enable key is
             // written while a cut is active), which would stall the discharge.
-            try client.setAdapterEnabled(false)
+            try mapDaemonClient { try client.setAdapterEnabled(false) }
         }
     }
 }
@@ -534,7 +542,7 @@ struct AlertList: ParsableCommand {
     var json = false
 
     func run() throws {
-        let status: AlertStatusDTO = try DaemonClient().getAlertStatus()
+        let status: AlertStatusDTO = try mapDaemonClient { try DaemonClient().getAlertStatus() }
         let definitions = status.definitions ?? []
         if json {
             print(try CLIJSON.encodeString(definitions))
@@ -551,7 +559,7 @@ struct AlertStatus: ParsableCommand {
     var json = false
 
     func run() throws {
-        let status: AlertStatusDTO = try DaemonClient().getAlertStatus()
+        let status: AlertStatusDTO = try mapDaemonClient { try DaemonClient().getAlertStatus() }
         if json {
             print(try CLIJSON.encodeString(status))
             return
@@ -567,7 +575,7 @@ struct AlertTest: ParsableCommand {
     var name: String
 
     func run() throws {
-        try DaemonClient().testAlert(name: name)
+        try mapDaemonClient { try DaemonClient().testAlert(name: name) }
         print("Fired action for alert '\(name)'. Check your webhook/command (or `log show --predicate 'subsystem == \"one.leaper.smctl\"'`).")
     }
 }
@@ -663,7 +671,7 @@ struct DaemonPing: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "ping", abstract: "Round-trip check that smctld is alive.")
 
     func run() throws {
-        let ping: PingDTO = try DaemonClient().ping()
+        let ping: PingDTO = try mapDaemonClient { try DaemonClient().ping() }
         print("smctld ok \(ping.version) \(CLIFormatters.iso8601.string(from: ping.timestamp))")
     }
 }
@@ -690,7 +698,7 @@ struct DaemonStatus: ParsableCommand {
     var json = false
 
     func run() throws {
-        let status: DaemonStatusDTO = try DaemonClient().getDaemonStatus()
+        let status: DaemonStatusDTO = try mapDaemonClient { try DaemonClient().getDaemonStatus() }
         if json {
             print(try CLIJSON.encodeString(status))
             return
