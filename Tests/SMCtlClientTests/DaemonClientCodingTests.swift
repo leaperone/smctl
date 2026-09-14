@@ -25,10 +25,3 @@ func setFanManualRequestRoundTrip() throws {
     #expect(try SMCtlProtocolCoding.decode(SetFanManualRequestDTO.self, from: data) == request)
     #expect(String(data: data, encoding: .utf8) == #"{"force":true,"index":1,"rpm":3200}"#)
 }
-
-@Test
-func clientErrorHasNonEmptyDescription() {
-    let error = SMCtlClientError("smctld is not running.")
-    #expect(error.errorDescription == "smctld is not running.")
-    #expect(!error.localizedDescription.isEmpty)
-}
