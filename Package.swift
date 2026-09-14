@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "SMCCore", targets: ["SMCCore"]),
         .library(name: "PolicyEngine", targets: ["PolicyEngine"]),
         .library(name: "SMCtlProtocol", targets: ["SMCtlProtocol"]),
+        .library(name: "SMCtlClient", targets: ["SMCtlClient"]),
         .executable(name: "smctld", targets: ["smctld"]),
         .executable(name: "smctl", targets: ["smctl"])
     ],
@@ -28,6 +29,10 @@ let package = Package(
         ),
         .target(name: "PolicyEngine"),
         .target(name: "SMCtlProtocol"),
+        .target(
+            name: "SMCtlClient",
+            dependencies: ["SMCtlProtocol"]
+        ),
         .target(
             name: "DisplayDDC",
             linkerSettings: [
@@ -61,6 +66,7 @@ let package = Package(
             dependencies: [
                 "SMCCore",
                 "SMCtlProtocol",
+                "SMCtlClient",
                 "DisplayDDC",
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
             ]
@@ -76,6 +82,10 @@ let package = Package(
         .testTarget(
             name: "SMCtlProtocolTests",
             dependencies: ["SMCtlProtocol"]
+        ),
+        .testTarget(
+            name: "SMCtlClientTests",
+            dependencies: ["SMCtlClient", "SMCtlProtocol"]
         ),
         .testTarget(
             name: "SMCtlDaemonCoreTests",
