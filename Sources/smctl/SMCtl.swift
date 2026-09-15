@@ -1,7 +1,16 @@
 import ArgumentParser
 import Foundation
 import SMCCore
+import SMCtlClient
 import SMCtlProtocol
+
+private func mapDaemonClient<T>(_ body: () throws -> T) throws -> T {
+    do {
+        return try body()
+    } catch let error as SMCtlClientError {
+        throw ValidationError(error.localizedDescription)
+    }
+}
 
 private final class LockedISO8601Formatter: @unchecked Sendable {
     private let formatter = ISO8601DateFormatter()
@@ -185,7 +194,7 @@ struct FanStatus: ParsableCommand {
     var json = false
 
     func run() throws {
-        let status: FansStatusDTO = try DaemonClient().getFans()
+        let status: FansStatusDTO = try mapDaemonClient { try DaemonClient().getFans() }
         if json {
             print(try CLIJSON.encodeString(status))
             return
@@ -215,7 +224,7 @@ struct FanSet: ParsableCommand {
         if let fan {
             indices = [fan]
         } else {
-            let status = try client.getFans()
+            let status = try mapDaemonClient { try client.getFans() }
             indices = status.fans.map(\.index)
             guard !indices.isEmpty else {
                 print("No fans were reported by smctld.")
@@ -223,7 +232,7 @@ struct FanSet: ParsableCommand {
             }
         }
         for index in indices {
-            try client.setFanManual(index: index, rpm: rpm, force: force)
+            try mapDaemonClient { try client.setFanManual(index: index, rpm: rpm, force: force) }
         }
         print("Fan target set to \(formatRPM(rpm))\(fan.map { " on fan \($0)" } ?? " on all fans").")
     }
@@ -236,7 +245,7 @@ struct FanAuto: ParsableCommand {
     var fan: Int?
 
     func run() throws {
-        try DaemonClient().setFanAuto(index: fan)
+        try mapDaemonClient { try DaemonClient().setFanAuto(index: fan) }
         if let fan {
             print("Fan \(fan) restored to system auto control.")
         } else {
@@ -252,7 +261,7 @@ struct FanProfile: ParsableCommand {
     var name: String
 
     func run() throws {
-        try DaemonClient().setFanProfile(name)
+        try mapDaemonClient { try DaemonClient().setFanProfile(name) }
         print("Fan profile set to \(name).")
     }
 }
@@ -272,7 +281,7 @@ struct BatteryStatus: ParsableCommand {
     var json = false
 
     func run() throws {
-        let status: BatteryStatusDTO = try DaemonClient().getBatteryStatus()
+        let status: BatteryStatusDTO = try mapDaemonClient { try DaemonClient().getBatteryStatus() }
         if json {
             print(try CLIJSON.encodeString(status))
             return
@@ -296,7 +305,7 @@ struct Maintain: ParsableCommand {
         let isStopping = ["stop", "off", "disabled", "100"].contains(trimmed)
         let normalized = isStopping ? "100" : limit
         let effectiveForceDischarge = !isStopping && forceDischarge
-        try client.setChargeLimit(normalized, forceDischarge: effectiveForceDischarge)
+        try mapDaemonClient { try client.setChargeLimit(normalized, forceDischarge: effectiveForceDischarge) }
         if normalized == "100" {
             _ = try? client.setChargingEnabled(true)
             _ = try? client.setAdapterEnabled(true)
@@ -320,9 +329,9 @@ struct Charge: ParsableCommand {
             throw ValidationError("Charge target must be between 0 and 100.")
         }
         let client = DaemonClient()
-        try client.setChargeLimit(String(target))
+        try mapDaemonClient { try client.setChargeLimit(String(target)) }
         _ = try? client.setAdapterEnabled(true)
-        try client.setChargingEnabled(true)
+        try mapDaemonClient { try client.setChargingEnabled(true) }
         print("Charging enabled with upper target \(target)%.")
     }
 }
@@ -336,7 +345,7 @@ struct Charging: ParsableCommand {
     func run() throws {
         let enabled = try parseOnOff(setting)
         let client = DaemonClient()
-        try client.setChargingEnabled(enabled)
+        try mapDaemonClient { try client.setChargingEnabled(enabled) }
         print("Charging \(enabled ? "enabled" : "disabled").")
         // A maintain policy re-evaluates every few seconds and will overwrite a
         // manual toggle that disagrees with it — warn instead of silently losing.
@@ -355,7 +364,7 @@ struct Adapter: ParsableCommand {
     func run() throws {
         let enabled = try parseOnOff(setting)
         let client = DaemonClient()
-        try client.setAdapterEnabled(enabled)
+        try mapDaemonClient { try client.setAdapterEnabled(enabled) }
         if enabled {
             print("Adapter power enabled.")
         } else {
@@ -393,7 +402,7 @@ struct Discharge: ParsableCommand {
             }
         }
 
-        let initial: BatteryStatusDTO = try client.getBatteryStatus()
+        let initial: BatteryStatusDTO = try mapDaemonClient { try client.getBatteryStatus() }
         guard initial.adapterControlSupported else {
             print("Adapter cutoff keys are unavailable on this Mac/system; active discharge is unsupported.")
             return
@@ -407,13 +416,13 @@ struct Discharge: ParsableCommand {
             return
         }
 
-        try client.setAdapterEnabled(false)
+        try mapDaemonClient { try client.setAdapterEnabled(false) }
         shouldRestoreAdapter = true
         print("Adapter disabled for foreground discharge to \(target)%. Press Ctrl-C to restore adapter power.")
 
         while true {
             sleep(10)
-            let status: BatteryStatusDTO = try client.getBatteryStatus()
+            let status: BatteryStatusDTO = try mapDaemonClient { try client.getBatteryStatus() }
             guard let current = status.chargePercent else {
                 print("Battery became unreadable; restoring adapter power.")
                 return
@@ -426,7 +435,7 @@ struct Discharge: ParsableCommand {
             // Re-assert the cut every poll: SMC firmware can silently re-enable
             // adapter power (observed on M2 when the charging-enable key is
             // written while a cut is active), which would stall the discharge.
-            try client.setAdapterEnabled(false)
+            try mapDaemonClient { try client.setAdapterEnabled(false) }
         }
     }
 }
@@ -533,7 +542,7 @@ struct AlertList: ParsableCommand {
     var json = false
 
     func run() throws {
-        let status: AlertStatusDTO = try DaemonClient().getAlertStatus()
+        let status: AlertStatusDTO = try mapDaemonClient { try DaemonClient().getAlertStatus() }
         let definitions = status.definitions ?? []
         if json {
             print(try CLIJSON.encodeString(definitions))
@@ -550,7 +559,7 @@ struct AlertStatus: ParsableCommand {
     var json = false
 
     func run() throws {
-        let status: AlertStatusDTO = try DaemonClient().getAlertStatus()
+        let status: AlertStatusDTO = try mapDaemonClient { try DaemonClient().getAlertStatus() }
         if json {
             print(try CLIJSON.encodeString(status))
             return
@@ -566,7 +575,7 @@ struct AlertTest: ParsableCommand {
     var name: String
 
     func run() throws {
-        try DaemonClient().testAlert(name: name)
+        try mapDaemonClient { try DaemonClient().testAlert(name: name) }
         print("Fired action for alert '\(name)'. Check your webhook/command (or `log show --predicate 'subsystem == \"one.leaper.smctl\"'`).")
     }
 }
@@ -662,7 +671,7 @@ struct DaemonPing: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "ping", abstract: "Round-trip check that smctld is alive.")
 
     func run() throws {
-        let ping: PingDTO = try DaemonClient().ping()
+        let ping: PingDTO = try mapDaemonClient { try DaemonClient().ping() }
         print("smctld ok \(ping.version) \(CLIFormatters.iso8601.string(from: ping.timestamp))")
     }
 }
@@ -689,7 +698,7 @@ struct DaemonStatus: ParsableCommand {
     var json = false
 
     func run() throws {
-        let status: DaemonStatusDTO = try DaemonClient().getDaemonStatus()
+        let status: DaemonStatusDTO = try mapDaemonClient { try DaemonClient().getDaemonStatus() }
         if json {
             print(try CLIJSON.encodeString(status))
             return
@@ -958,189 +967,6 @@ struct DebugRead: ParsableCommand {
             print("  decoded: \(decoded)")
         }
     }
-}
-
-private final class DaemonClient {
-    private let connection: NSXPCConnection
-
-    init() {
-        connection = NSXPCConnection(machServiceName: SMCtlProtocolInfo.machServiceName, options: .privileged)
-        connection.remoteObjectInterface = NSXPCInterface(with: SMCtlDaemonXPCProtocol.self)
-        // Resumed exactly once here; a second resume would trap (over-resume).
-        connection.resume()
-    }
-
-    deinit {
-        connection.invalidate()
-    }
-
-    func ping() throws -> PingDTO {
-        try call { proxy, reply in
-            proxy.daemonPing(withReply: reply)
-        }
-    }
-
-    func getBatteryStatus() throws -> BatteryStatusDTO {
-        try call { proxy, reply in
-            proxy.getBatteryStatus(withReply: reply)
-        }
-    }
-
-    func getFans() throws -> FansStatusDTO {
-        try call { proxy, reply in
-            proxy.getFans(withReply: reply)
-        }
-    }
-
-    func getDaemonStatus() throws -> DaemonStatusDTO {
-        try call { proxy, reply in
-            proxy.getDaemonStatus(withReply: reply)
-        }
-    }
-
-    func getAlertStatus() throws -> AlertStatusDTO {
-        try call { proxy, reply in
-            proxy.getAlertStatus(withReply: reply)
-        }
-    }
-
-    func testAlert(name: String) throws {
-        let data = try SMCtlProtocolCoding.encode(TestAlertRequestDTO(name: name))
-        let _: EmptyResponseDTO = try call { proxy, reply in
-            proxy.testAlert(data, withReply: reply)
-        }
-    }
-
-    func setChargeLimit(_ limit: String, forceDischarge: Bool = false) throws {
-        let data = try SMCtlProtocolCoding.encode(SetChargeLimitRequestDTO(limit: limit, forceDischarge: forceDischarge))
-        let _: EmptyResponseDTO = try call { proxy, reply in
-            proxy.setChargeLimit(data, withReply: reply)
-        }
-    }
-
-    func setChargingEnabled(_ enabled: Bool) throws {
-        let data = try SMCtlProtocolCoding.encode(SetEnabledRequestDTO(enabled: enabled))
-        let _: EmptyResponseDTO = try call { proxy, reply in
-            proxy.setChargingEnabled(data, withReply: reply)
-        }
-    }
-
-    func setAdapterEnabled(_ enabled: Bool) throws {
-        let data = try SMCtlProtocolCoding.encode(SetEnabledRequestDTO(enabled: enabled))
-        let _: EmptyResponseDTO = try call { proxy, reply in
-            proxy.setAdapterEnabled(data, withReply: reply)
-        }
-    }
-
-    func setFanManual(index: Int, rpm: Double, force: Bool) throws {
-        let data = try SMCtlProtocolCoding.encode(SetFanManualRequestDTO(index: index, rpm: rpm, force: force))
-        let _: EmptyResponseDTO = try call { proxy, reply in
-            proxy.setFanManual(data, withReply: reply)
-        }
-    }
-
-    func setFanAuto(index: Int?) throws {
-        let data = try SMCtlProtocolCoding.encode(SetFanAutoRequestDTO(index: index))
-        let _: EmptyResponseDTO = try call { proxy, reply in
-            proxy.setFanAuto(data, withReply: reply)
-        }
-    }
-
-    func setFanProfile(_ name: String) throws {
-        let data = try SMCtlProtocolCoding.encode(SetFanProfileRequestDTO(name: name))
-        let _: EmptyResponseDTO = try call { proxy, reply in
-            proxy.setFanProfile(data, withReply: reply)
-        }
-    }
-
-    private func call<T: Decodable>(
-        _ body: (SMCtlDaemonXPCProtocol, @escaping (Data?, String?) -> Void) -> Void
-    ) throws -> T {
-        // Note: the connection is resumed exactly once in init. Resuming an already
-        // active NSXPCConnection is an over-resume and traps (SIGTRAP).
-        let semaphore = DispatchSemaphore(value: 0)
-        let box = XPCResultBox()
-
-        let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-            let nsError = error as NSError
-            if nsError.domain == NSCocoaErrorDomain, nsError.code == 4099 {
-                // Connection invalidated: the mach service is not registered with launchd.
-                box.error = "smctld is not running. Install it with 'sudo smctl daemon install' (check with 'smctl daemon status')."
-            } else {
-                box.error = String(describing: error)
-            }
-            semaphore.signal()
-        } as? SMCtlDaemonXPCProtocol
-        guard let proxy else {
-            throw ValidationError("Could not create XPC proxy.")
-        }
-        body(proxy) { data, error in
-            box.data = data
-            box.error = error
-            semaphore.signal()
-        }
-        // Bounded wait: never hang the CLI on a wedged daemon or undelivered message.
-        if semaphore.wait(timeout: .now() + 15) == .timedOut {
-            throw ValidationError("Timed out waiting for smctld (15s). Check 'smctl daemon status'.")
-        }
-
-        if let error = box.error {
-            throw ValidationError(error)
-        }
-        guard let data = box.data else {
-            throw ValidationError("Daemon returned no data.")
-        }
-        let result = try SMCtlProtocolCoding.decode(T.self, from: data)
-        warnOnVersionIssues(result)
-        return result
-    }
-
-    /// Two stderr hints, checked once per CLI invocation, both sourced from the
-    /// daemon's ping (piggybacked on the command's own reply when it is a PingDTO,
-    /// otherwise via one extra ping):
-    ///   - version skew: brew swaps binaries but never restarts the daemon, so a
-    ///     stale daemon keeps serving safety fixes that are not actually active
-    ///     (observed live: a 0.1.2 daemon served a 0.1.5 CLI for three releases).
-    ///   - update available: the daemon's daily check found a newer release.
-    private var versionChecked = false
-
-    private func warnOnVersionIssues<T>(_ result: T) {
-        guard !versionChecked else { return }
-        versionChecked = true  // set before any nested call() to prevent recursion
-
-        let ping: PingDTO?
-        if let p = result as? PingDTO {
-            ping = p
-        } else {
-            ping = try? call { proxy, reply in
-                proxy.daemonPing(withReply: reply)
-            }
-        }
-        guard let ping else { return }
-
-        if ping.version != SMCtlProtocolInfo.version {
-            emit("""
-            warning: smctl is \(SMCtlProtocolInfo.version) but the running smctld is \(ping.version).
-            Fixes in this version are NOT active until the daemon restarts:
-              sudo smctl daemon restart
-            """)
-        } else if let latest = ping.latestVersion,
-                  SMCtlProtocolInfo.isVersion(latest, newerThan: SMCtlProtocolInfo.version) {
-            emit("""
-            note: smctl \(latest) is available (you have \(SMCtlProtocolInfo.version)). Upgrade:
-              brew upgrade smctl && sudo smctl daemon restart
-            """)
-        }
-    }
-
-    private func emit(_ message: String) {
-        FileHandle.standardError.write(Data((message + "\n\n").utf8))
-    }
-}
-
-private final class XPCResultBox: @unchecked Sendable {
-    var data: Data?
-    var error: String?
 }
 
 enum CLIJSON {
