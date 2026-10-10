@@ -82,7 +82,7 @@ The Homebrew install sets up shell completions (bash/zsh/fish) and a `man smctl`
 Controlling fans and charging from userspace demands paranoia. smctl treats these as first-class invariants:
 
 - **Never leave a brick.** Uninstalling, stopping, or killing the daemon restores system control of fans and charging — enforced by termination hooks, startup reconciliation, and launchd restart.
-- **Thermal safety guard.** While fans are under manual control, smctl monitors all temperature sensors every second. Sustained readings above the ceiling force fans back to system control and latch out manual control until things cool down. The base ceiling defaults to 100 °C and is hard-capped at 105 °C; Apple Silicon `Tp*` hot-spot sensors get a narrow allowance up to 110 °C because they can run hotter than board/skin/proximity sensors under ordinary load. The guard cannot be disabled, and losing temperature visibility counts as unsafe.
+- **Thermal safety guard.** While fans are under manual control, smctl monitors all temperature sensors every second. Sustained readings above the ceiling — or readings that go unreadable or implausible (corrupt SMC sentinels) — make the guard pin every fan at **maximum RPM under its own control** and latch out new manual commands until the machine recovers, then resume your configured profile automatically. The guard never hands control back to the system and never rewrites your profile: an overheating Mac needs full cooling, not Apple's default curve. The base ceiling defaults to 100 °C and is hard-capped at 105 °C; Apple Silicon hot-spot sensors (`Tp*`, `TC*`, `Tg*`) get a narrow allowance up to 110 °C because they routinely run above 100 °C under ordinary sustained load. The guard cannot be disabled, and losing credible temperature visibility counts as unsafe.
 - **Verified writes.** Every SMC write is read back and verified (with a settle window for firmware that applies writes asynchronously) — failures surface as errors, never as silent no-ops.
 - **Graceful degradation.** If a macOS update changes SMC behavior, affected features degrade to read-only with an explicit message instead of pretending to work.
 
@@ -126,7 +126,7 @@ url = "http://gotify.lan/message?token=..."
 
 [[alert]]
 name = "guard-tripped"
-on = "guard"           # the thermal safety guard forced fans back to auto
+on = "guard"           # the thermal safety guard engaged (overheat or implausible readings; fans held at max RPM until recovery)
 action = "exec"
 command = ["/usr/local/bin/notify.sh", "{name}", "{reason}"]
 ```

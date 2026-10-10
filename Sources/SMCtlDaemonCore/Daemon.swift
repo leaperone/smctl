@@ -312,6 +312,12 @@ public final class SmctlDaemon: @unchecked Sendable {
     private var runtimeFanProfile: String?
     // Stateful: carries the safety latch across ticks; ceiling refreshed from config.
     var safetyGuard = FanSafetyGuard()
+    // Runtime state of the fail-safe hold: guard latched -> fans pinned at maximum
+    // under the same manual control. The user's configured profile survives the hold
+    // untouched and resumes on release; these fields only mark the engage/release
+    // edge for logging and for `smctl fan status`.
+    var safetyHoldActive = false
+    var safetyHoldReason: String?
     // Stateful: carries per-rule debounce/cooldown across ticks.
     var alertEngine = AlertEngine()
     private let alertRunner = AlertActionRunner()
@@ -723,6 +729,10 @@ public final class SmctlDaemon: @unchecked Sendable {
             throw DaemonError.unsupported("AppleSMC is not available.")
         }
         guard let group = capabilities.chargingControl else {
+            // The hardware exposes no charging-control keys at all. "Enabled" is the
+            // power-on default, so the policy is already satisfied there; throwing on
+            // every 10s tick buried real fan faults under battery noise in `daemon status`.
+            if enabled { return }
             throw DaemonError.unsupported("Charging control keys are not available on this Mac/system.")
         }
         for write in enabled ? group.enableWrites : group.disableWrites {
@@ -735,6 +745,9 @@ public final class SmctlDaemon: @unchecked Sendable {
             throw DaemonError.unsupported("AppleSMC is not available.")
         }
         guard let group = capabilities.adapterControl else {
+            // See applyChargingLocked: re-enabling the adapter default is a no-op
+            // when the hardware has no adapter-control keys.
+            if enabled { return }
             throw DaemonError.unsupported("Adapter control keys are not available on this Mac/system.")
         }
         for write in enabled ? group.enableWrites : group.disableWrites {
@@ -831,19 +844,25 @@ public final class SmctlDaemon: @unchecked Sendable {
             configuredCeilingCelsius: config.safety.temp_ceiling
         ).configuredCeilingCelsius
         let decision = safetyGuard.evaluate(samples: samples, manualPolicyActive: manualPolicyActive)
-        if decision.forceAuto {
-            logger.notice("Fan safety guard tripped: \(decision.reason ?? "unknown", privacy: .public); restoring all fans to auto")
+        if decision.holdAtMaxRPM {
+            if !safetyHoldActive {
+                safetyHoldActive = true
+                safetyHoldReason = decision.reason
+                logger.notice("Fan safety guard engaged: \(decision.reason ?? "unknown", privacy: .public); holding all fans at maximum RPM (profile '\(profile, privacy: .public)' resumes on release)")
+            }
             do {
-                try restoreFansAutoLocked(indices: capabilities.fans.map(\.index), clearPolicy: true)
-                config.fan.profile = "auto"
-                runtimeFanProfile = nil
-                try Self.writeConfig(config, path: configPath)
+                try holdFansAtMaxRPMLocked()
             } catch {
                 lastError = String(describing: error)
-                logger.error("Fan safety restore failed: \(String(describing: error), privacy: .public)")
-                SentryReporter.capture(error, context: "Fan safety restore failed")
+                logger.error("Fan safety hold failed: \(String(describing: error), privacy: .public)")
+                SentryReporter.capture(error, context: "Fan safety hold failed")
             }
             return
+        }
+        if safetyHoldActive {
+            safetyHoldActive = false
+            safetyHoldReason = nil
+            logger.notice("Fan safety guard released; resuming profile '\(profile, privacy: .public)'")
         }
 
         guard manualPolicyActive else {
@@ -873,7 +892,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         let input = AlertConditionInput(
             samples: samples,
             guardTripped: latched,
-            guardReason: latched ? "Fan safety guard latched (overheat or unreadable temperature sensors)" : nil,
+            guardReason: latched ? "Fan safety guard latched (overheat or implausible temperature readings)" : nil,
             writeError: lastWriteError
         )
         let events = alertEngine.evaluate(rules: rules, input: input, now: Date())
@@ -952,9 +971,9 @@ public final class SmctlDaemon: @unchecked Sendable {
             return
         }
         throw DaemonError.unsupported(
-            "Fan safety guard is latched (overheat or unreadable temperature sensors). "
-                + "Fans stay under system control until temperatures fall at least "
-                + "\(Int(FanSafetyGuard.releaseHysteresisCelsius))C below the ceiling."
+            "Fan safety guard is latched (overheat or implausible temperature sensors). "
+                + "Fans are held at maximum RPM by the guard until every plausible reading "
+                + "falls at least \(Int(FanSafetyGuard.releaseHysteresisCelsius))C below its ceiling."
         )
     }
 
@@ -968,6 +987,23 @@ public final class SmctlDaemon: @unchecked Sendable {
                 try controller.setManual(index: index, rpm: rpm)
             }
             ftstGate.enterManual(index: index)
+        }
+    }
+
+    /// Fail-safe landing state: keep manual ownership of every fan and pin it to the
+    /// SMC-reported maximum. Chosen over handing control back to the system because a
+    /// hand-back (a) reduces cooling exactly when the machine is hottest if the trip
+    /// cause was a corrupt reading or a spike the curve was already answering with
+    /// full RPM, and (b) required rewriting the user's configured profile to "auto",
+    /// which is how the controller kept "resetting to Apple defaults" in normal use.
+    private func holdFansAtMaxRPMLocked() throws {
+        let controller = try fanControllerLocked()
+        for fan in capabilities.fans {
+            let maximum = readNumericLocked(fan.maximumKey) ?? 6000
+            _ = try writeSMCOperationLocked {
+                try controller.setManual(index: fan.index, rpm: maximum)
+            }
+            ftstGate.enterManual(index: fan.index)
         }
     }
 
@@ -1163,7 +1199,8 @@ public final class SmctlDaemon: @unchecked Sendable {
             timestamp: Date(),
             profile: currentFanProfileLocked(),
             fans: statuses,
-            message: statusMessage
+            message: statusMessage,
+            safetyHold: safetyHoldActive ? (safetyHoldReason ?? "safety hold active") : nil
         )
     }
 

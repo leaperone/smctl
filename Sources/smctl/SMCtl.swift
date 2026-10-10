@@ -855,6 +855,9 @@ private func hoursMinutes(_ minutes: Int) -> String {
 private func printFansStatus(_ status: FansStatusDTO) {
     print("Fans")
     print("  profile: \(status.profile)")
+    if let hold = status.safetyHold {
+        print("  SAFETY HOLD: \(hold) (fans pinned at maximum; profile resumes on release)")
+    }
     if status.fans.isEmpty {
         print("  No fans reported by smctld.")
     } else {

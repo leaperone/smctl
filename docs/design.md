@@ -117,7 +117,7 @@ locked ──直写 modeKey=1 成功──► manual          （M1/M5 路径）
 
 1. **退出钩子**：signal handler（SIGTERM/SIGINT）+ 正常退出路径，best-effort 写 `Ftst=0` + 所有风扇 `modeKey=0`
 2. **启动对账**：daemon 由 launchd `KeepAlive` 拉起后，启动时核对「持久化的期望状态」vs「SMC 实际状态」——若发现 Ftst=1 但本地无活跃手动策略（上次 crash 的残留），立即恢复 auto
-3. **温度护栏（安全地板）**：手动模式期间 daemon 以 1s 间隔监控关键温度传感器；任一传感器超过安全阈值（默认保守值，可配但有硬下限）→ 强制恢复 auto 并告警。手动模式下 thermalmonitord 不管散热，**这道护栏由我们补上**
+3. **温度护栏（安全地板）**：手动模式期间 daemon 以 1s 间隔监控温度传感器；读数超过安全阈值（默认保守值，可配但有硬下限）、不可读或**不可信（物理上不可能的值，如 279 ℃ 的 SMC 哨兵垃圾）** → 护栏把风扇**钉死在最大转速（保持手动控制）并告警**，温度回落后自动恢复原 profile；绝不恢复 auto、绝不改写配置里的 profile——过热时机器需要的是满功率散热，交还系统默认曲线是反向操作。手动模式下 thermalmonitord 不管散热，**这道护栏由我们补上**；`Tp*`/`TC*`/`Tg*` 结温热点传感器按 Apple 规格（~110 ℃）享有窄幅容差，不可信读数在触发与释放两侧都不参与投票
 
 另外：SIGKILL 杀掉 daemon 时 1、2 都来不及/延迟，此时 thermalmonitord 的 reclaim（Ftst≠1 时几秒内收回）+ launchd 秒级重启 + 启动对账兜底——残余风险窗口只剩「Ftst=1 且 daemon 未被重启」，靠 KeepAlive 把这个窗口压到秒级。
 

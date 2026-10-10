@@ -1,7 +1,7 @@
 import Foundation
 
 public enum SMCtlProtocolInfo {
-    public static let version = "0.2.3"
+    public static let version = "0.2.4"
     public static let machServiceName = "one.leaper.smctl.daemon"
 
     /// Numeric-component semver comparison, tolerant of a leading "v".
@@ -231,12 +231,16 @@ public struct FansStatusDTO: Codable, Equatable, Sendable {
     public var profile: String
     public var fans: [FanStatusDTO]
     public var message: String?
+    /// Non-nil while the fan safety guard holds every fan at maximum RPM. The
+    /// profile shown above is what will resume when the hold releases.
+    public var safetyHold: String?
 
-    public init(timestamp: Date, profile: String, fans: [FanStatusDTO], message: String?) {
+    public init(timestamp: Date, profile: String, fans: [FanStatusDTO], message: String?, safetyHold: String? = nil) {
         self.timestamp = timestamp
         self.profile = profile
         self.fans = fans
         self.message = message
+        self.safetyHold = safetyHold
     }
 }
 

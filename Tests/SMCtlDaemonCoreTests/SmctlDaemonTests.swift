@@ -24,11 +24,14 @@ final class SmctlDaemonTests: XCTestCase {
 
     // MARK: - Fan safety guard at the integration layer
 
-    func testFanGuardForcesAutoWhenSensorsUnreadable() throws {
-        // Regression for the fail-open found in review: manual fans + zero readable
-        // temperature sensors must hand control back to the system, at the daemon level.
+    func testFanGuardHoldsMaxRPMWhenSensorsUnreadable() throws {
+        // Regression for the fail-open found in review, and for the reset-to-Apple-
+        // defaults complaint: manual fans + zero readable temperature sensors must
+        // pin the fans at maximum under the daemon's own control — never hand back
+        // to system auto, and never rewrite the configured profile.
         let backend = RecordingBackend()
         let daemon = makeDaemon(backend: backend, capabilities: .oneFan)
+        daemon.config.fan.profile = "cooler"
 
         try daemon.setFanManual(index: 0, rpm: 2000, force: false)
         XCTAssertTrue(daemon.ftstGate.hasManualFans)
@@ -37,12 +40,17 @@ final class SmctlDaemonTests: XCTestCase {
         daemon.evaluateFanSubsystemLocked()
 
         XCTAssertTrue(daemon.safetyGuard.isLatched, "blind guard must latch")
+        XCTAssertTrue(daemon.safetyHoldActive, "the hold must be visible to status")
         XCTAssertTrue(
-            backend.writes.contains { $0.key == "F0Md" && $0.bytes == [0] },
-            "fans must be restored to auto; writes: \(backend.writes)"
+            backend.writes.contains { $0.key == "F0Tg" && $0.bytes == FanController.float32LittleEndianBytes(4900) },
+            "fans must be pinned at the SMC maximum; writes: \(backend.writes)"
         )
-        XCTAssertEqual(daemon.config.fan.profile, "auto")
-        XCTAssertFalse(daemon.ftstGate.hasManualFans)
+        XCTAssertFalse(
+            backend.writes.contains { $0.key == "F0Md" && $0.bytes == [0] },
+            "the fail-safe must never hand the fan back to system control"
+        )
+        XCTAssertEqual(daemon.config.fan.profile, "cooler", "a trip may not destroy the configured profile")
+        XCTAssertTrue(daemon.ftstGate.hasManualFans)
     }
 
     func testLatchedGuardRejectsManualControl() throws {
