@@ -2,6 +2,31 @@ import XCTest
 @testable import PolicyEngine
 
 final class FanSafetyGuardTests: XCTestCase {
+    func testNonFiniteCeilingsUseSafeDefault() {
+        for ceiling in [Double.nan, .infinity, -.infinity] {
+            var guardrail = FanSafetyGuard(configuredCeilingCelsius: ceiling)
+            XCTAssertEqual(guardrail.configuredCeilingCelsius, 100)
+            _ = guardrail.evaluate(samples: [sample(105)], manualPolicyActive: true)
+            XCTAssertTrue(guardrail.evaluate(samples: [sample(105)], manualPolicyActive: true).forceAuto)
+        }
+    }
+
+    func testNonFiniteTemperaturesCountAsSensorBlindness() {
+        var guardrail = FanSafetyGuard()
+        XCTAssertTrue(guardrail.evaluate(samples: [sample(.nan), sample(.infinity)], manualPolicyActive: true).forceAuto)
+        XCTAssertTrue(guardrail.isLatched)
+        XCTAssertFalse(guardrail.evaluate(samples: [sample(90), sample(.nan)], manualPolicyActive: true).forceAuto)
+        XCTAssertFalse(guardrail.isLatched)
+    }
+
+    func testMutatingCeilingCannotDisableTheGuard() {
+        var guardrail = FanSafetyGuard()
+        guardrail.configuredCeilingCelsius = .nan
+        _ = guardrail.evaluate(samples: [sample(105)], manualPolicyActive: true)
+        XCTAssertTrue(guardrail.evaluate(samples: [sample(105)], manualPolicyActive: true).forceAuto)
+        XCTAssertEqual(guardrail.configuredCeilingCelsius, 100)
+    }
+
     func testCeilingClampAndSustainedTrip() {
         var defaultGuard = FanSafetyGuard()  // ceiling 100
         XCTAssertFalse(

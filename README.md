@@ -75,6 +75,10 @@ Each [release](https://github.com/leaperone/smctl/releases) ships a zip with `sm
 
 Charge limiting and fan control are applied by `smctld`, a root LaunchDaemon. The CLI talks to it over XPC; reading sensors needs no daemon and no root.
 
+`daemon install` copies the helper to `/Library/PrivilegedHelperTools/one.leaper.smctl.daemon`, owned by root, and restarts the service. After `brew upgrade smctl` or rebuilding from source, run `sudo smctl daemon install` again to update this protected copy. Restarting alone does not install the new binary.
+
+Foreground discharge is supervised by the daemon. Reaching the target, losing the CLI connection, or missing renewals restores adapter power. A failed restore is retried; it does not depend on the CLI running an exit handler.
+
 The Homebrew install sets up shell completions (bash/zsh/fish) and a `man smctl` page automatically.
 
 ## Safety by design

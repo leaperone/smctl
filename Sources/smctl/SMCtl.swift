@@ -1,4 +1,5 @@
 import ArgumentParser
+import Darwin
 import Foundation
 import SMCCore
 import SMCtlClient
@@ -395,17 +396,13 @@ struct Discharge: ParsableCommand {
             throw ValidationError("Discharge target must be between 0 and 100.")
         }
         let client = DaemonClient()
-        var shouldRestoreAdapter = false
-        defer {
-            if shouldRestoreAdapter {
-                _ = try? client.setAdapterEnabled(true)
-            }
-        }
-
         let initial: BatteryStatusDTO = try mapDaemonClient { try client.getBatteryStatus() }
         guard initial.adapterControlSupported else {
             print("Adapter cutoff keys are unavailable on this Mac/system; active discharge is unsupported.")
             return
+        }
+        guard initial.foregroundDischargeSupported == true else {
+            throw ValidationError("This smctld cannot safely supervise foreground discharge. Run 'sudo smctl daemon install' to update it.")
         }
         guard let charge = initial.chargePercent else {
             print("No readable battery was found; active discharge is unsupported on this Mac.")
@@ -416,8 +413,7 @@ struct Discharge: ParsableCommand {
             return
         }
 
-        try mapDaemonClient { try client.setAdapterEnabled(false) }
-        shouldRestoreAdapter = true
+        try mapDaemonClient { try client.setAdapterEnabled(false, dischargeTarget: target) }
         print("Adapter disabled for foreground discharge to \(target)%. Press Ctrl-C to restore adapter power.")
 
         while true {
@@ -435,7 +431,7 @@ struct Discharge: ParsableCommand {
             // Re-assert the cut every poll: SMC firmware can silently re-enable
             // adapter power (observed on M2 when the charging-enable key is
             // written while a cut is active), which would stall the discharge.
-            try mapDaemonClient { try client.setAdapterEnabled(false) }
+            try mapDaemonClient { try client.setAdapterEnabled(false, dischargeTarget: target) }
         }
     }
 }
@@ -679,7 +675,7 @@ struct DaemonPing: ParsableCommand {
 struct DaemonRestart: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "restart",
-        abstract: "Restart smctld so it picks up an upgraded binary (requires root)."
+        abstract: "Restart the installed helper and reload configuration (requires root)."
     )
 
     func run() throws {
@@ -747,16 +743,75 @@ struct DaemonInstall: ParsableCommand {
             throw ValidationError("daemon install must be run as root. Try: sudo smctl daemon install")
         }
 
-        let smctldPath = try Self.currentSmctldPath()
-        let plist = Self.plist(smctldPath: smctldPath)
+        let source = try Self.currentSmctldPath()
+        try Self.validateHelperDirectory(URL(fileURLWithPath: "/"))
+        try Self.validateHelperDirectory(URL(fileURLWithPath: "/Library"))
+        try Self.installHelper(from: URL(fileURLWithPath: source), to: URL(fileURLWithPath: Self.installedHelperPath))
+        let plist = try Self.plist()
         try plist.write(toFile: Self.plistPath, atomically: true, encoding: .utf8)
         try runProcess("/bin/chmod", ["0644", Self.plistPath])
         try runProcess("/usr/sbin/chown", ["root:wheel", Self.plistPath])
+        if (try? runProcess("/bin/launchctl", ["print", "system/\(SMCtlProtocolInfo.machServiceName)"])) != nil {
+            try runProcess("/bin/launchctl", ["bootout", "system/\(SMCtlProtocolInfo.machServiceName)"])
+        }
         try runProcess("/bin/launchctl", ["bootstrap", "system", Self.plistPath])
-        print("Installed smctld at \(Self.plistPath)")
+        print("Installed smctld at \(Self.installedHelperPath)")
     }
 
     static let plistPath = "/Library/LaunchDaemons/one.leaper.smctl.daemon.plist"
+    static let installedHelperPath = "/Library/PrivilegedHelperTools/one.leaper.smctl.daemon"
+
+    static func installHelper(from source: URL, to destination: URL) throws {
+        let manager = FileManager.default
+        let directory = destination.deletingLastPathComponent()
+        var info = stat()
+        if lstat(directory.path, &info) != 0 {
+            guard errno == ENOENT else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+            try manager.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o755])
+            guard lstat(directory.path, &info) == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+        }
+        try validateHelperDirectory(directory)
+        // Source ACLs can grant write access before they are cleared.
+        let stagingDirectory = directory.appendingPathComponent(".smctld-\(UUID().uuidString)")
+        try manager.createDirectory(at: stagingDirectory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        defer { try? manager.removeItem(at: stagingDirectory) }
+        let staging = stagingDirectory.appendingPathComponent("smctld")
+        try manager.copyItem(at: source.resolvingSymlinksInPath(), to: staging)
+        guard lstat(staging.path, &info) == 0, info.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else {
+            throw ValidationError("The smctld helper must be a regular file.")
+        }
+        guard let emptyACL = acl_init(0) else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+        defer { acl_free(UnsafeMutableRawPointer(emptyACL)) }
+        guard acl_set_file(staging.path, ACL_TYPE_EXTENDED, emptyACL) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        try manager.setAttributes([
+            .ownerAccountID: NSNumber(value: geteuid()),
+            .groupOwnerAccountID: NSNumber(value: geteuid() == 0 ? 0 : getegid()),
+            .posixPermissions: 0o755
+        ], ofItemAtPath: staging.path)
+        guard rename(staging.path, destination.path) == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+    }
+
+    private static func validateHelperDirectory(_ directory: URL) throws {
+        var info = stat()
+        guard lstat(directory.path, &info) == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+        guard info.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR),
+              info.st_uid == geteuid(), info.st_mode & 0o022 == 0 else {
+            throw ValidationError("Helper directory must be owned by the installing user and must not be writable by other users or groups.")
+        }
+        guard let acl = acl_get_file(directory.path, ACL_TYPE_EXTENDED) else {
+            if errno == ENOENT { return }
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        defer { acl_free(UnsafeMutableRawPointer(acl)) }
+        var entry: acl_entry_t?
+        guard acl_get_entry(acl, ACL_FIRST_ENTRY.rawValue, &entry) == -1 else {
+            throw ValidationError("Helper directory must not have extended ACLs: \(directory.path)")
+        }
+    }
 
     private static func currentSmctldPath() throws -> String {
         guard
@@ -771,31 +826,16 @@ struct DaemonInstall: ParsableCommand {
         return path
     }
 
-    private static func plist(smctldPath: String) -> String {
-        // SMAppService requires an app bundle. The CLI-only M2 milestone installs a hand-written LaunchDaemon plist.
-        """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-        <dict>
-            <key>Label</key>
-            <string>one.leaper.smctl.daemon</string>
-            <key>ProgramArguments</key>
-            <array>
-                <string>\(smctldPath)</string>
-            </array>
-            <key>MachServices</key>
-            <dict>
-                <key>one.leaper.smctl.daemon</key>
-                <true/>
-            </dict>
-            <key>KeepAlive</key>
-            <true/>
-            <key>RunAtLoad</key>
-            <true/>
-        </dict>
-        </plist>
-        """
+    static func plist() throws -> String {
+        let values: [String: Any] = [
+            "Label": SMCtlProtocolInfo.machServiceName,
+            "ProgramArguments": [installedHelperPath],
+            "MachServices": [SMCtlProtocolInfo.machServiceName: true],
+            "KeepAlive": true,
+            "RunAtLoad": true
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: values, format: .xml, options: 0)
+        return String(decoding: data, as: UTF8.self)
     }
 }
 
@@ -819,6 +859,9 @@ struct DaemonUninstall: ParsableCommand {
             if FileManager.default.fileExists(atPath: plistPath) {
                 try FileManager.default.removeItem(atPath: plistPath)
             }
+        }
+        if FileManager.default.fileExists(atPath: DaemonInstall.installedHelperPath) {
+            try FileManager.default.removeItem(atPath: DaemonInstall.installedHelperPath)
         }
         print("Uninstalled smctld and restored fans plus charging/adapter power when supported.")
     }

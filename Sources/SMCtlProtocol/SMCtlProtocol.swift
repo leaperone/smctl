@@ -97,6 +97,7 @@ public struct BatteryStatusDTO: Codable, Equatable, Sendable {
     public var timeToFullMinutes: Int?
     /// Whether maintain actively discharges down to the band (nil from older daemons).
     public var forceDischarge: Bool?
+    public var foregroundDischargeSupported: Bool?
 
     public init(
         timestamp: Date,
@@ -114,7 +115,8 @@ public struct BatteryStatusDTO: Codable, Equatable, Sendable {
         message: String?,
         timeToEmptyMinutes: Int? = nil,
         timeToFullMinutes: Int? = nil,
-        forceDischarge: Bool? = nil
+        forceDischarge: Bool? = nil,
+        foregroundDischargeSupported: Bool? = nil
     ) {
         self.timestamp = timestamp
         self.chargePercent = chargePercent
@@ -132,6 +134,7 @@ public struct BatteryStatusDTO: Codable, Equatable, Sendable {
         self.timeToEmptyMinutes = timeToEmptyMinutes
         self.timeToFullMinutes = timeToFullMinutes
         self.forceDischarge = forceDischarge
+        self.foregroundDischargeSupported = foregroundDischargeSupported
     }
 }
 
@@ -202,9 +205,11 @@ public struct SetChargeLimitRequestDTO: Codable, Equatable, Sendable {
 
 public struct SetEnabledRequestDTO: Codable, Equatable, Sendable {
     public var enabled: Bool
+    public var dischargeTarget: Int?
 
-    public init(enabled: Bool) {
+    public init(enabled: Bool, dischargeTarget: Int? = nil) {
         self.enabled = enabled
+        self.dischargeTarget = dischargeTarget
     }
 }
 
