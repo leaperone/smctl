@@ -55,7 +55,8 @@ One-shot charge up to PERCENT, then stop.
 .IR PERCENT
 .RS
 Cut adapter power and discharge down to PERCENT. Runs in the foreground;
-adapter power is restored on completion or interrupt.
+the daemon restores adapter power on completion, client disconnect, or renewal
+timeout. Failed restoration is retried.
 .RE
 .SS fan
 .B smctl fan status
@@ -103,9 +104,12 @@ Manage
 require root.
 .B uninstall
 restores system control of fans and charging before removing the daemon.
-.B restart
-reloads an upgraded binary \(em run it after every
+.B install
+updates the root-owned helper in /Library/PrivilegedHelperTools and restarts
+the service. Run it after every
 .BR "brew upgrade" .
+.B restart
+restarts the installed copy and reloads configuration; it does not copy a new binary.
 .RE
 .SH CONFIGURATION
 Policy lives in

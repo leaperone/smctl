@@ -72,8 +72,8 @@ public final class DaemonClient {
         }
     }
 
-    public func setAdapterEnabled(_ enabled: Bool) throws {
-        let data = try SMCtlProtocolCoding.encode(SetEnabledRequestDTO(enabled: enabled))
+    public func setAdapterEnabled(_ enabled: Bool, dischargeTarget: Int? = nil) throws {
+        let data = try SMCtlProtocolCoding.encode(SetEnabledRequestDTO(enabled: enabled, dischargeTarget: dischargeTarget))
         let _: EmptyResponseDTO = try call { proxy, reply in
             proxy.setAdapterEnabled(data, withReply: reply)
         }
@@ -174,14 +174,14 @@ public final class DaemonClient {
         if ping.version != SMCtlProtocolInfo.version {
             emit("""
             warning: smctl is \(SMCtlProtocolInfo.version) but the running smctld is \(ping.version).
-            Fixes in this version are NOT active until the daemon restarts:
-              sudo smctl daemon restart
+            Install this version of the protected helper and restart the daemon:
+              sudo smctl daemon install
             """)
         } else if let latest = ping.latestVersion,
                   SMCtlProtocolInfo.isVersion(latest, newerThan: SMCtlProtocolInfo.version) {
             emit("""
             note: smctl \(latest) is available (you have \(SMCtlProtocolInfo.version)). Upgrade:
-              brew upgrade smctl && sudo smctl daemon restart
+              brew upgrade smctl && sudo smctl daemon install
             """)
         }
     }

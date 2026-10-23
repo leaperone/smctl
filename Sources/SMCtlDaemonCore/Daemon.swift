@@ -297,9 +297,15 @@ enum DaemonError: Error, CustomStringConvertible {
     }
 }
 
+private enum ForegroundDischarge {
+    case active(owner: UUID, target: Int, expiresAt: TimeInterval)
+    case restoring
+}
+
 public final class SmctlDaemon: @unchecked Sendable {
     let configPath: String
     static let period: TimeInterval = 10
+    static let foregroundDischargeLease: TimeInterval = 30
 
     private let queue = DispatchQueue(label: "one.leaper.smctl.daemon.state")
     var config = DaemonConfig()
@@ -308,6 +314,8 @@ public final class SmctlDaemon: @unchecked Sendable {
     private var capabilities = Capabilities()
     var ftstGate = FtstGateManager()
     var manualFanTargets: [Int: Double] = [:]
+    private var pendingFanRestores: Set<Int> = []
+    private var foregroundDischarge: ForegroundDischarge?
     private var fanCurveEngines: [Int: FanCurveEngine] = [:]
     private var runtimeFanProfile: String?
     // Stateful: carries the safety latch across ticks; ceiling refreshed from config.
@@ -388,6 +396,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         queue.sync {
             timer = source
             fanTimer = fanSource
+            reconcileAdapterStartupLocked()
             reconcileFanStartupLocked()
         }
         startUpdateCheck()
@@ -497,6 +506,9 @@ public final class SmctlDaemon: @unchecked Sendable {
         let parsedLimit = try ChargeLimit.parse(limit)
         let effectiveForceDischarge = parsedLimit.isLimiting && forceDischarge
         try queue.sync {
+            if effectiveForceDischarge, foregroundDischarge != nil {
+                throw DaemonError.unsupported("Stop the foreground discharge before enabling force-discharge.")
+            }
             let wasForcing = config.battery.force_discharge
             config.battery.limit = limit
             config.battery.force_discharge = effectiveForceDischarge
@@ -517,21 +529,98 @@ public final class SmctlDaemon: @unchecked Sendable {
         }
     }
 
-    func setAdapterEnabled(_ enabled: Bool) throws {
+    func setAdapterEnabled(_ enabled: Bool, dischargeTarget: Int? = nil, owner: UUID? = nil, now: TimeInterval = ProcessInfo.processInfo.systemUptime) throws {
         try queue.sync {
-            try applyAdapterLocked(enabled)
+            if let target = dischargeTarget {
+                guard !enabled, (0...100).contains(target), let owner else {
+                    throw DaemonError.unsupported("Foreground discharge requires an owner and a target between 0 and 100.")
+                }
+                guard !config.battery.force_discharge else {
+                    throw DaemonError.unsupported("Stop force-discharge before starting a foreground discharge.")
+                }
+                if let foregroundDischarge {
+                    guard case .active(let currentOwner, _, _) = foregroundDischarge, currentOwner == owner else {
+                        throw DaemonError.unsupported("Another discharge is active or adapter restoration is pending.")
+                    }
+                }
+                guard let charge = readNumericLocked("BUIC"), charge.isFinite else {
+                    throw DaemonError.unsupported("No readable battery was found.")
+                }
+                guard charge > Double(target) else {
+                    try restoreForegroundDischargeLocked()
+                    return
+                }
+                foregroundDischarge = .active(owner: owner, target: target, expiresAt: now + Self.foregroundDischargeLease)
+                do {
+                    try applyAdapterLocked(false)
+                } catch {
+                    let operationError = error
+                    try? restoreForegroundDischargeLocked()
+                    throw operationError
+                }
+                return
+            }
+            if enabled, foregroundDischarge != nil {
+                try restoreForegroundDischargeLocked()
+            } else {
+                guard foregroundDischarge == nil else {
+                    throw DaemonError.unsupported("A foreground discharge already controls the adapter.")
+                }
+                try applyAdapterLocked(enabled)
+            }
             evaluateLocked()
         }
+    }
+
+    func cancelForegroundDischarge(owner: UUID) {
+        queue.async { [self] in
+            guard case .active(let currentOwner, _, _) = foregroundDischarge, currentOwner == owner else { return }
+            do {
+                try restoreForegroundDischargeLocked()
+            } catch {
+                lastError = String(describing: error)
+                logger.error("Foreground discharge restore failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    private func restoreForegroundDischargeLocked() throws {
+        foregroundDischarge = .restoring
+        try applyAdapterLocked(true)
+        foregroundDischarge = nil
+    }
+
+    func evaluateForegroundDischargeLocked(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        guard let foregroundDischarge else { return }
+        if case .active(_, let target, let expiresAt) = foregroundDischarge,
+           now < expiresAt, !config.battery.force_discharge,
+           let charge = readNumericLocked("BUIC"), charge.isFinite, charge > Double(target) {
+            do {
+                if readAdapterEnabledLocked() != false { try applyAdapterLocked(false) }
+                return
+            } catch {
+                lastError = String(describing: error)
+            }
+        }
+        do {
+            try restoreForegroundDischargeLocked()
+        } catch {
+            lastError = String(describing: error)
+            logger.error("Foreground discharge restore failed: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    func reconcileAdapterStartupLocked() {
+        guard capabilities.adapterControl != nil, !config.battery.force_discharge else { return }
+        foregroundDischarge = .restoring
+        evaluateForegroundDischargeLocked()
     }
 
     func setFanManual(index: Int, rpm: Double, force: Bool) throws {
         try queue.sync {
             try rejectIfSafetyLatchedLocked()
             let target = try normalizedFanRPM(index: index, rpm: rpm, force: force)
-            let result = try writeSMCOperationLocked {
-                try fanControllerLocked().setManual(index: index, rpm: target)
-            }
-            ftstGate.enterManual(index: index)
+            let result = try setManualFanTargetLocked(index: index, rpm: target)
             manualFanTargets[index] = target
             fanCurveEngines.removeAll()
             runtimeFanProfile = "manual"
@@ -606,6 +695,9 @@ public final class SmctlDaemon: @unchecked Sendable {
                 ?? BatteryObservation(chargePercent: 100, isChargingAllowed: false, isPluggedIn: false)
             let evaluation = sleepMachine.handle(event: event, context: SleepContext(limit: limit, observation: observation))
             do {
+                if event == .systemWillSleep, foregroundDischarge != nil {
+                    try restoreForegroundDischargeLocked()
+                }
                 try applyActionsLocked(evaluation.actions)
                 if evaluation.forcesReevaluation {
                     evaluateLocked()
@@ -807,6 +899,7 @@ public final class SmctlDaemon: @unchecked Sendable {
     /// alert engine. Alerts run even on fanless Macs (where the fan subsystem
     /// early-returns) so temperature/write-error alerts still work there.
     func tickFanAndAlertsLocked() {
+        evaluateForegroundDischargeLocked()
         let samples = temperatureSamplesLocked()
         evaluateFanSubsystemLocked(samples: samples)
         evaluateAlertsLocked(samples: samples)
@@ -817,7 +910,14 @@ public final class SmctlDaemon: @unchecked Sendable {
             return
         }
 
-        let samples = providedSamples ?? temperatureSamplesLocked()
+        for index in pendingFanRestores.sorted() {
+            do {
+                try restoreFansAutoLocked(indices: [index])
+            } catch {
+                lastError = String(describing: error)
+            }
+        }
+        let samples = (providedSamples ?? temperatureSamplesLocked()).filter { $0.celsius.isFinite }
         let profile = currentFanProfileLocked()
         // "Manual policy active" covers direct manual targets, residual Ftst/manual
         // modes, and curve profiles (which drive fans via manual mode every tick).
@@ -849,6 +949,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         guard manualPolicyActive else {
             return
         }
+        guard pendingFanRestores.isEmpty else { return }
 
         do {
             if profile == "manual" {
@@ -948,6 +1049,9 @@ public final class SmctlDaemon: @unchecked Sendable {
     }
 
     private func rejectIfSafetyLatchedLocked() throws {
+        guard pendingFanRestores.isEmpty else {
+            throw DaemonError.unsupported("Manual fan control is unavailable until pending auto restoration succeeds.")
+        }
         guard safetyGuard.isLatched else {
             return
         }
@@ -962,12 +1066,31 @@ public final class SmctlDaemon: @unchecked Sendable {
         guard !manualFanTargets.isEmpty else {
             return
         }
-        let controller = try fanControllerLocked()
         for (index, rpm) in manualFanTargets.sorted(by: { $0.key < $1.key }) {
-            _ = try writeSMCOperationLocked {
-                try controller.setManual(index: index, rpm: rpm)
+            _ = try setManualFanTargetLocked(index: index, rpm: rpm)
+        }
+    }
+
+    private func setManualFanTargetLocked(index: Int, rpm: Double) throws -> FanManualResult {
+        do {
+            let result = try writeSMCOperationLocked {
+                try fanControllerLocked().setManual(
+                    index: index,
+                    rpm: rpm,
+                    otherManualFansRemaining: ftstGate.otherManualFansRemain(afterLeaving: index)
+                )
             }
             ftstGate.enterManual(index: index)
+            return result
+        } catch {
+            manualFanTargets.removeValue(forKey: index)
+            if case FanControlError.restorationFailed = error {
+                ftstGate.enterManual(index: index)
+                pendingFanRestores.insert(index)
+            } else {
+                _ = ftstGate.leaveManual(index: index)
+            }
+            throw error
         }
     }
 
@@ -975,7 +1098,6 @@ public final class SmctlDaemon: @unchecked Sendable {
         guard !samples.isEmpty else {
             throw DaemonError.unsupported("No readable temperature sensors are available for fan profile '\(profile)'.")
         }
-        let controller = try fanControllerLocked()
         for fan in capabilities.fans {
             let maximum = readNumericLocked(fan.maximumKey) ?? 6000
             let minimum = readNumericLocked(fan.minimumKey) ?? 0
@@ -984,10 +1106,7 @@ public final class SmctlDaemon: @unchecked Sendable {
             let evaluation = try engine.evaluate(curve: curve, samples: samples, now: Date())
             fanCurveEngines[fan.index] = engine
             let target = min(maximum, max(minimum, evaluation.targetRPM))
-            _ = try writeSMCOperationLocked {
-                try controller.setManual(index: fan.index, rpm: target)
-            }
-            ftstGate.enterManual(index: fan.index)
+            _ = try setManualFanTargetLocked(index: fan.index, rpm: target)
         }
     }
 
@@ -1040,6 +1159,7 @@ public final class SmctlDaemon: @unchecked Sendable {
                 try controller.setAuto(index: index, otherManualFansRemaining: otherManual)
             }
             _ = ftstGate.leaveManual(index: index)
+            pendingFanRestores.remove(index)
             manualFanTargets.removeValue(forKey: index)
         }
         if clearPolicy {
@@ -1088,8 +1208,8 @@ public final class SmctlDaemon: @unchecked Sendable {
         guard let reader else {
             return []
         }
-        return reader.snapshot().temperatures.map {
-            FanTemperatureSample(sensor: $0.key, celsius: $0.celsius)
+        return reader.snapshot().temperatures.compactMap {
+            $0.celsius.isFinite ? FanTemperatureSample(sensor: $0.key, celsius: $0.celsius) : nil
         }
     }
 
@@ -1134,7 +1254,8 @@ public final class SmctlDaemon: @unchecked Sendable {
             message: statusMessage,
             timeToEmptyMinutes: timeEstimate.toEmpty,
             timeToFullMinutes: timeEstimate.toFull,
-            forceDischarge: config.battery.force_discharge
+            forceDischarge: config.battery.force_discharge,
+            foregroundDischargeSupported: true
         )
     }
 
@@ -1325,10 +1446,12 @@ private func powerCallback(
 final class XPCService: NSObject, SMCtlDaemonXPCProtocol {
     private let daemon: SmctlDaemon
     private weak var connection: NSXPCConnection?
+    private let owner: UUID
 
-    init(daemon: SmctlDaemon, connection: NSXPCConnection) {
+    init(daemon: SmctlDaemon, connection: NSXPCConnection, owner: UUID) {
         self.daemon = daemon
         self.connection = connection
+        self.owner = owner
     }
 
     func daemonPing(withReply reply: @escaping (Data?, String?) -> Void) {
@@ -1400,7 +1523,7 @@ final class XPCService: NSObject, SMCtlDaemonXPCProtocol {
     func setAdapterEnabled(_ requestData: Data, withReply reply: @escaping (Data?, String?) -> Void) {
         doWrite(reply) {
             let request = try SMCtlProtocolCoding.decode(SetEnabledRequestDTO.self, from: requestData)
-            try daemon.setAdapterEnabled(request.enabled)
+            try daemon.setAdapterEnabled(request.enabled, dischargeTarget: request.dischargeTarget, owner: owner)
         }
     }
 
@@ -1481,8 +1604,12 @@ public final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
     }
 
     public func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
+        let owner = UUID()
+        let daemon = self.daemon
         connection.exportedInterface = NSXPCInterface(with: SMCtlDaemonXPCProtocol.self)
-        connection.exportedObject = XPCService(daemon: daemon, connection: connection)
+        connection.exportedObject = XPCService(daemon: daemon, connection: connection, owner: owner)
+        connection.invalidationHandler = { [weak daemon] in daemon?.cancelForegroundDischarge(owner: owner) }
+        connection.interruptionHandler = { [weak daemon] in daemon?.cancelForegroundDischarge(owner: owner) }
         connection.resume()
         return true
     }

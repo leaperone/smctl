@@ -4,6 +4,7 @@ import XCTest
 @testable import SMCtlDaemonCore
 @testable import SMCCore
 import PolicyEngine
+import SMCtlProtocol
 
 final class SmctlDaemonTests: XCTestCase {
     private var configPath: String!
@@ -69,6 +70,7 @@ final class SmctlDaemonTests: XCTestCase {
         XCTAssertEqual(backend.values["F0Md"], [1])
         XCTAssertTrue(daemon.ftstGate.hasManualFans)
 
+        XCTAssertThrowsError(try daemon.setFanManual(index: 0, rpm: 2500, force: false))
         daemon.evaluateFanSubsystemLocked()
 
         XCTAssertEqual(backend.values["F0Md"], [0])
@@ -110,6 +112,126 @@ final class SmctlDaemonTests: XCTestCase {
     }
 
     // MARK: - Below-minimum gating
+
+    func testForegroundDischargeStopsAtTargetAndReassertsFirmwareReset() throws {
+        let (backend, daemon) = makeAdapterDaemon()
+        let owner = UUID()
+        let now: TimeInterval = 100
+        try daemon.setAdapterEnabled(false, dischargeTarget: 40, owner: owner, now: now)
+        XCTAssertEqual(backend.values["CHIE"], [1])
+
+        backend.values["CHIE"] = [0]
+        daemon.evaluateForegroundDischargeLocked(now: now + 1)
+        XCTAssertEqual(backend.values["CHIE"], [1])
+
+        backend.values["BUIC"] = [40]
+        daemon.evaluateForegroundDischargeLocked(now: now + 2)
+        XCTAssertEqual(backend.values["CHIE"], [0])
+        daemon.evaluateForegroundDischargeLocked(now: now + 3)
+        XCTAssertEqual(backend.values["CHIE"], [0])
+    }
+
+    func testForegroundDischargeLeaseRequiresLiveOwnerAndRenewal() throws {
+        let (backend, daemon) = makeAdapterDaemon()
+        let owner = UUID()
+        let now: TimeInterval = 100
+        try daemon.setAdapterEnabled(false, dischargeTarget: 40, owner: owner, now: now)
+        XCTAssertThrowsError(try daemon.setAdapterEnabled(false, dischargeTarget: 40, owner: UUID(), now: now))
+        daemon.cancelForegroundDischarge(owner: UUID())
+        _ = daemon.daemonStatus()
+        XCTAssertEqual(backend.values["CHIE"], [1])
+
+        try daemon.setAdapterEnabled(false, dischargeTarget: 40, owner: owner, now: now + 20)
+        daemon.evaluateForegroundDischargeLocked(now: now + 31)
+        XCTAssertEqual(backend.values["CHIE"], [1])
+        daemon.evaluateForegroundDischargeLocked(now: now + 51)
+        XCTAssertEqual(backend.values["CHIE"], [0])
+    }
+
+    func testForegroundDischargeRetriesFailedDisconnectRestore() throws {
+        let (backend, daemon) = makeAdapterDaemon()
+        let owner = UUID()
+        try daemon.setAdapterEnabled(false, dischargeTarget: 40, owner: owner)
+        backend.failingWriteKeys = ["CHIE"]
+
+        daemon.cancelForegroundDischarge(owner: owner)
+        _ = daemon.daemonStatus()
+        XCTAssertEqual(backend.values["CHIE"], [1])
+        XCTAssertThrowsError(try daemon.setAdapterEnabled(false, dischargeTarget: 40, owner: UUID()))
+
+        backend.failingWriteKeys = []
+        daemon.tickFanAndAlertsLocked()
+        XCTAssertEqual(backend.values["CHIE"], [0])
+        try daemon.setAdapterEnabled(false, dischargeTarget: 40, owner: UUID())
+        XCTAssertEqual(backend.values["CHIE"], [1])
+    }
+
+    func testForegroundDischargeRestoresAfterUnreadableBatteryAndPartialCutFailure() throws {
+        let (backend, daemon) = makeAdapterDaemon()
+        backend.adapterCutFailuresAfterWrite = 3
+        XCTAssertThrowsError(try daemon.setAdapterEnabled(false, dischargeTarget: 40, owner: UUID()))
+        XCTAssertEqual(backend.values["CHIE"], [0])
+
+        try daemon.setAdapterEnabled(false, dischargeTarget: 40, owner: UUID())
+        backend.values.removeValue(forKey: "BUIC")
+        daemon.tickFanAndAlertsLocked()
+        XCTAssertEqual(backend.values["CHIE"], [0])
+    }
+
+    func testStartupRestoresOrphanAdapterCutButPreservesForceDischarge() throws {
+        let (backend, daemon) = makeAdapterDaemon()
+        backend.values["CHIE"] = [1]
+        daemon.reconcileAdapterStartupLocked()
+        XCTAssertEqual(backend.values["CHIE"], [0])
+
+        try daemon.setChargeLimit("70-80", forceDischarge: true)
+        XCTAssertEqual(backend.values["CHIE"], [1])
+        daemon.reconcileAdapterStartupLocked()
+        XCTAssertEqual(backend.values["CHIE"], [1])
+        XCTAssertThrowsError(try daemon.setAdapterEnabled(false, dischargeTarget: 40, owner: UUID()))
+    }
+
+    func testForegroundDischargeRejectsInvalidRequestsBeforeWriting() throws {
+        let (backend, daemon) = makeAdapterDaemon()
+        for target in [-1, 101] {
+            XCTAssertThrowsError(try daemon.setAdapterEnabled(false, dischargeTarget: target, owner: UUID()))
+        }
+        XCTAssertThrowsError(try daemon.setAdapterEnabled(true, dischargeTarget: 40, owner: UUID()))
+        XCTAssertThrowsError(try daemon.setAdapterEnabled(false, dischargeTarget: 40))
+        XCTAssertEqual(backend.values["CHIE"], [0])
+        XCTAssertEqual(daemon.batteryStatus().foregroundDischargeSupported, true)
+    }
+
+    func testXPCDisconnectRestoresForegroundDischarge() throws {
+        let (backend, daemon) = makeAdapterDaemon()
+        let listener = NSXPCListener.anonymous()
+        let delegate = ListenerDelegate(daemon: daemon)
+        listener.delegate = delegate
+        listener.resume()
+        defer { listener.invalidate() }
+        let connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
+        connection.remoteObjectInterface = NSXPCInterface(with: SMCtlDaemonXPCProtocol.self)
+        connection.resume()
+        let started = expectation(description: "discharge started through XPC")
+        let proxy = try XCTUnwrap(connection.remoteObjectProxyWithErrorHandler { error in
+            XCTFail("XPC failed: \(error)")
+            started.fulfill()
+        } as? SMCtlDaemonXPCProtocol)
+        let request = try SMCtlProtocolCoding.encode(SetEnabledRequestDTO(enabled: false, dischargeTarget: 40))
+        proxy.setAdapterEnabled(request) { _, error in
+            XCTAssertNil(error)
+            started.fulfill()
+        }
+        wait(for: [started], timeout: 5)
+        XCTAssertEqual(backend.values["CHIE"], [1])
+
+        connection.invalidate()
+        let deadline = Date().addingTimeInterval(5)
+        while backend.values["CHIE"] != [0], Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        XCTAssertEqual(backend.values["CHIE"], [0])
+    }
 
     func testBelowMinimumIsClampedWithoutForce() throws {
         let backend = RecordingBackend()
@@ -460,6 +582,15 @@ final class SmctlDaemonTests: XCTestCase {
 
     // MARK: - Helpers
 
+    private func makeAdapterDaemon() -> (RecordingBackend, SmctlDaemon) {
+        let backend = RecordingBackend()
+        backend.values["BUIC"] = [85]
+        backend.values["CH0B"] = [0]
+        backend.values["CH0C"] = [0]
+        backend.values["CHIE"] = [0]
+        return (backend, makeDaemon(backend: backend, capabilities: .oneFanWithAdapter))
+    }
+
     private func makeDaemon(backend: RecordingBackend, capabilities: Capabilities) -> SmctlDaemon {
         // Seed the fan keys so mode/target writes pass the key-info size check.
         backend.values["F0Md"] = backend.values["F0Md"] ?? [0]
@@ -515,6 +646,16 @@ final class AlertActionRunnerTests: XCTestCase {
 }
 
 private extension Capabilities {
+    static var oneFanWithAdapter: Capabilities {
+        var capabilities = oneFanWithCharging
+        capabilities.adapterControl = SMCControlKeyGroup(
+            identifier: "CHIE", statusKey: "CHIE", requiredKeys: ["CHIE"],
+            enableWrites: [SMCKeyWrite(key: "CHIE", bytes: [0])],
+            disableWrites: [SMCKeyWrite(key: "CHIE", bytes: [1])]
+        )
+        return capabilities
+    }
+
     static var oneFan: Capabilities {
         Capabilities(
             fans: [FanCapability(
@@ -546,10 +687,16 @@ private extension Capabilities {
 /// Mock SMC backend: key/value store for reads, append log for writes.
 /// Writes apply immediately (no async-settle simulation needed at this layer).
 private final class RecordingBackend: SMCWriteBackend {
-    var values: [String: [UInt8]] = [:]
+    private let lock = NSLock()
+    private var storedValues: [String: [UInt8]] = [:]
+    var values: [String: [UInt8]] {
+        get { lock.withLock { storedValues } }
+        set { lock.withLock { storedValues = newValue } }
+    }
     var writes: [(key: String, bytes: [UInt8])] = []
     var failingWriteKeys: Set<String> = []
     var failingAutoWrites = 0
+    var adapterCutFailuresAfterWrite = 0
 
     func readKeyInfo(_ key: String) throws -> SMCKeyInfo {
         guard let bytes = values[key] else {
@@ -582,5 +729,9 @@ private final class RecordingBackend: SMCWriteBackend {
         }
         writes.append((key, bytes))
         values[key] = bytes
+        if key == "CHIE", bytes == [1], adapterCutFailuresAfterWrite > 0 {
+            adapterCutFailuresAfterWrite -= 1
+            throw SMCError.badCommand
+        }
     }
 }

@@ -15,6 +15,7 @@ public enum FanControlError: Error, Equatable, CustomStringConvertible {
     case unsupported(String)
     case missingFan(Int)
     case missingModeKey(Int)
+    case restorationFailed(operation: String, restoration: String)
 
     public var description: String {
         switch self {
@@ -24,6 +25,8 @@ public enum FanControlError: Error, Equatable, CustomStringConvertible {
             return "Fan \(index) is not available."
         case .missingModeKey(let index):
             return "Fan \(index) has no readable mode key; manual fan control is unsupported."
+        case .restorationFailed(let operation, let restoration):
+            return "Manual fan operation failed: \(operation). Restoring auto also failed: \(restoration)"
         }
     }
 }
@@ -144,24 +147,46 @@ public struct FanController {
     public func setManual(
         index: Int,
         rpm: Double,
-        timing: FanUnlockTiming = .default
+        timing: FanUnlockTiming = .default,
+        otherManualFansRemaining: Bool = false
     ) throws -> FanManualResult {
         let fan = try fan(index)
-        let unlockPath = try unlockManualMode(fan: fan, timing: timing)
-        try backend.writeKey(
-            fan.targetKey,
-            bytes: Self.float32LittleEndianBytes(Float(rpm)),
-            retryPolicy: Self.singleAttemptRetryPolicy
-        )
-        return FanManualResult(index: index, requestedRPM: rpm, unlockPath: unlockPath)
+        guard fan.modeKey != nil else { throw FanControlError.missingModeKey(index) }
+        do {
+            let unlockPath = try unlockManualMode(fan: fan, timing: timing)
+            try backend.writeKey(
+                fan.targetKey,
+                bytes: Self.float32LittleEndianBytes(Float(rpm)),
+                retryPolicy: Self.singleAttemptRetryPolicy
+            )
+            return FanManualResult(index: index, requestedRPM: rpm, unlockPath: unlockPath)
+        } catch {
+            try restoreAfterManualFailure(index: index, otherManualFansRemaining: otherManualFansRemaining, operationError: error)
+        }
     }
 
     @discardableResult
     public func unlockManualMode(
         index: Int,
-        timing: FanUnlockTiming = .default
+        timing: FanUnlockTiming = .default,
+        otherManualFansRemaining: Bool = false
     ) throws -> FanUnlockPath {
-        try unlockManualMode(fan: fan(index), timing: timing)
+        let fan = try fan(index)
+        guard fan.modeKey != nil else { throw FanControlError.missingModeKey(index) }
+        do {
+            return try unlockManualMode(fan: fan, timing: timing)
+        } catch {
+            try restoreAfterManualFailure(index: index, otherManualFansRemaining: otherManualFansRemaining, operationError: error)
+        }
+    }
+
+    private func restoreAfterManualFailure(index: Int, otherManualFansRemaining: Bool, operationError: Error) throws -> Never {
+        do {
+            try setAuto(index: index, otherManualFansRemaining: otherManualFansRemaining)
+        } catch {
+            throw FanControlError.restorationFailed(operation: String(describing: operationError), restoration: String(describing: error))
+        }
+        throw operationError
     }
 
     public func setAuto(index: Int, otherManualFansRemaining: Bool) throws {

@@ -73,6 +73,10 @@ $ sudo .build/release/smctl daemon install
 
 充电限制和风扇控制由 root LaunchDaemon `smctld` 执行，CLI 通过 XPC 与之通信；只读传感器不需要 daemon 也不需要 root。
 
+`daemon install` 会将 helper 复制到 root 拥有的 `/Library/PrivilegedHelperTools/one.leaper.smctl.daemon`，并重启服务。执行 `brew upgrade smctl` 或从源码重新构建后，需要再次运行 `sudo smctl daemon install` 更新受保护的副本，仅 restart 不会更新二进制。
+
+前台放电由 daemon 监督。达到目标、CLI 断连或续约超时后，daemon 恢复适配器供电；恢复失败会继续重试，不依赖 CLI 的退出钩子。
+
 Homebrew 安装会自动配置 shell 补全（bash/zsh/fish）和 `man smctl` 手册页。
 
 ## 安全设计

@@ -19,6 +19,14 @@ final class FanSafetyGuardTests: XCTestCase {
         XCTAssertFalse(guardrail.isLatched)
     }
 
+    func testMutatingCeilingCannotDisableTheGuard() {
+        var guardrail = FanSafetyGuard()
+        guardrail.configuredCeilingCelsius = .nan
+        _ = guardrail.evaluate(samples: [sample(105)], manualPolicyActive: true)
+        XCTAssertTrue(guardrail.evaluate(samples: [sample(105)], manualPolicyActive: true).forceAuto)
+        XCTAssertEqual(guardrail.configuredCeilingCelsius, 100)
+    }
+
     func testCeilingClampAndSustainedTrip() {
         var defaultGuard = FanSafetyGuard()  // ceiling 100
         XCTAssertFalse(

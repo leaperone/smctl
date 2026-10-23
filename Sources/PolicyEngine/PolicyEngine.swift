@@ -572,11 +572,7 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
     private var consecutiveOverCeiling: Int
 
     public init(configuredCeilingCelsius: Double = Self.defaultCeilingCelsius, isLatched: Bool = false) {
-        if configuredCeilingCelsius <= 0 {
-            self.configuredCeilingCelsius = Self.defaultCeilingCelsius
-        } else {
-            self.configuredCeilingCelsius = min(configuredCeilingCelsius, Self.hardMaximumCeilingCelsius)
-        }
+        self.configuredCeilingCelsius = Self.normalizedCeiling(configuredCeilingCelsius)
         self.isLatched = isLatched
         self.consecutiveOverCeiling = 0
     }
@@ -585,6 +581,8 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
     /// guard is the only thermal floor (thermalmonitord is hands-off), so *no readable
     /// temperature* counts as unsafe — blind manual control is never allowed.
     public mutating func evaluate(samples: [FanTemperatureSample], manualPolicyActive: Bool) -> FanSafetyDecision {
+        configuredCeilingCelsius = Self.normalizedCeiling(configuredCeilingCelsius)
+        let samples = samples.filter { $0.celsius.isFinite }
         // Latch release requires credible readings comfortably below each sensor's
         // own effective ceiling. Hotspot-class Tp* readings use a higher ceiling
         // than board/skin/proximity sensors.
@@ -646,6 +644,10 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
             configuredCeilingCelsius + Self.hotSpotAllowanceCelsius,
             Self.hotSpotHardMaximumCeilingCelsius
         )
+    }
+
+    private static func normalizedCeiling(_ value: Double) -> Double {
+        value.isFinite && value > 0 ? min(value, hardMaximumCeilingCelsius) : defaultCeilingCelsius
     }
 }
 

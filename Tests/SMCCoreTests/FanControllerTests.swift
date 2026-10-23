@@ -77,6 +77,19 @@ final class FanControllerTests: XCTestCase {
         XCTAssertEqual(backend.uint8Value("Ftst"), 0)
     }
 
+    func testTargetFailureKeepsFtstForOtherManualFan() {
+        let backend = MockFanBackend()
+        backend.installTwoFans(ftst: true)
+        backend.failingWriteKeys = ["F0Tg"]
+        let controller = FanController(backend: backend, capabilities: twoFanCapabilities(ftst: true))
+
+        XCTAssertThrowsError(try controller.setManual(index: 0, rpm: 2400, timing: .test, otherManualFansRemaining: true))
+
+        XCTAssertEqual(backend.uint8Value("F0Md"), 0)
+        XCTAssertEqual(backend.uint8Value("F1Md"), 1)
+        XCTAssertEqual(backend.uint8Value("Ftst"), 1)
+    }
+
     private func capabilities(ftst: Bool) -> Capabilities {
         Capabilities(
             fans: [
