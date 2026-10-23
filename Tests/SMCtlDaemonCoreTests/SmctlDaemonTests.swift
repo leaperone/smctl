@@ -166,6 +166,25 @@ final class SmctlDaemonTests: XCTestCase {
         XCTAssertEqual(backend.values["CHIE"], [1])
     }
 
+    func testCompletedOwnersDisconnectDoesNotStopTheNextDischarge() throws {
+        let (backend, daemon) = makeAdapterDaemon()
+        let firstOwner = UUID()
+        let secondOwner = UUID()
+        try daemon.setAdapterEnabled(false, dischargeTarget: 40, owner: firstOwner)
+        backend.values["BUIC"] = [40]
+        daemon.tickFanAndAlertsLocked()
+        XCTAssertEqual(backend.values["CHIE"], [0])
+
+        try daemon.setAdapterEnabled(false, dischargeTarget: 30, owner: secondOwner)
+        daemon.cancelForegroundDischarge(owner: firstOwner)
+        _ = daemon.daemonStatus()
+        XCTAssertEqual(backend.values["CHIE"], [1])
+
+        daemon.cancelForegroundDischarge(owner: secondOwner)
+        _ = daemon.daemonStatus()
+        XCTAssertEqual(backend.values["CHIE"], [0])
+    }
+
     func testForegroundDischargeRestoresAfterUnreadableBatteryAndPartialCutFailure() throws {
         let (backend, daemon) = makeAdapterDaemon()
         backend.adapterCutFailuresAfterWrite = 3
@@ -578,6 +597,22 @@ final class SmctlDaemonTests: XCTestCase {
         )
         let reported = try XCTUnwrap(status.lastError, "config parse failure must surface in status")
         XCTAssertTrue(reported.contains("failed to parse"), "status should explain the failure: \(reported)")
+    }
+
+    func testNanTomlCeilingStillRestoresOverheatedManualFan() throws {
+        try "[safety]\ntemp_ceiling = nan\n".write(toFile: configPath, atomically: true, encoding: .utf8)
+        let backend = RecordingBackend()
+        let daemon = makeDaemon(backend: backend, capabilities: .oneFan)
+        XCTAssertTrue(daemon.config.safety.temp_ceiling.isNaN)
+        try daemon.setFanManual(index: 0, rpm: 2000, force: false)
+        let samples = [FanTemperatureSample(sensor: "TC0P", celsius: 105)]
+
+        daemon.evaluateFanSubsystemLocked(samples: samples)
+        daemon.evaluateFanSubsystemLocked(samples: samples)
+
+        XCTAssertTrue(daemon.safetyGuard.isLatched)
+        XCTAssertEqual(backend.values["F0Md"], [0])
+        XCTAssertEqual(daemon.safetyGuard.configuredCeilingCelsius, 100)
     }
 
     // MARK: - Helpers

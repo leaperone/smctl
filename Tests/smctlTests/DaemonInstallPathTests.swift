@@ -13,6 +13,10 @@ final class DaemonInstallPathTests: XCTestCase {
         let destination = root.appendingPathComponent("protected/smctld")
         try Data("original helper".utf8).write(to: source)
         try addACL("everyone allow write,append,writeattr,writeextattr", to: source)
+        let sourceACL = try XCTUnwrap(acl_get_file(source.path, ACL_TYPE_EXTENDED))
+        defer { acl_free(UnsafeMutableRawPointer(sourceACL)) }
+        var sourceEntry: acl_entry_t?
+        XCTAssertEqual(acl_get_entry(sourceACL, ACL_FIRST_ENTRY.rawValue, &sourceEntry), 0)
         try manager.createSymbolicLink(at: link, withDestinationURL: source)
 
         try DaemonInstall.installHelper(from: link, to: destination)
@@ -24,10 +28,13 @@ final class DaemonInstallPathTests: XCTestCase {
         XCTAssertEqual(info.st_mode & mode_t(S_IFMT), mode_t(S_IFREG))
         XCTAssertEqual(info.st_mode & 0o777, 0o755)
         XCTAssertEqual(info.st_uid, geteuid())
-        let acl = try XCTUnwrap(acl_get_file(destination.path, ACL_TYPE_EXTENDED))
-        defer { acl_free(UnsafeMutableRawPointer(acl)) }
-        var entry: acl_entry_t?
-        XCTAssertEqual(acl_get_entry(acl, ACL_FIRST_ENTRY.rawValue, &entry), -1, "the protected copy must not retain source ACLs")
+        if let acl = acl_get_file(destination.path, ACL_TYPE_EXTENDED) {
+            defer { acl_free(UnsafeMutableRawPointer(acl)) }
+            var entry: acl_entry_t?
+            XCTAssertEqual(acl_get_entry(acl, ACL_FIRST_ENTRY.rawValue, &entry), -1, "the protected copy must not retain source ACLs")
+        } else {
+            XCTAssertEqual(errno, ENOENT)
+        }
 
         try DaemonInstall.installHelper(from: link, to: destination)
         XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "replaced source")
