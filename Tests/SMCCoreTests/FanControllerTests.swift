@@ -46,9 +46,21 @@ final class FanControllerTests: XCTestCase {
                 return
             }
         }
-        XCTAssertEqual(backend.uint8Value("Ftst"), 1)
-        XCTAssertEqual(backend.uint8Value("F0Md"), 3)
+        XCTAssertEqual(backend.uint8Value("Ftst"), 0)
+        XCTAssertEqual(backend.uint8Value("F0Md"), 0)
         XCTAssertGreaterThanOrEqual(clock.sleeps.count, 4)
+    }
+
+    func testTargetWriteFailureRestoresAuto() {
+        let backend = MockFanBackend()
+        backend.installSingleFan(ftst: false, mode: 0)
+        backend.failingWriteKeys = ["F0Tg"]
+        let controller = FanController(backend: backend, capabilities: capabilities(ftst: false))
+
+        XCTAssertThrowsError(try controller.setManual(index: 0, rpm: 2400, timing: .test))
+
+        XCTAssertEqual(backend.uint8Value("F0Md"), 0)
+        XCTAssertEqual(backend.floatValue("F0Tg"), 1800)
     }
 
     func testSetAutoClearsFtstOnlyWhenLastManualFanLeaves() throws {
@@ -115,6 +127,7 @@ private final class MockFanBackend: SMCWriteBackend {
     }
 
     var values: [String: StoredValue] = [:]
+    var failingWriteKeys: Set<String> = []
     var modeFailuresBeforeSuccess = 0
     private var modeWriteAttempts = 0
 
@@ -167,6 +180,7 @@ private final class MockFanBackend: SMCWriteBackend {
     }
 
     func writeRawValue(_ key: String, bytes: [UInt8]) throws {
+        if failingWriteKeys.contains(key) { throw SMCError.badCommand }
         if key.hasSuffix("Md"), bytes == [1] {
             modeWriteAttempts += 1
             if modeWriteAttempts <= modeFailuresBeforeSuccess {

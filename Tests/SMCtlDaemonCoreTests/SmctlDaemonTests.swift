@@ -59,6 +59,22 @@ final class SmctlDaemonTests: XCTestCase {
 
     // MARK: - Startup reconciliation
 
+    func testFailedManualRestoreRemainsTrackedAndRetries() throws {
+        let backend = RecordingBackend()
+        let daemon = makeDaemon(backend: backend, capabilities: .oneFan)
+        backend.failingWriteKeys = ["F0Tg"]
+        backend.failingAutoWrites = 1
+
+        XCTAssertThrowsError(try daemon.setFanManual(index: 0, rpm: 2000, force: false))
+        XCTAssertEqual(backend.values["F0Md"], [1])
+        XCTAssertTrue(daemon.ftstGate.hasManualFans)
+
+        daemon.evaluateFanSubsystemLocked()
+
+        XCTAssertEqual(backend.values["F0Md"], [0])
+        XCTAssertFalse(daemon.ftstGate.hasManualFans)
+    }
+
     func testStartupReconciliationRestoresCrashResidue() {
         // SMC reports a fan stuck in manual mode but the daemon has no local policy:
         // startup must restore auto.
@@ -533,6 +549,7 @@ private final class RecordingBackend: SMCWriteBackend {
     var values: [String: [UInt8]] = [:]
     var writes: [(key: String, bytes: [UInt8])] = []
     var failingWriteKeys: Set<String> = []
+    var failingAutoWrites = 0
 
     func readKeyInfo(_ key: String) throws -> SMCKeyInfo {
         guard let bytes = values[key] else {
@@ -556,6 +573,10 @@ private final class RecordingBackend: SMCWriteBackend {
     }
 
     func writeRawValue(_ key: String, bytes: [UInt8]) throws {
+        if key.hasSuffix("Md"), bytes == [0], failingAutoWrites > 0 {
+            failingAutoWrites -= 1
+            throw SMCError.badCommand
+        }
         if failingWriteKeys.contains(key) {
             throw SMCError.badCommand
         }
