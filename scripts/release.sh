@@ -11,7 +11,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 IDENTITY="${SIGN_IDENTITY:-Developer ID Application: Zhuhai Zhiwei Network Technology Co., Ltd. (5UAHRS482C)}"
-VERSION=$(.build/release/smctl --version 2>/dev/null || true)
 
 echo "==> swift build -c release"
 swift build -c release

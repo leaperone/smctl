@@ -100,26 +100,24 @@ struct SentryConfig: Codable, Equatable, Sendable {
 struct BatteryConfig: Codable, Equatable, Sendable {
     var limit: String
     var sleep_policy: String
-    var magsafe_led: Bool
     /// When true, maintain actively discharges down to the band by cutting
     /// adapter power while above the upper bound (unreliable in clamshell mode).
     var force_discharge: Bool
 
-    init(limit: String = "100", sleep_policy: String = "strict", magsafe_led: Bool = true, force_discharge: Bool = false) {
+    init(limit: String = "100", sleep_policy: String = "strict", force_discharge: Bool = false) {
         self.limit = limit
         self.sleep_policy = sleep_policy
-        self.magsafe_led = magsafe_led
         self.force_discharge = force_discharge
     }
 
     // Defensive decoding: missing keys fall back to defaults. Synthesized decoding
     // would reject any hand-edited (or older-version) config and silently reset
     // EVERYTHING to defaults via loadConfig's catch — losing the user's policy.
+    // Unknown keys (including the retired `magsafe_led`) are simply ignored.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         limit = try container.decodeIfPresent(String.self, forKey: .limit) ?? "100"
         sleep_policy = try container.decodeIfPresent(String.self, forKey: .sleep_policy) ?? "strict"
-        magsafe_led = try container.decodeIfPresent(Bool.self, forKey: .magsafe_led) ?? true
         force_discharge = try container.decodeIfPresent(Bool.self, forKey: .force_discharge) ?? false
     }
 }
@@ -297,6 +295,16 @@ enum DaemonError: Error, CustomStringConvertible {
     }
 }
 
+/// Wraps a daemon status message so it can be reported through the `Error`-based
+/// Sentry path without pretending it was thrown.
+private struct DaemonMessageError: Error, CustomStringConvertible {
+    let description: String
+
+    init(_ description: String) {
+        self.description = description
+    }
+}
+
 private enum ForegroundDischarge {
     case active(owner: UUID, target: Int, expiresAt: TimeInterval)
     case restoring
@@ -306,6 +314,7 @@ public final class SmctlDaemon: @unchecked Sendable {
     let configPath: String
     static let period: TimeInterval = 10
     static let foregroundDischargeLease: TimeInterval = 30
+    static let fanUnlockBackoff: TimeInterval = 30
 
     private let queue = DispatchQueue(label: "one.leaper.smctl.daemon.state")
     var config = DaemonConfig()
@@ -315,6 +324,10 @@ public final class SmctlDaemon: @unchecked Sendable {
     var ftstGate = FtstGateManager()
     var manualFanTargets: [Int: Double] = [:]
     private var pendingFanRestores: Set<Int> = []
+    /// Per-fan retry gate after a failed manual operation. Prevents the 1 Hz policy loop
+    /// from re-entering the multi-second FTST retry loop (and blocking the state queue)
+    /// on every single tick while the SMC keeps rejecting the mode write.
+    private var fanUnlockBackoffUntil: [Int: Date] = [:]
     private var foregroundDischarge: ForegroundDischarge?
     private var fanCurveEngines: [Int: FanCurveEngine] = [:]
     private var runtimeFanProfile: String?
@@ -578,8 +591,7 @@ public final class SmctlDaemon: @unchecked Sendable {
             do {
                 try restoreForegroundDischargeLocked()
             } catch {
-                lastError = String(describing: error)
-                logger.error("Foreground discharge restore failed: \(String(describing: error), privacy: .public)")
+                recordErrorLocked(error, context: "Foreground discharge restore failed")
             }
         }
     }
@@ -605,8 +617,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         do {
             try restoreForegroundDischargeLocked()
         } catch {
-            lastError = String(describing: error)
-            logger.error("Foreground discharge restore failed: \(String(describing: error), privacy: .public)")
+            recordErrorLocked(error, context: "Foreground discharge restore failed")
         }
     }
 
@@ -619,6 +630,11 @@ public final class SmctlDaemon: @unchecked Sendable {
     func setFanManual(index: Int, rpm: Double, force: Bool) throws {
         try queue.sync {
             try rejectIfSafetyLatchedLocked()
+            if isFanUnlockBackingOff(index) {
+                throw DaemonError.unsupported(
+                    "Fan \(index) manual control is retrying after a recent failure; try again in a few seconds."
+                )
+            }
             let target = try normalizedFanRPM(index: index, rpm: rpm, force: force)
             let result = try setManualFanTargetLocked(index: index, rpm: target)
             manualFanTargets[index] = target
@@ -630,6 +646,15 @@ public final class SmctlDaemon: @unchecked Sendable {
 
     func setFanAuto(index: Int?) throws {
         try queue.sync {
+            // A curve profile drives every fan on every tick. Restoring just one fan
+            // to auto would be undone within a second, so reject it explicitly instead
+            // of printing a success message that is not true.
+            if let index, Self.isCurveProfile(currentFanProfileLocked()) {
+                throw DaemonError.unsupported(
+                    "Fan profile '\(currentFanProfileLocked())' drives every fan and would re-assert manual control immediately. "
+                        + "Run 'smctl fan profile auto' to leave the curve before restoring fan \(index)."
+                )
+            }
             try restoreFansAutoLocked(indices: index.map { [$0] } ?? capabilities.fans.map(\.index))
             if index == nil {
                 config.fan.profile = "auto"
@@ -706,9 +731,7 @@ public final class SmctlDaemon: @unchecked Sendable {
                     }
                 }
             } catch {
-                lastError = String(describing: error)
-                logger.error("Sleep event handling failed: \(String(describing: error), privacy: .public)")
-                SentryReporter.capture(error, context: "Sleep event handling failed")
+                recordErrorLocked(error, context: "Sleep event handling failed")
             }
             return evaluation
         }
@@ -727,7 +750,10 @@ public final class SmctlDaemon: @unchecked Sendable {
     func evaluateLocked() {
         guard let observation = currentObservationLocked() else {
             lastEvaluation = Date()
-            lastError = "No readable battery charge/charging state was found on this Mac."
+            recordErrorLocked(
+                "No readable battery charge/charging state was found on this Mac.",
+                context: "Battery observation unavailable"
+            )
             return
         }
         let now = Date()
@@ -744,10 +770,28 @@ public final class SmctlDaemon: @unchecked Sendable {
             lastError = nil
         } catch {
             lastEvaluation = now
-            lastError = String(describing: error)
-            logger.error("Battery policy evaluation failed: \(String(describing: error), privacy: .public)")
-            SentryReporter.capture(error, context: "Battery policy evaluation failed")
+            recordErrorLocked(error, context: "Battery policy evaluation failed")
         }
+    }
+
+    /// Record a failure once per distinct message.
+    ///
+    /// These paths run on the 1 Hz / 10 s timers and are retried on every tick. Logging
+    /// and reporting the same error each time floods both the unified log and Sentry
+    /// (and hides a *new* failure in the noise). A changed message is always reported.
+    @discardableResult
+    private func recordErrorLocked(_ error: Error, context: String) -> Bool {
+        return recordErrorLocked(String(describing: error), context: context)
+    }
+
+    @discardableResult
+    private func recordErrorLocked(_ message: String, context: String) -> Bool {
+        let isNew = lastError != message
+        lastError = message
+        guard isNew else { return false }
+        logger.error("\(context, privacy: .public): \(message, privacy: .public)")
+        SentryReporter.capture(DaemonMessageError(message), context: context)
+        return true
     }
 
     private func currentChargeLimitLocked() -> ChargeLimit {
@@ -914,7 +958,7 @@ public final class SmctlDaemon: @unchecked Sendable {
             do {
                 try restoreFansAutoLocked(indices: [index])
             } catch {
-                lastError = String(describing: error)
+                recordErrorLocked(error, context: "Pending fan restore failed")
             }
         }
         let samples = (providedSamples ?? temperatureSamplesLocked()).filter { $0.celsius.isFinite }
@@ -923,7 +967,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         // modes, and curve profiles (which drive fans via manual mode every tick).
         let manualPolicyActive = ftstGate.hasManualFans
             || !manualFanTargets.isEmpty
-            || (profile != "auto" && profile != "manual")
+            || Self.isCurveProfile(profile)
 
         // The guard is stateful (latch); it must be evaluated every tick — including
         // with manualPolicyActive == false — so the latch can release after cooling.
@@ -939,9 +983,7 @@ public final class SmctlDaemon: @unchecked Sendable {
                 runtimeFanProfile = nil
                 try Self.writeConfig(config, path: configPath)
             } catch {
-                lastError = String(describing: error)
-                logger.error("Fan safety restore failed: \(String(describing: error), privacy: .public)")
-                SentryReporter.capture(error, context: "Fan safety restore failed")
+                recordErrorLocked(error, context: "Fan safety restore failed")
             }
             return
         }
@@ -958,9 +1000,7 @@ public final class SmctlDaemon: @unchecked Sendable {
                 try evaluateFanProfileLocked(profile: profile, samples: samples)
             }
         } catch {
-            lastError = String(describing: error)
-            logger.error("Fan policy evaluation failed: \(String(describing: error), privacy: .public)")
-            SentryReporter.capture(error, context: "Fan policy evaluation failed")
+            recordErrorLocked(error, context: "Fan policy evaluation failed")
         }
     }
 
@@ -1067,6 +1107,7 @@ public final class SmctlDaemon: @unchecked Sendable {
             return
         }
         for (index, rpm) in manualFanTargets.sorted(by: { $0.key < $1.key }) {
+            guard !isFanUnlockBackingOff(index) else { continue }
             _ = try setManualFanTargetLocked(index: index, rpm: rpm)
         }
     }
@@ -1081,6 +1122,7 @@ public final class SmctlDaemon: @unchecked Sendable {
                 )
             }
             ftstGate.enterManual(index: index)
+            fanUnlockBackoffUntil.removeValue(forKey: index)
             return result
         } catch {
             manualFanTargets.removeValue(forKey: index)
@@ -1090,8 +1132,20 @@ public final class SmctlDaemon: @unchecked Sendable {
             } else {
                 _ = ftstGate.leaveManual(index: index)
             }
+            fanUnlockBackoffUntil[index] = Date().addingTimeInterval(Self.fanUnlockBackoff)
             throw error
         }
+    }
+
+    /// True while a fan is inside its post-unlock-failure retry gate. Expired gates are
+    /// cleared so the next tick tries again.
+    private func isFanUnlockBackingOff(_ index: Int) -> Bool {
+        guard let retryAt = fanUnlockBackoffUntil[index] else { return false }
+        if Date() >= retryAt {
+            fanUnlockBackoffUntil.removeValue(forKey: index)
+            return false
+        }
+        return true
     }
 
     private func evaluateFanProfileLocked(profile: String, samples: [FanTemperatureSample]) throws {
@@ -1099,6 +1153,7 @@ public final class SmctlDaemon: @unchecked Sendable {
             throw DaemonError.unsupported("No readable temperature sensors are available for fan profile '\(profile)'.")
         }
         for fan in capabilities.fans {
+            guard !isFanUnlockBackingOff(fan.index) else { continue }
             let maximum = readNumericLocked(fan.maximumKey) ?? 6000
             let minimum = readNumericLocked(fan.minimumKey) ?? 0
             let curve = try curveForProfileLocked(profile, maximumRPM: maximum)
@@ -1160,6 +1215,7 @@ public final class SmctlDaemon: @unchecked Sendable {
             }
             _ = ftstGate.leaveManual(index: index)
             pendingFanRestores.remove(index)
+            fanUnlockBackoffUntil.removeValue(forKey: index)
             manualFanTargets.removeValue(forKey: index)
         }
         if clearPolicy {
@@ -1172,16 +1228,31 @@ public final class SmctlDaemon: @unchecked Sendable {
     }
 
     func reconcileFanStartupLocked() {
-        guard !hasLocalManualFanPolicyLocked(), !capabilities.fans.isEmpty else {
+        // Fans without a writable mode key cannot be restored and must not be counted
+        // as "unreadable state" — otherwise every startup would try and fail.
+        let controllable = capabilities.fans.filter { $0.modeKey != nil }
+        guard !hasLocalManualFanPolicyLocked(), !controllable.isEmpty else {
             evaluateFanSubsystemLocked()
             return
         }
-        let modes = Dictionary(uniqueKeysWithValues: fanControllerStatusLocked().map { ($0.index, $0.rawMode ?? 0) })
+        let controllableIndices = Set(controllable.map(\.index))
+        let readable: [(index: Int, mode: UInt8)] = fanControllerStatusLocked().compactMap { status in
+            guard controllableIndices.contains(status.index), let mode = status.rawMode else { return nil }
+            return (status.index, mode)
+        }
+        let modes = Dictionary(readable.map { ($0.index, $0.mode) }, uniquingKeysWith: { first, _ in first })
         let ftst = readUInt8Locked("Ftst")
-        if FanStartupReconciler().shouldRestoreAuto(hasLocalManualPolicy: false, fanModes: modes, ftstValue: ftst) {
-            logger.notice("Detected leftover manual fan state at startup; restoring fans to auto")
+        let unreadableState = readable.count < controllable.count
+            || (capabilities.ftstAvailable && ftst == nil)
+        if FanStartupReconciler().shouldRestoreAuto(
+            hasLocalManualPolicy: false,
+            fanModes: modes,
+            ftstValue: ftst,
+            hasUnreadableState: unreadableState
+        ) {
+            logger.notice("Detected leftover or unreadable manual fan state at startup; restoring fans to auto")
             do {
-                try restoreFansAutoLocked(indices: capabilities.fans.map(\.index), clearPolicy: true)
+                try restoreFansAutoLocked(indices: controllable.map(\.index), clearPolicy: true)
             } catch {
                 // Likely an external fan tool re-asserting its own manual setting
                 // (e.g. Macs Fan Control); surface it — never swallow a failed restore.
@@ -1200,6 +1271,11 @@ public final class SmctlDaemon: @unchecked Sendable {
         runtimeFanProfile ?? config.fan.profile
     }
 
+    /// `auto` and `manual` are modes; any other name is a declarative curve.
+    static func isCurveProfile(_ profile: String) -> Bool {
+        profile != "auto" && profile != "manual"
+    }
+
     private func fanControllerStatusLocked() -> [FanStatus] {
         (try? fanControllerLocked().status()) ?? []
     }
@@ -1208,7 +1284,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         guard let reader else {
             return []
         }
-        return reader.snapshot().temperatures.compactMap {
+        return reader.temperatures().compactMap {
             $0.celsius.isFinite ? FanTemperatureSample(sensor: $0.key, celsius: $0.celsius) : nil
         }
     }
@@ -1311,46 +1387,123 @@ public final class SmctlDaemon: @unchecked Sendable {
         }
         do {
             let text = try String(contentsOfFile: path, encoding: .utf8)
-            return (try TOMLDecoder().decode(DaemonConfig.self, from: text), nil)
+            var config = try TOMLDecoder().decode(DaemonConfig.self, from: text)
+            let duplicates = duplicateAlertNames(config.alerts)
+            if !duplicates.isEmpty {
+                config.alerts = deduplicatedAlerts(config.alerts)
+                return (
+                    config,
+                    "config at \(path): duplicate alert rule name(s) \(duplicates.joined(separator: ", ")); only the first of each is used"
+                )
+            }
+            return (config, nil)
         } catch {
             logger.error("Unable to parse \(path, privacy: .public): \(String(describing: error), privacy: .public)")
             return (DaemonConfig(), "config at \(path) failed to parse, running on defaults: \(String(describing: error))")
         }
     }
 
-    private static func writeConfig(_ config: DaemonConfig, path: String) throws {
-        let directory = (path as NSString).deletingLastPathComponent
+    private static func duplicateAlertNames(_ alerts: [AlertConfig]) -> [String] {
+        var seen = Set<String>()
+        var reported = Set<String>()
+        var duplicates: [String] = []
+        for alert in alerts {
+            let name = alert.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
+            if !seen.insert(name).inserted, reported.insert(name).inserted {
+                duplicates.append(name)
+            }
+        }
+        return duplicates
+    }
+
+    private static func deduplicatedAlerts(_ alerts: [AlertConfig]) -> [AlertConfig] {
+        var seen = Set<String>()
+        return alerts.filter { alert in
+            let name = alert.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return true }
+            return seen.insert(name).inserted
+        }
+    }
+
+    /// Resolve a symlink first so the dotfiles workflow (`config.toml` linking into a
+    /// dotfiles repository) updates the link target instead of replacing the link with
+    /// a regular file on the first write.
+    static func configWriteTarget(path: String) -> String {
+        URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+    }
+
+    static func writeConfig(_ config: DaemonConfig, path: String) throws {
+        let target = configWriteTarget(path: path)
+        let directory = (target as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
-        var text = """
-        [battery]
-        limit = "\(config.battery.limit)"
-        sleep_policy = "\(config.battery.sleep_policy)"
-        magsafe_led = \(config.battery.magsafe_led ? "true" : "false")
-        force_discharge = \(config.battery.force_discharge ? "true" : "false")
 
-        [fan]
-        profile = "\(config.fan.profile)"
+        let updates = configUpdates(config)
+        let text: String
+        if FileManager.default.fileExists(atPath: target) {
+            // Patch the existing document instead of regenerating it: comments, unknown
+            // keys, and user-authored curve/alert tables must survive a CLI write.
+            let existing = try String(contentsOfFile: target, encoding: .utf8)
+            text = TomlConfigPatcher.patch(text: existing, sections: updates)
+        } else {
+            text = renderNewConfig(config, updates: updates)
+        }
+        // Never persist a document the daemon itself would refuse to load.
+        _ = try TOMLDecoder().decode(DaemonConfig.self, from: text)
+        try text.write(toFile: target, atomically: true, encoding: .utf8)
+        // The file can contain webhook tokens and a Sentry DSN. Keep it readable by
+        // root only instead of inheriting the default 0644 creation mode.
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target)
+    }
 
-        [safety]
-        temp_ceiling = \(FanSafetyGuard(configuredCeilingCelsius: config.safety.temp_ceiling).configuredCeilingCelsius)
-        allow_below_minimum = \(config.safety.allow_below_minimum ? "true" : "false")
+    private static func configUpdates(_ config: DaemonConfig) -> [TomlConfigPatcher.SectionUpdate] {
+        let string = TomlConfigPatcher.stringLiteral
+        return [
+            .init(name: "battery", values: [
+                ("limit", string(config.battery.limit)),
+                ("sleep_policy", string(config.battery.sleep_policy)),
+                ("force_discharge", config.battery.force_discharge ? "true" : "false")
+            ]),
+            .init(name: "fan", values: [
+                ("profile", string(config.fan.profile))
+            ]),
+            .init(name: "safety", values: [
+                ("temp_ceiling", "\(FanSafetyGuard(configuredCeilingCelsius: config.safety.temp_ceiling).configuredCeilingCelsius)"),
+                ("allow_below_minimum", config.safety.allow_below_minimum ? "true" : "false")
+            ]),
+            .init(name: "update", values: [
+                ("check", config.update.check ? "true" : "false")
+            ]),
+            .init(name: "sentry", values: [
+                ("dsn", string(config.sentry.dsn)),
+                ("environment", string(config.sentry.environment)),
+                ("debug", config.sentry.debug ? "true" : "false"),
+                ("traces_sample_rate", "\(config.sentry.traces_sample_rate)")
+            ])
+        ]
+    }
 
-        [update]
-        check = \(config.update.check ? "true" : "false")
-
-        [sentry]
-        dsn = "\(config.sentry.dsn)"
-        environment = "\(config.sentry.environment)"
-        debug = \(config.sentry.debug ? "true" : "false")
-        traces_sample_rate = \(config.sentry.traces_sample_rate)
-
-        """
+    /// Full-document fallback for when the config file does not exist (first write, or
+    /// it was deleted while the daemon was running). Curves and alerts are carried over
+    /// from the in-memory config so they are never dropped.
+    private static func renderNewConfig(
+        _ config: DaemonConfig,
+        updates: [TomlConfigPatcher.SectionUpdate]
+    ) -> String {
+        var text = ""
+        for section in updates {
+            text += "[\(section.name)]\n"
+            for value in section.values {
+                text += "\(value.key) = \(value.literal)\n"
+            }
+            text += "\n"
+        }
+        let string = TomlConfigPatcher.stringLiteral
         for curve in config.fan.curves {
             text += """
-
             [[fan.curves]]
-            name = "\(curve.name)"
-            sensors = [\(curve.sensors.map { "\"\($0)\"" }.joined(separator: ", "))]
+            name = \(string(curve.name))
+            sensors = [\(curve.sensors.map(string).joined(separator: ", "))]
             points = [\(curve.points.map(formatFanPoint).joined(separator: ", "))]
             hysteresis = \(curve.hysteresis)
 
@@ -1362,29 +1515,29 @@ public final class SmctlDaemon: @unchecked Sendable {
                 text += "fall_slew_rate = \(fallSlewRate)\n"
             }
             if let weights = curve.weights, !weights.isEmpty {
-                let pairs = weights.sorted { $0.key < $1.key }.map { "\"\($0.key)\" = \($0.value)" }.joined(separator: ", ")
+                let pairs = weights.sorted { $0.key < $1.key }.map { "\(string($0.key)) = \($0.value)" }.joined(separator: ", ")
                 text += "weights = { \(pairs) }\n"
             }
+            text += "\n"
         }
-        // Round-trip alert rules so a battery/fan write never silently drops the
-        // user's alert config (writeConfig rewrites the whole file).
         for alert in config.alerts {
             text += formatAlert(alert)
         }
-        try text.write(toFile: path, atomically: true, encoding: .utf8)
+        return text
     }
 
     private static func formatAlert(_ alert: AlertConfig) -> String {
-        var lines = ["", "[[alert]]", "name = \"\(alert.name)\"", "on = \"\(alert.on)\""]
-        if let sensor = alert.sensor { lines.append("sensor = \"\(sensor)\"") }
+        let string = TomlConfigPatcher.stringLiteral
+        var lines = ["", "[[alert]]", "name = \(string(alert.name))", "on = \(string(alert.on))"]
+        if let sensor = alert.sensor { lines.append("sensor = \(string(sensor))") }
         if let above = alert.above { lines.append("above = \(above)") }
         if let forSeconds = alert.forSeconds { lines.append("for = \(forSeconds)") }
         if let cooldown = alert.cooldown { lines.append("cooldown = \(cooldown)") }
         if let resolve = alert.resolve { lines.append("resolve = \(resolve ? "true" : "false")") }
-        if let action = alert.action { lines.append("action = \"\(action)\"") }
-        if let url = alert.url { lines.append("url = \"\(url)\"") }
+        if let action = alert.action { lines.append("action = \(string(action))") }
+        if let url = alert.url { lines.append("url = \(string(url))") }
         if let command = alert.command {
-            lines.append("command = [\(command.map { "\"\($0)\"" }.joined(separator: ", "))]")
+            lines.append("command = [\(command.map(string).joined(separator: ", "))]")
         }
         return lines.joined(separator: "\n") + "\n"
     }

@@ -39,9 +39,9 @@ $ smctl sensors --watch            # 实时温度、风扇转速、封装功耗
 | `smctl power status [--watch] [--json]` | 热压制状态、CPU 降频幅度（限速 %）、封装功耗与输入功率 |
 | `smctl display list` / `brightness [0-100]` / `power on\|off` | 外接显示器亮度与电源（DDC/CI）；关闭后显示器仍留在 macOS 布局中，窗口不会被重排 |
 | `smctl alert list\|status\|test <name>` | 温度/事件告警 → webhook、命令或日志（TOML 配置） |
-| `smctl daemon install\|uninstall\|status\|ping\|logs` | 管理特权 daemon 并查看最近日志 |
+| `smctl daemon install\|uninstall\|restart\|reload\|status\|capabilities\|ping\|logs` | 管理特权 daemon、重载配置并查看最近日志 |
 
-策略配置在 `/etc/smctl/config.toml`——声明式、可 diff、对 dotfiles 友好。自定义风扇曲线的完整方法见 [风扇曲线教程](fan-profiles.md)。
+策略配置在 `/etc/smctl/config.toml`——声明式、可 diff、对 dotfiles 友好。daemon 只就地更新自己管理的键，因此注释、未知键以及手写的 `[[fan.curves]]` / `[[alert]]` 表都会保留；符号链接的配置会通过链接写到目标文件。文件由 root 拥有且权限为 0600（alert 规则里可能含 token）。自定义风扇曲线的完整方法见 [风扇曲线教程](fan-profiles.md)。
 
 ## 安装
 

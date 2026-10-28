@@ -77,18 +77,6 @@ public struct Capabilities: Codable, Equatable {
         self.chargingControl = chargingControl
         self.adapterControl = adapterControl
     }
-
-    public var availableKeysByFeature: [String: [String]] {
-        [
-            "fans": fans.flatMap { [$0.actualKey, $0.targetKey, $0.minimumKey, $0.maximumKey] + [$0.modeKey].compactMap { $0 } },
-            "ftst": ftstAvailable ? ["Ftst"] : [],
-            "temperature": temperatureKeys,
-            "battery": batteryKeys,
-            "power": powerKeys,
-            "chargingControl": chargingControl?.requiredKeys ?? [],
-            "adapterControl": adapterControl?.requiredKeys ?? []
-        ]
-    }
 }
 
 public struct KeyCatalog {

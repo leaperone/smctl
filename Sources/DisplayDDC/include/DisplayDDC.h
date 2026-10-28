@@ -55,6 +55,11 @@ int ddcCopyOnlineDisplayInfos(DDCDisplayInfo *infos, int maxCount);
 // or NULL if the display has no DDC-capable connection.
 IOAVServiceRef ddcCopyDisplayAVService(const DDCDisplayInfo *info);
 
+// Whether the display resolves an external DDC-capable port. Used to keep the
+// built-in panel (which has a UUID and IORegistry location but no external port)
+// out of `smctl display list`.
+int ddcDisplayHasExternalService(const DDCDisplayInfo *info);
+
 // VCP feature read/write. Return kIOReturnSuccess on success.
 IOReturn ddcRead(IOAVServiceRef avService, UInt8 attrCode, DDCValue *outValue);
 IOReturn ddcWrite(IOAVServiceRef avService, UInt8 attrCode, UInt16 value);

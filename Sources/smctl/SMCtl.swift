@@ -39,7 +39,8 @@ func currentExecutablePath() -> String? {
     guard size > 0 else { return nil }
     var buffer = [CChar](repeating: 0, count: Int(size))
     guard _NSGetExecutablePath(&buffer, &size) == 0 else { return nil }
-    return String(cString: buffer)
+    let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+    return String(decoding: bytes, as: UTF8.self)
 }
 
 /// smctld sits next to smctl. Pure and testable. The path is deliberately left
@@ -235,7 +236,22 @@ struct FanSet: ParsableCommand {
         for index in indices {
             try mapDaemonClient { try client.setFanManual(index: index, rpm: rpm, force: force) }
         }
-        print("Fan target set to \(formatRPM(rpm))\(fan.map { " on fan \($0)" } ?? " on all fans").")
+        // Report what the firmware accepted, not what was requested: the daemon clamps
+        // to the fan's minimum/maximum and a below-minimum target needs config opt-in.
+        let status: FansStatusDTO = try mapDaemonClient { try client.getFans() }
+        let applied = status.fans.filter { indices.contains($0.index) }
+        guard !applied.isEmpty else {
+            print("Fan target requested at \(formatRPM(rpm)); smctld returned no fan status.")
+            return
+        }
+        for fan in applied {
+            guard let target = fan.targetRPM else {
+                print("Fan \(fan.index): target reported as unknown.")
+                continue
+            }
+            let clamped = abs(target - rpm) >= 1 ? " (clamped from \(formatRPM(rpm)))" : ""
+            print("Fan \(fan.index): target \(formatRPM(target))\(clamped)")
+        }
     }
 }
 
@@ -659,7 +675,10 @@ struct Daemon: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "daemon",
         abstract: "Install, remove, and inspect smctld.",
-        subcommands: [DaemonInstall.self, DaemonUninstall.self, DaemonRestart.self, DaemonStatus.self, DaemonPing.self, DaemonLogs.self]
+        subcommands: [
+            DaemonInstall.self, DaemonUninstall.self, DaemonRestart.self, DaemonReload.self,
+            DaemonStatus.self, DaemonCapabilities.self, DaemonPing.self, DaemonLogs.self
+        ]
     )
 }
 
@@ -687,6 +706,18 @@ struct DaemonRestart: ParsableCommand {
     }
 }
 
+struct DaemonReload: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "reload",
+        abstract: "Reload /etc/smctl/config.toml without restarting the daemon."
+    )
+
+    func run() throws {
+        try mapDaemonClient { try DaemonClient().reloadConfig() }
+        print("Configuration reloaded.")
+    }
+}
+
 struct DaemonStatus: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "status", abstract: "Daemon health: config path, evaluation loop, last error.")
 
@@ -708,6 +739,30 @@ struct DaemonStatus: ParsableCommand {
 
     private func format(_ value: Double) -> String {
         String(format: "%.0f", value)
+    }
+}
+
+struct DaemonCapabilities: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "capabilities",
+        abstract: "Detected fan, charging, and adapter control capabilities."
+    )
+
+    @Flag(name: .long, help: "Print machine-readable JSON.")
+    var json = false
+
+    func run() throws {
+        let capabilities: CapabilitiesDTO = try mapDaemonClient { try DaemonClient().getCapabilities() }
+        if json {
+            print(try CLIJSON.encodeString(capabilities))
+            return
+        }
+        print("Capabilities")
+        print("  fans: \(capabilities.fanCount)\(capabilities.fanControlSupported ? " (writable)" : " (read-only or none)")")
+        print("  ftst: \(capabilities.ftstAvailable ? "available" : "unavailable")")
+        print("  charging control: \(capabilities.chargingControlSupported ? (capabilities.chargingControlGroup ?? "supported") : "unsupported")")
+        print("  adapter control: \(capabilities.adapterControlSupported ? (capabilities.adapterControlGroup ?? "supported") : "unsupported")")
+        print("  battery keys: \(capabilities.batteryKeys.isEmpty ? "-" : capabilities.batteryKeys.joined(separator: ", "))")
     }
 }
 
@@ -1032,9 +1087,11 @@ private func runProcess(_ executable: String, _ arguments: [String]) throws -> S
     process.standardOutput = pipe
     process.standardError = pipe
     try process.run()
+    // Read to EOF *before* waiting: a child that writes more than the pipe buffer
+    // would otherwise block forever while we sit in waitUntilExit().
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
     process.waitUntilExit()
 
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
     let output = String(data: data, encoding: .utf8) ?? ""
     guard process.terminationStatus == 0 else {
         throw ValidationError(output.isEmpty ? "\(executable) failed with status \(process.terminationStatus)" : output)

@@ -94,6 +94,27 @@ final class ChargeStateMachineTests: XCTestCase {
         XCTAssertEqual(evaluation.actions, [])
     }
 
+    func testMissedBeatWithNoLimitDoesNotChurnCharging() {
+        // With limiting disabled there is nothing to overshoot, so a wake-up must not
+        // write charging off and immediately back on.
+        var machine = ChargeStateMachine(period: 10)
+        let first = Date(timeIntervalSince1970: 0)
+        _ = machine.evaluate(
+            limit: .disabled,
+            observation: BatteryObservation(chargePercent: 59, isChargingAllowed: true),
+            now: first
+        )
+
+        let evaluation = machine.evaluate(
+            limit: .disabled,
+            observation: BatteryObservation(chargePercent: 59, isChargingAllowed: true),
+            now: first.addingTimeInterval(31)
+        )
+
+        XCTAssertTrue(evaluation.sleptSinceLastEvaluation)
+        XCTAssertEqual(evaluation.actions, [])
+    }
+
     func testParsesSingleAndRangeLimits() throws {
         XCTAssertEqual(try ChargeLimit.parse("80"), ChargeLimit(upperBound: 80, lowerDelta: 2))
         XCTAssertEqual(try ChargeLimit.parse("70-80"), ChargeLimit(upperBound: 80, lowerDelta: 10))

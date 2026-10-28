@@ -615,6 +615,98 @@ final class SmctlDaemonTests: XCTestCase {
         XCTAssertEqual(daemon.safetyGuard.configuredCeilingCelsius, 100)
     }
 
+    // MARK: - Per-fan auto under a curve
+
+    func testPerFanAutoIsRejectedWhileCurveProfileIsActive() throws {
+        let backend = RecordingBackend()
+        let daemon = makeDaemon(backend: backend, capabilities: .oneFan)
+        daemon.config.fan.profile = "quiet"
+
+        XCTAssertThrowsError(try daemon.setFanAuto(index: 0)) { error in
+            XCTAssertTrue("\(error)".contains("fan profile auto"), "unexpected error: \(error)")
+        }
+
+        // Clearing the whole profile is still the documented escape hatch.
+        try daemon.setFanAuto(index: nil)
+        XCTAssertEqual(daemon.config.fan.profile, "auto")
+    }
+
+    // MARK: - Duplicate alert rules
+
+    func testDuplicateAlertNamesAreDeduplicatedAndReported() throws {
+        try """
+        [[alert]]
+        name = "hot"
+        on = "temp"
+        above = 90
+
+        [[alert]]
+        name = "hot"
+        on = "temp"
+        above = 95
+        """.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+
+        XCTAssertEqual(daemon.config.alerts.count, 1, "duplicate names share engine state and action lookup")
+        XCTAssertEqual(daemon.alertStatus().rules.count, 1)
+        let reported = try XCTUnwrap(daemon.daemonStatus().lastError)
+        XCTAssertTrue(reported.contains("duplicate alert rule name"), reported)
+    }
+
+    // MARK: - Config file safety
+
+    func testConfigWritePreservesCommentsUnknownKeysAndSecuresPermissions() throws {
+        try """
+        # managed by hand — keep this comment
+        [battery]
+        limit = "80"   # cap
+        vendor_flag = true
+
+        [[alert]]
+        name = "hot"
+        on = "temp"
+        above = 90
+        action = "exec"
+        command = ["/bin/echo", "hi # not a comment"]
+        """.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+        try daemon.setChargeLimit("70-80")
+
+        let text = try String(contentsOfFile: configPath, encoding: .utf8)
+        XCTAssertTrue(text.contains("# managed by hand — keep this comment"), text)
+        XCTAssertTrue(text.contains("limit = \"70-80\"  # cap"), text)
+        XCTAssertTrue(text.contains("vendor_flag = true"), text)
+        XCTAssertTrue(text.contains("command = [\"/bin/echo\", \"hi # not a comment\"]"), text)
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: configPath)
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+    }
+
+    func testConfigWriteFollowsSymlink() throws {
+        let target = configPath + "-real.toml"
+        defer { try? FileManager.default.removeItem(atPath: target) }
+        try """
+        [battery]
+        limit = "80"
+        """.write(toFile: target, atomically: true, encoding: .utf8)
+        try? FileManager.default.removeItem(atPath: configPath)
+        try FileManager.default.createSymbolicLink(atPath: configPath, withDestinationPath: target)
+
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+        try daemon.setChargeLimit("70-80")
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: configPath)
+        XCTAssertEqual(
+            attributes[.type] as? FileAttributeType,
+            .typeSymbolicLink,
+            "a dotfiles symlink must be followed, not replaced by a regular file"
+        )
+        let targetText = try String(contentsOfFile: target, encoding: .utf8)
+        XCTAssertTrue(targetText.contains("limit = \"70-80\""), targetText)
+    }
+
     // MARK: - Helpers
 
     private func makeAdapterDaemon() -> (RecordingBackend, SmctlDaemon) {

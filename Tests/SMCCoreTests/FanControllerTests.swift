@@ -15,6 +15,22 @@ final class FanControllerTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(backend.floatValue("F0Tg")), 2400, accuracy: 0.01)
     }
 
+    func testAlreadyManualFanSkipsModeWriteAndNeverEntersFtstRetryLoop() throws {
+        // A curve re-applies its target every second. Re-writing the mode key each tick
+        // bought nothing and re-entered the multi-second FTST retry loop whenever an
+        // unlock was failing — blocking the daemon's state queue every tick.
+        let backend = MockFanBackend()
+        backend.installSingleFan(ftst: true, mode: 1)
+        backend.modeFailuresBeforeSuccess = Int.max
+        let controller = FanController(backend: backend, capabilities: capabilities(ftst: true))
+
+        let result = try controller.setManual(index: 0, rpm: 2600, timing: .test)
+
+        XCTAssertEqual(result.unlockPath, .direct)
+        XCTAssertEqual(backend.uint8Value("F0Md"), 1)
+        XCTAssertEqual(try XCTUnwrap(backend.floatValue("F0Tg")), 2600, accuracy: 0.01)
+    }
+
     func testFtstFallbackUnlockRetriesUntilModeWriteSucceeds() throws {
         let backend = MockFanBackend()
         backend.installSingleFan(ftst: true, mode: 3)

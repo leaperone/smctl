@@ -1,4 +1,4 @@
-.TH SMCTL 1 "2026-06-08" "smctl" "User Commands"
+.TH SMCTL 1 "2026-10-29" "smctl" "User Commands"
 .SH NAME
 smctl \- control your Mac's System Management Controller from the terminal
 .SH SYNOPSIS
@@ -8,8 +8,8 @@ smctl \- control your Mac's System Management Controller from the terminal
 .SH DESCRIPTION
 .B smctl
 is a CLI-first tool for controlling hardware that macOS normally manages on
-its own \(em fan speed, battery charging, and power telemetry \(em on Apple
-Silicon Macs.
+its own \(em fan speed, battery charging, external display power, and power
+telemetry \(em on Apple Silicon Macs.
 .PP
 Reading sensors works without privileges. Battery and fan control are applied
 by a root LaunchDaemon,
@@ -31,20 +31,24 @@ emits machine-readable output. Needs no daemon and no root.
 .RE
 .SS battery
 .B smctl battery status
+.RB [ --json ]
 .RS
-Charge level, charging state, and the configured limit.
+Charge level, charging state, time estimate, and the configured limit.
 .RE
 .B smctl battery maintain
 .IR LIMIT
+.RB [ --force-discharge ]
 .RS
 Keep the charge within a limit. LIMIT is a single percent
 .RI ( 80 ),
 a range
 .RI ( 70-80 ),
 or
-.B stop
-to disable limiting. A dead-band prevents charge/discharge flapping near the
-threshold.
+.BR stop .
+A dead-band prevents charge/discharge flapping near the threshold.
+.B --force-discharge
+actively drains down to the band by cutting adapter power while above the
+upper bound.
 .RE
 .B smctl battery charge
 .IR PERCENT
@@ -58,8 +62,20 @@ Cut adapter power and discharge down to PERCENT. Runs in the foreground;
 the daemon restores adapter power on completion, client disconnect, or renewal
 timeout. Failed restoration is retried.
 .RE
+.B smctl battery charging
+.RI ( on | off )
+.RS
+Manually allow or block battery charging. An active maintain policy may
+override this on its next evaluation.
+.RE
+.B smctl battery adapter
+.RI ( on | off )
+.RS
+Manually enable or cut adapter power input.
+.RE
 .SS fan
 .B smctl fan status
+.RB [ --json ]
 .RS
 Per-fan actual, target, minimum, and maximum RPM, plus the control mode.
 .RE
@@ -69,7 +85,8 @@ Per-fan actual, target, minimum, and maximum RPM, plus the control mode.
 .IR N ]
 .RB [ --force ]
 .RS
-Set a manual fan target in RPM, clamped to the fan's reported min/max.
+Set a manual fan target in RPM, clamped to the fan's reported min/max. The
+applied target is printed, so a clamp is visible.
 .B --fan
 targets one fan (0-based); omit it to set all fans.
 .B --force
@@ -83,7 +100,10 @@ in the config; the maximum is always a hard ceiling.
 .RB [ --fan
 .IR N ]
 .RS
-Return fans to system control.
+Return fans to system control. While a curve profile is active, restoring a
+single fan is rejected because the curve re-asserts control every second; run
+.B smctl fan profile auto
+first.
 .RE
 .B smctl fan profile
 .IR NAME
@@ -94,41 +114,165 @@ Apply a fan profile:
 .BR full ,
 or a custom curve defined in the config.
 .RE
+.SS power
+.B smctl power
+.RB [ status ]
+.RB [ --watch ]
+.RB [ --json ]
+.RS
+Thermal pressure, CPU throttling (percent of full clock), and package, system,
+and input power. Needs no daemon and no root.
+.RE
+.SS display
+.B smctl display list
+.RB [ --json ]
+.RS
+List external DDC/CI-capable displays. The built-in panel is not listed.
+.RE
+.B smctl display brightness
+.RB [ PERCENT ]
+.RB [ --display
+.IR INDEX|UUID ]
+.RB [ --json ]
+.RS
+Read or set brightness as a percentage. The percentage is scaled to the
+display's own luminance range.
+.RE
+.B smctl display power
+.RB [ ( on | off ) ]
+.RB [ --display
+.IR INDEX|UUID ]
+.RS
+Read or set display power over DDC. The display stays in the macOS layout
+while soft-off.
+.RE
+.SS alert
+.B smctl alert list
+.RB [ --json ]
+.RS
+Show configured rules, validity, and redacted action targets. Webhook query
+strings and exec arguments are deliberately hidden.
+.RE
+.B smctl alert status
+.RB [ --json ]
+.RS
+Per-rule state
+.RI ( armed | pending | cooling | firing )
+and recent events.
+.RE
+.B smctl alert test
+.IR NAME
+.RS
+Fire a rule's action immediately to verify the webhook or command. Requires
+root or an admin user.
+.RE
 .SS daemon
 .B smctl daemon
-.RB ( install | uninstall | restart | status | ping )
+.RB ( install | uninstall | restart | reload | status | capabilities | ping | logs )
 .RS
 Manage
 .BR smctld .
-.B install/uninstall/restart
+.B install/uninstall
 require root.
-.B uninstall
-restores system control of fans and charging before removing the daemon.
 .B install
 updates the root-owned helper in /Library/PrivilegedHelperTools and restarts
 the service. Run it after every
 .BR "brew upgrade" .
+.B uninstall
+restores system control of fans and charging before removing the daemon.
 .B restart
-restarts the installed copy and reloads configuration; it does not copy a new binary.
+restarts the installed copy and reloads configuration; it does not copy a new
+binary.
+.B reload
+re-reads /etc/smctl/config.toml without restarting; requires root or an admin
+user.
+.B status
+shows the config path, evaluation period, and last error.
+.B capabilities
+shows detected fan, charging, and adapter control support.
+.B logs
+wraps
+.BR "log show"
+for the smctl subsystem and accepts
+.BR --last " (e.g. 10m, 1h, 2d)."
 .RE
 .SH CONFIGURATION
 Policy lives in
-.IR /etc/smctl/config.toml ,
-with sections
-.BR [battery] ,
-.BR [fan] ,
-.BR [safety] ,
+.IR /etc/smctl/config.toml .
+The file is root-owned and mode 0600 because alert action targets can contain
+secrets. CLI commands update the keys they own in place: comments, unknown
+keys, and the
+.B [[fan.curves]]
 and
-.BR [update] .
-The daemon owns the file; CLI commands rewrite it. After hand-editing, run
-.BR "sudo smctl daemon restart" .
+.B [[alert]]
+tables written by hand are preserved. A symlinked config is updated through
+the link. After hand-editing, run
+.BR "sudo smctl daemon reload" .
+.PP
+.B [battery]
+.RS
+.BR limit " (\(dq80\(dq, 70-80, or \(dq100\(dq),"
+.BR sleep_policy " (strict | relaxed),"
+.BR force_discharge " (bool)."
+.RE
+.B [fan]
+.RS
+.B profile
+(named profile or custom curve). Custom curves are declared as
+.B [[fan.curves]]
+tables with
+.BR name ,
+.BR sensors ,
+.BR points " ([[temperature, rpm-or-\(dqmax\(dq]], …),"
+.BR hysteresis ,
+.BR slew_rate ,
+.BR fall_slew_rate ,
+and optional
+.BR weights .
+.RE
+.B [safety]
+.RS
+.BR temp_ceiling " (default 100C, hard-capped at 105C),"
+.BR allow_below_minimum " (bool)."
+The thermal guard cannot be disabled.
+.RE
+.B [update]
+.RS
+.B check
+enables the once-a-day GitHub release check.
+.RE
+.B [sentry]
+.RS
+.BR dsn " (empty disables Sentry),"
+.BR environment ,
+.BR debug ,
+.BR traces_sample_rate .
+.RE
+.B [[alert]]
+.RS
+Rules with
+.BR name ,
+.BR on " (temp | guard | write-error),"
+.BR sensor ,
+.BR above ,
+.BR for ,
+.BR cooldown ,
+.BR resolve ,
+.B action " (webhook | exec | log),"
+.BR url ,
+.B command.
+Exec actions run as root; commands use argv arrays and never a shell.
+.RE
 .SH FILES
 .TP
 .I /etc/smctl/config.toml
-Declarative policy configuration.
+Declarative policy configuration, root-owned, mode 0600.
 .TP
 .I /Library/LaunchDaemons/one.leaper.smctl.daemon.plist
 The installed LaunchDaemon.
+.TP
+.I /Library/PrivilegedHelperTools/one.leaper.smctl.daemon
+The protected copy of the daemon executed by launchd.
 .SH PRIVACY
 The CLI itself does not make network requests. The daemon can make outbound
 requests for the daily GitHub releases update check, user-configured alert
