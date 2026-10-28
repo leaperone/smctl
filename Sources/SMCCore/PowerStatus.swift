@@ -207,7 +207,9 @@ public final class PowerReader {
         process.arguments = ["-g", "therm"]
         let pipe = Pipe()
         process.standardOutput = pipe
-        process.standardError = Pipe()
+        // Leave stderr unreadable rather than attaching a Pipe nobody drains: a chatty
+        // pmset warning could fill the buffer and deadlock the read below.
+        process.standardError = FileHandle.nullDevice
         do {
             try process.run()
         } catch {

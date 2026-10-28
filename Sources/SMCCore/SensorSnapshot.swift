@@ -58,7 +58,7 @@ public final class SensorReader {
         return SensorSnapshot(
             timestamp: Date(),
             capabilities: capabilities,
-            temperatures: readTemperatures(keys: capabilities.temperatureKeys),
+            temperatures: temperatures(),
             fans: readFans(capabilities.fans),
             battery: readNamedReadings([
                 ("BUIC", "Charge", "%", 1),
@@ -74,6 +74,12 @@ public final class SensorReader {
                 ("VD0R", "Input Voltage", "V", 1)
             ], availableKeys: capabilities.powerKeys)
         )
+    }
+
+    /// Temperature readings only. The daemon's 1 Hz thermal loop needs these and
+    /// nothing else; reading battery/power/fan keys every second is wasted SMC I/O.
+    public func temperatures() -> [TemperatureReading] {
+        readTemperatures(keys: capabilities().temperatureKeys)
     }
 
     private func readTemperatures(keys: [String]) -> [TemperatureReading] {

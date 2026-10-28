@@ -293,17 +293,28 @@ final class AlertActionRunner: @unchecked Sendable {
             alertLogger.error("Alert '\(event.ruleName, privacy: .public)' exec failed to launch '\(executable, privacy: .public)': \(String(describing: error), privacy: .public)")
             return
         }
-        // Enforce a timeout: kill the process if it overruns.
-        let deadline = DispatchTime.now() + execTimeout
+        // Enforce a timeout: SIGTERM first, then SIGKILL for a child that ignores it.
+        // Otherwise `waitUntilExit()` blocks forever and permanently burns one of the
+        // four action slots.
+        let pid = process.processIdentifier
         let killer = DispatchWorkItem { [weak process] in
-            if process?.isRunning == true {
-                process?.terminate()
-                alertLogger.error("Alert '\(event.ruleName, privacy: .public)' exec timed out; terminated")
+            guard process?.isRunning == true else { return }
+            alertLogger.error("Alert '\(event.ruleName, privacy: .public)' exec timed out; sending SIGTERM")
+            process?.terminate()
+        }
+        let forceKiller = DispatchWorkItem {
+            // `kill(pid, 0)` only proves the pid exists; PID reuse within the grace
+            // window is improbable and the alternative is a permanently stuck slot.
+            if kill(pid, 0) == 0 {
+                alertLogger.error("Alert '\(event.ruleName, privacy: .public)' exec ignored SIGTERM; sending SIGKILL")
+                kill(pid, SIGKILL)
             }
         }
-        queue.asyncAfter(deadline: deadline, execute: killer)
+        queue.asyncAfter(deadline: .now() + execTimeout, execute: killer)
+        queue.asyncAfter(deadline: .now() + execTimeout + 2, execute: forceKiller)
         process.waitUntilExit()
         killer.cancel()
+        forceKiller.cancel()
         if process.terminationStatus != 0 {
             alertLogger.error("Alert '\(event.ruleName, privacy: .public)' exec exited \(process.terminationStatus, privacy: .public)")
         }

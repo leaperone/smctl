@@ -74,10 +74,15 @@ IOAVServiceRef ddcCopyDisplayAVService(const DDCDisplayInfo *info) {
     }
 
     io_registry_entry_t root = IORegistryGetRootEntry(kIOMainPortDefault);
-    io_iterator_t iter;
-    if (IORegistryEntryCreateIterator(root, kIOServicePlane, kIORegistryIterateRecursively, &iter) != KERN_SUCCESS) {
+    if (root == MACH_PORT_NULL) {
         return NULL;
     }
+    io_iterator_t iter;
+    if (IORegistryEntryCreateIterator(root, kIOServicePlane, kIORegistryIterateRecursively, &iter) != KERN_SUCCESS) {
+        IOObjectRelease(root);
+        return NULL;
+    }
+    IOObjectRelease(root);
 
     IOAVServiceRef avService = NULL;
     io_service_t service;
@@ -118,4 +123,13 @@ IOAVServiceRef ddcCopyDisplayAVService(const DDCDisplayInfo *info) {
     }
     IOObjectRelease(iter);
     return avService;
+}
+
+int ddcDisplayHasExternalService(const DDCDisplayInfo *info) {
+    IOAVServiceRef service = ddcCopyDisplayAVService(info);
+    if (service == NULL) {
+        return 0;
+    }
+    CFRelease(service);
+    return 1;
 }

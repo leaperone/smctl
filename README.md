@@ -41,9 +41,9 @@ $ smctl sensors --watch            # live temperatures, fan RPM, package power
 | `smctl power status [--watch] [--json]` | Thermal pressure, CPU throttling (% speed limit), system/package + input power |
 | `smctl display list` / `brightness [0-100]` / `power on\|off` | External display brightness and power over DDC/CI; the display stays in the macOS layout while off |
 | `smctl alert list\|status\|test <name>` | Temperature/event alerts → webhook, command, or log (configured in TOML) |
-| `smctl daemon install\|uninstall\|status\|ping\|logs` | Manage the privileged helper and inspect recent daemon logs |
+| `smctl daemon install\|uninstall\|restart\|reload\|status\|capabilities\|ping\|logs` | Manage the privileged helper, reload config, and inspect recent daemon logs |
 
-Policies live in `/etc/smctl/config.toml` — declarative, diffable, dotfiles-friendly. For a step-by-step custom fan curve guide, see the [fan profile cookbook](docs/fan-profiles.md) (Chinese).
+Policies live in `/etc/smctl/config.toml` — declarative, diffable, dotfiles-friendly. The daemon updates only the keys it owns, in place, so comments, unknown keys, and your `[[fan.curves]]` / `[[alert]]` tables survive a CLI command; a symlinked config is updated through the link. The file is root-owned and mode 0600 because alert rules can contain tokens. For a step-by-step custom fan curve guide, see the [fan profile cookbook](docs/fan-profiles.md) (Chinese).
 
 ## Install
 

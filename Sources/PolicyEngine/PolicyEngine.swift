@@ -1,30 +1,9 @@
 import Foundation
 
-public enum PolicyEngine {
-    public static let version = "0.2.4"
-}
-
-public protocol PolicyClock: Sendable {
-    var now: Date { get }
-}
-
-public struct SystemPolicyClock: PolicyClock {
-    public init() {}
-
-    public var now: Date {
-        Date()
-    }
-}
-
 public enum BatteryPolicyAction: Codable, Equatable, Sendable {
     case setChargingEnabled(Bool)
     case setAdapterEnabled(Bool)
     case reevaluate
-}
-
-public protocol BatteryPolicyBackend {
-    func setChargingEnabled(_ enabled: Bool) throws
-    func setAdapterEnabled(_ enabled: Bool) throws
 }
 
 public struct ChargeLimit: Codable, Equatable, Sendable {
@@ -161,7 +140,9 @@ public struct ChargeStateMachine: Sendable {
         // Missed-beat guard: we may have charged past the limit while asleep. Only write
         // the conservative disable when power is actually present — an unplugged Mac
         // cannot have overshot, and the write would needlessly flip the allowed state.
-        if slept, effectiveObservation.isCharging {
+        // No limit means there is nothing to overshoot; skip the write entirely so a
+        // wake-up does not churn charging off and straight back on.
+        if slept, limit.isLimiting, effectiveObservation.isCharging {
             actions.append(.setChargingEnabled(false))
             effectiveObservation.isChargingAllowed = false
         }
@@ -207,15 +188,6 @@ public struct ChargeStateMachine: Sendable {
             lowerBound: limit.lowerBound,
             upperBound: limit.upperBound
         )
-    }
-
-    public mutating func evaluate<C: PolicyClock>(
-        limit: ChargeLimit,
-        observation: BatteryObservation,
-        clock: C,
-        forceDischarge: Bool = false
-    ) -> ChargeEvaluation {
-        evaluate(limit: limit, observation: observation, now: clock.now, forceDischarge: forceDischarge)
     }
 }
 
@@ -654,9 +626,23 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
 public struct FanStartupReconciler: Sendable {
     public init() {}
 
-    public func shouldRestoreAuto(hasLocalManualPolicy: Bool, fanModes: [Int: UInt8], ftstValue: UInt8?) -> Bool {
+    /// Whether startup should hand fans back to the firmware.
+    ///
+    /// Fail-safe: a fan that is in manual mode, or whose state cannot be read at all,
+    /// is treated as residue from a crashed instance. Reporting "unknown" as auto was
+    /// the one path where a pinned fan could survive a restart with no local policy
+    /// *and* with the thermal guard believing the system was in control.
+    public func shouldRestoreAuto(
+        hasLocalManualPolicy: Bool,
+        fanModes: [Int: UInt8],
+        ftstValue: UInt8?,
+        hasUnreadableState: Bool = false
+    ) -> Bool {
         guard !hasLocalManualPolicy else {
             return false
+        }
+        if hasUnreadableState {
+            return true
         }
         if fanModes.values.contains(FanModeValue.manual.rawValue) {
             return true

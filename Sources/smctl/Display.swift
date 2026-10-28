@@ -4,6 +4,21 @@ import Foundation
 
 // MARK: - DDC display access
 
+/// MCCS luminance is a `0...maxValue` range, not universally `0...100`. Most panels
+/// report max 100, but writing "50" to a panel whose max is 255 lands at ~20%. Convert
+/// in both directions so the CLI's percent interface is honest on every display.
+enum DDCLuminance {
+    static func rawValue(percent: Int, maximum: Int) -> UInt16 {
+        let maximum = maximum > 0 ? maximum : 100
+        return UInt16(clamping: Int((Double(maximum) * Double(percent) / 100).rounded()))
+    }
+
+    static func percent(raw: Int, maximum: Int) -> Int {
+        let maximum = maximum > 0 ? maximum : 100
+        return Int((Double(raw) * 100 / Double(maximum)).rounded())
+    }
+}
+
 /// External display reachable over DDC/CI. `raw` keeps the retained CFString
 /// fields from the C layer alive; smctl is a one-shot process, so they are
 /// never released.
@@ -18,14 +33,21 @@ enum DisplayControl {
     static func onlineDisplays() -> [ExternalDisplay] {
         var infos = [DDCDisplayInfo](repeating: DDCDisplayInfo(), count: Int(DDC_MAX_DISPLAYS))
         let count = Int(ddcCopyOnlineDisplayInfos(&infos, DDC_MAX_DISPLAYS))
-        return (0..<count).map { i in
-            ExternalDisplay(
-                index: i + 1,
-                name: infos[i].productName.map { $0.takeUnretainedValue() as String } ?? "Unknown Display",
-                uuid: infos[i].uuid.map { $0.takeUnretainedValue() as String } ?? "",
-                raw: infos[i]
-            )
+        var displays: [ExternalDisplay] = []
+        for i in 0..<count {
+            var raw = infos[i]
+            // Only list displays that actually resolve an external DDC port. The
+            // built-in panel and virtual displays expose a UUID/location but cannot be
+            // controlled over DDC, so listing them just makes `--display` ambiguous.
+            guard ddcDisplayHasExternalService(&raw) != 0 else { continue }
+            displays.append(ExternalDisplay(
+                index: displays.count + 1,
+                name: raw.productName.map { $0.takeUnretainedValue() as String } ?? "Unknown Display",
+                uuid: raw.uuid.map { $0.takeUnretainedValue() as String } ?? "",
+                raw: raw
+            ))
         }
+        return displays
     }
 
     static func resolve(_ selector: String?, in displays: [ExternalDisplay]) throws -> ExternalDisplay {
@@ -147,25 +169,33 @@ struct DisplayBrightness: ParsableCommand {
     func run() throws {
         let target = try DisplayControl.resolve(display, in: DisplayControl.onlineDisplays())
         let service = try DisplayControl.avService(for: target)
+        let before = try DisplayControl.read(service, UInt8(DDC_VCP_LUMINANCE))
+        let range = max(1, Int(before.maxValue))
+        var reading = before
 
         if let value {
             guard (0...100).contains(value) else {
                 throw ValidationError("Brightness must be between 0 and 100.")
             }
-            try DisplayControl.write(service, UInt8(DDC_VCP_LUMINANCE), UInt16(value))
-            let after = try DisplayControl.read(service, UInt8(DDC_VCP_LUMINANCE))
-            if after.curValue != value {
-                FileHandle.standardError.write(Data("warning: display reports \(after.curValue) after writing \(value)\n".utf8))
+            try DisplayControl.write(
+                service,
+                UInt8(DDC_VCP_LUMINANCE),
+                DDCLuminance.rawValue(percent: value, maximum: range)
+            )
+            reading = try DisplayControl.read(service, UInt8(DDC_VCP_LUMINANCE))
+            let reported = DDCLuminance.percent(raw: Int(reading.curValue), maximum: range)
+            if abs(reported - value) > 1 {
+                FileHandle.standardError.write(Data("warning: display reports \(reported)% after writing \(value)%\n".utf8))
             }
         }
 
-        let reading = try DisplayControl.read(service, UInt8(DDC_VCP_LUMINANCE))
+        let percent = DDCLuminance.percent(raw: Int(reading.curValue), maximum: range)
         if json {
             print(try CLIJSON.encodeString(Reading(
                 display: target.name, uuid: target.uuid,
-                brightness: Int(reading.curValue), max: Int(reading.maxValue))))
+                brightness: percent, max: range)))
         } else {
-            print(reading.curValue)
+            print(percent)
         }
     }
 }

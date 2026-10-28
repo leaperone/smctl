@@ -217,6 +217,15 @@ public struct FanController {
             throw FanControlError.missingModeKey(fan.index)
         }
 
+        // Steady state: a curve or manual policy re-asserts the target every second,
+        // and thermalmonitord reclaims control by flipping the mode key back. Writing
+        // the mode on every tick buys nothing, and when an unlock is failing it used to
+        // re-enter the multi-second FTST retry loop on every tick while holding the
+        // daemon's state queue. If the fan is already manual, go straight to the target.
+        if let current = try? readUInt8(modeKey), current == FanMode.manual.rawValue {
+            return .direct
+        }
+
         do {
             try backend.writeKey(modeKey, bytes: [FanMode.manual.rawValue], retryPolicy: Self.singleAttemptRetryPolicy)
             return .direct

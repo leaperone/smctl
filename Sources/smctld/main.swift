@@ -2,6 +2,25 @@ import Foundation
 import SMCtlDaemonCore
 import SMCtlProtocol
 
+// The daemon is launched by launchd with no arguments. Reject anything else instead of
+// silently starting a root daemon when someone (or a script) runs `smctld --version`.
+let arguments = Array(CommandLine.arguments.dropFirst())
+if arguments.contains("--version") || arguments.contains("-v") {
+    print(SMCtlProtocolInfo.version)
+    exit(0)
+}
+if let unexpected = arguments.first {
+    FileHandle.standardError.write(Data("""
+    smctld: unexpected argument '\(unexpected)'
+    smctld is a LaunchDaemon and takes no arguments. Manage it with:
+      sudo smctl daemon install
+      sudo smctl daemon restart
+      sudo smctl daemon uninstall
+
+    """.utf8))
+    exit(64)
+}
+
 // Logic-free entry point: everything testable lives in SMCtlDaemonCore.
 let daemon = SmctlDaemon()
 daemon.start()

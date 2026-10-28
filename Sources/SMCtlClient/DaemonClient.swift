@@ -171,12 +171,8 @@ public final class DaemonClient {
         }
         guard let ping else { return }
 
-        if ping.version != SMCtlProtocolInfo.version {
-            emit("""
-            warning: smctl is \(SMCtlProtocolInfo.version) but the running smctld is \(ping.version).
-            Install this version of the protected helper and restart the daemon:
-              sudo smctl daemon install
-            """)
+        if let advice = VersionSkew.message(client: SMCtlProtocolInfo.version, daemon: ping.version) {
+            emit(advice)
         } else if let latest = ping.latestVersion,
                   SMCtlProtocolInfo.isVersion(latest, newerThan: SMCtlProtocolInfo.version) {
             emit("""

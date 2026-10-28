@@ -159,6 +159,37 @@ final class FanSafetyGuardTests: XCTestCase {
         XCTAssertFalse(reconciler.shouldRestoreAuto(hasLocalManualPolicy: false, fanModes: [0: 0, 1: 3], ftstValue: 0))
     }
 
+    func testStartupReconciliationFailsSafeOnUnreadableFanState() {
+        // An unreadable mode key or Ftst must not be interpreted as "auto": that was
+        // the one path where a crashed instance's pinned fans survived a restart while
+        // the thermal guard believed the system was in control.
+        let reconciler = FanStartupReconciler()
+
+        XCTAssertTrue(reconciler.shouldRestoreAuto(
+            hasLocalManualPolicy: false,
+            fanModes: [:],
+            ftstValue: nil,
+            hasUnreadableState: true
+        ))
+        XCTAssertTrue(reconciler.shouldRestoreAuto(
+            hasLocalManualPolicy: false,
+            fanModes: [0: 0],
+            ftstValue: 0,
+            hasUnreadableState: true
+        ))
+        XCTAssertFalse(reconciler.shouldRestoreAuto(
+            hasLocalManualPolicy: true,
+            fanModes: [:],
+            ftstValue: nil,
+            hasUnreadableState: true
+        ))
+        XCTAssertFalse(reconciler.shouldRestoreAuto(
+            hasLocalManualPolicy: false,
+            fanModes: [0: 0],
+            ftstValue: 0
+        ))
+    }
+
     private func sample(_ celsius: Double, sensor: String = "cpu") -> FanTemperatureSample {
         FanTemperatureSample(sensor: sensor, celsius: celsius)
     }

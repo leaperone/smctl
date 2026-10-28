@@ -70,6 +70,18 @@ IOReturn ddcRead(IOAVServiceRef avService, UInt8 attrCode, DDCValue *outValue) {
         return err;
     }
 
+    // Validate the "Get VCP Feature Reply" header before trusting the payload.
+    // An unplugged/asleep cable can return stale or truncated bytes; decoding those
+    // silently reports a plausible-looking brightness instead of an error.
+    if (reply[0] != 0x6E || (reply[1] & 0x80) == 0 || reply[2] != 0x02) {
+        return kIOReturnError;
+    }
+    // Result code 0 means "no error"; anything else is a display-side rejection
+    // (e.g. unsupported VCP code), not a value.
+    if (reply[3] != 0x00) {
+        return kIOReturnUnsupported;
+    }
+
     // DDC/CI "Get VCP Feature Reply": max in bytes [6..7], current in [8..9], big-endian.
     outValue->maxValue = (reply[6] << 8) | reply[7];
     outValue->curValue = (reply[8] << 8) | reply[9];
