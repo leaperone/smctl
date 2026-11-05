@@ -539,42 +539,90 @@ public struct FanCurveEngine: Sendable {
     }
 }
 
+/// What the daemon should do with fan control after one guard evaluation.
+public enum FanSafetyAction: Equatable, Sendable {
+    /// Manual policy keeps running normally.
+    case none
+    /// Pin every fan to its hardware maximum until the latch releases. Used when
+    /// readings are trustworthy but temperatures exceed a ceiling: the manual
+    /// policy may be asking for less than full speed, and handing the fans back
+    /// to system auto can reduce cooling below what is already applied.
+    case holdMaximumRPM
+    /// Hand fans back to system control. Used when the guard is blind: without
+    /// readable sensors there is no safe target to compute.
+    case restoreAuto
+}
+
 public struct FanSafetyDecision: Equatable, Sendable {
-    public var forceAuto: Bool
+    public var action: FanSafetyAction
     public var reason: String?
 
-    public init(forceAuto: Bool, reason: String? = nil) {
-        self.forceAuto = forceAuto
+    public init(action: FanSafetyAction, reason: String? = nil) {
+        self.action = action
         self.reason = reason
     }
+
+    /// Source-compatible with the previous single-flag decision. Prefer
+    /// `init(action:reason:)`; only `.restoreAuto` or `.none` can be expressed here.
+    public init(forceAuto: Bool, reason: String? = nil) {
+        self.init(action: forceAuto ? .restoreAuto : .none, reason: reason)
+    }
+
+    /// True when the daemon must stop manual control and restore system auto.
+    public var forceAuto: Bool { action == .restoreAuto }
+    /// True when the daemon must pin every fan to its hardware maximum.
+    public var holdMaximumRPM: Bool { action == .holdMaximumRPM }
 }
 
 public struct FanSafetyGuard: Codable, Equatable, Sendable {
     /// Calibrated against field data: Apple Silicon junction hot-spot sensors (Tp0E/Tp3P
     /// class) can sit above 100C under ordinary sustained load. Non-hotspot sensors keep
-    /// the stricter base ceiling; Tp* sensors get a narrow allowance and still hard-trip.
+    /// the stricter base ceiling; Tp* sensors use their own, independently configurable
+    /// ceiling and still hard-trip above it.
     public static let defaultCeilingCelsius = 100.0
+    public static let defaultHotSpotCeilingCelsius = 120.0
     public static let hardMaximumCeilingCelsius = 105.0
     public static let hotSpotSensorPrefix = "Tp"
-    public static let hotSpotAllowanceCelsius = 10.0
-    public static let hotSpotHardMaximumCeilingCelsius = 110.0
+    public static let hotSpotHardMaximumCeilingCelsius = 125.0
     /// The latch releases only after cooling this far below the ceiling, so a trip
     /// cannot be immediately re-armed into a hot system.
-    public static let releaseHysteresisCelsius = 5.0
+    public static let defaultReleaseHysteresisCelsius = 5.0
+    public static let releaseHysteresisMaximumCelsius = 20.0
     /// Overheat must persist for this many consecutive ticks (1s cadence) to trip —
     /// debounces momentary hot-spot spikes while keeping reaction time under ~2.5s.
     /// Sensor blindness is NOT debounced: it trips immediately.
     public static let consecutiveTripsRequired = 2
 
     public var configuredCeilingCelsius: Double
+    public var configuredHotSpotCeilingCelsius: Double
+    public var releaseHysteresisCelsius: Double
     /// Set when the guard trips; manual fan control must be rejected while latched.
     public private(set) var isLatched: Bool
     private var consecutiveOverCeiling: Int
 
-    public init(configuredCeilingCelsius: Double = Self.defaultCeilingCelsius, isLatched: Bool = false) {
+    public init(
+        configuredCeilingCelsius: Double = Self.defaultCeilingCelsius,
+        hotSpotCeilingCelsius: Double = Self.defaultHotSpotCeilingCelsius,
+        releaseHysteresisCelsius: Double = Self.defaultReleaseHysteresisCelsius,
+        isLatched: Bool = false
+    ) {
         self.configuredCeilingCelsius = Self.normalizedCeiling(configuredCeilingCelsius)
+        self.configuredHotSpotCeilingCelsius = Self.normalizedHotSpotCeiling(hotSpotCeilingCelsius)
+        self.releaseHysteresisCelsius = Self.normalizedReleaseHysteresis(releaseHysteresisCelsius)
         self.isLatched = isLatched
         self.consecutiveOverCeiling = 0
+    }
+
+    /// Applies values from `/etc/smctl/config.toml` each tick. Values are clamped
+    /// to the same hard safety limits as the initializer.
+    public mutating func applyConfiguration(
+        ceilingCelsius: Double,
+        hotSpotCeilingCelsius: Double,
+        releaseHysteresisCelsius: Double
+    ) {
+        configuredCeilingCelsius = Self.normalizedCeiling(ceilingCelsius)
+        configuredHotSpotCeilingCelsius = Self.normalizedHotSpotCeiling(hotSpotCeilingCelsius)
+        self.releaseHysteresisCelsius = Self.normalizedReleaseHysteresis(releaseHysteresisCelsius)
     }
 
     /// One evaluation tick. Fail-safe semantics: while a manual fan policy is active the
@@ -582,12 +630,14 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
     /// temperature* counts as unsafe — blind manual control is never allowed.
     public mutating func evaluate(samples: [FanTemperatureSample], manualPolicyActive: Bool) -> FanSafetyDecision {
         configuredCeilingCelsius = Self.normalizedCeiling(configuredCeilingCelsius)
+        configuredHotSpotCeilingCelsius = Self.normalizedHotSpotCeiling(configuredHotSpotCeilingCelsius)
+        releaseHysteresisCelsius = Self.normalizedReleaseHysteresis(releaseHysteresisCelsius)
         let samples = samples.filter { $0.celsius.isFinite }
         // Latch release requires credible readings comfortably below each sensor's
-        // own effective ceiling. Hotspot-class Tp* readings use a higher ceiling
-        // than board/skin/proximity sensors.
+        // own effective ceiling. Hotspot-class Tp* readings use their own ceiling
+        // instead of the board/skin/proximity ceiling.
         if isLatched, !samples.isEmpty, samples.allSatisfy({ sample in
-            sample.celsius <= effectiveCeiling(for: sample) - Self.releaseHysteresisCelsius
+            sample.celsius <= effectiveCeiling(for: sample) - releaseHysteresisCelsius
         }) {
             isLatched = false
             consecutiveOverCeiling = 0
@@ -596,14 +646,14 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
         guard manualPolicyActive else {
             // System is in control; nothing to enforce.
             consecutiveOverCeiling = 0
-            return FanSafetyDecision(forceAuto: false)
+            return FanSafetyDecision(action: .none)
         }
 
         guard !samples.isEmpty else {
             isLatched = true
             consecutiveOverCeiling = 0
             return FanSafetyDecision(
-                forceAuto: true,
+                action: .restoreAuto,
                 reason: "no readable temperature sensors while fans are under manual control"
             )
         }
@@ -620,8 +670,8 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
             if consecutiveOverCeiling >= Self.consecutiveTripsRequired {
                 isLatched = true
                 return FanSafetyDecision(
-                    forceAuto: true,
-                    reason: "temperature \(offender.sample.sensor) \(offender.sample.celsius)C held at/above safety ceiling \(offender.ceiling)C for \(consecutiveOverCeiling) consecutive checks"
+                    action: .holdMaximumRPM,
+                    reason: "temperature \(offender.sample.sensor) \(offender.sample.celsius)C held at/above safety ceiling \(offender.ceiling)C for \(consecutiveOverCeiling) consecutive checks; holding fans at maximum RPM"
                 )
             }
         } else {
@@ -629,25 +679,34 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
         }
         if isLatched {
             return FanSafetyDecision(
-                forceAuto: true,
-                reason: "safety latch active until temperature falls below \(configuredCeilingCelsius - Self.releaseHysteresisCelsius)C"
+                action: .holdMaximumRPM,
+                reason: "safety latch active until temperatures fall \(Int(releaseHysteresisCelsius))C below their ceilings; holding fans at maximum RPM"
             )
         }
-        return FanSafetyDecision(forceAuto: false)
+        return FanSafetyDecision(action: .none)
     }
 
     private func effectiveCeiling(for sample: FanTemperatureSample) -> Double {
-        guard sample.sensor.hasPrefix(Self.hotSpotSensorPrefix) else {
-            return configuredCeilingCelsius
-        }
-        return min(
-            configuredCeilingCelsius + Self.hotSpotAllowanceCelsius,
-            Self.hotSpotHardMaximumCeilingCelsius
-        )
+        sample.sensor.hasPrefix(Self.hotSpotSensorPrefix)
+            ? configuredHotSpotCeilingCelsius
+            : configuredCeilingCelsius
     }
 
-    private static func normalizedCeiling(_ value: Double) -> Double {
+    public static func normalizedCeiling(_ value: Double) -> Double {
         value.isFinite && value > 0 ? min(value, hardMaximumCeilingCelsius) : defaultCeilingCelsius
+    }
+
+    public static func normalizedHotSpotCeiling(_ value: Double) -> Double {
+        value.isFinite && value > 0
+            ? min(value, hotSpotHardMaximumCeilingCelsius)
+            : defaultHotSpotCeilingCelsius
+    }
+
+    public static func normalizedReleaseHysteresis(_ value: Double) -> Double {
+        guard value.isFinite, value >= 0 else {
+            return defaultReleaseHysteresisCelsius
+        }
+        return min(value, releaseHysteresisMaximumCelsius)
     }
 }
 

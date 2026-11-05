@@ -113,10 +113,18 @@ fall_slew_rate = 180
 ```toml
 [safety]
 temp_ceiling = 100.0
+hotspot_ceiling = 120.0
+release_hysteresis = 5.0
 allow_below_minimum = false
 ```
 
-`allow_below_minimum` 是给 `smctl fan set --force` 这类低于风扇最低转速的实验用的。冷却 profile 不应该依赖它。
+- `temp_ceiling` 是非 `Tp*` 传感器的上限，默认 100°C，硬上限 105°C。
+- `hotspot_ceiling` 是 `Tp*` 热点传感器的独立上限，默认 120°C，硬上限 125°C。
+- `release_hysteresis` 是锁存释放前需要下降的幅度，默认 5°C，最大 20°C。
+- 持续超过上限时，护栏把风扇锁到硬件最高转速并保持手动模式，直到温度下降；曲线不会在过热时把转速降回去。只有温度传感器全部读不到时，才把风扇交回系统 auto。
+- `allow_below_minimum` 是给 `smctl fan set --force` 这类低于风扇最低转速的实验用的。冷却 profile 不应该依赖它。
+
+这些上限可以调高，但不要用来掩盖“曲线起得太晚”的问题；先让曲线在正确传感器上更早提速。
 
 ## 写入和启用
 

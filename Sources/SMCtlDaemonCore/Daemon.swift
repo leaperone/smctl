@@ -262,12 +262,24 @@ private struct LenientDictKey: CodingKey {
 
 struct SafetyConfig: Codable, Equatable, Sendable {
     var temp_ceiling: Double
+    /// Separate ceiling for Tp* hotspot sensors. Defaults higher than the base
+    /// ceiling because Apple Silicon hotspot readings run hot under normal load.
+    var hotspot_ceiling: Double
+    /// Degrees below a sensor's ceiling before the safety latch releases.
+    var release_hysteresis: Double
     /// Advanced opt-in: allows `fan set --force` to target below the fan's reported
     /// minimum RPM (e.g. full fan stop). Off by default; the flag alone is not enough.
     var allow_below_minimum: Bool
 
-    init(temp_ceiling: Double = FanSafetyGuard.defaultCeilingCelsius, allow_below_minimum: Bool = false) {
+    init(
+        temp_ceiling: Double = FanSafetyGuard.defaultCeilingCelsius,
+        hotspot_ceiling: Double = FanSafetyGuard.defaultHotSpotCeilingCelsius,
+        release_hysteresis: Double = FanSafetyGuard.defaultReleaseHysteresisCelsius,
+        allow_below_minimum: Bool = false
+    ) {
         self.temp_ceiling = temp_ceiling
+        self.hotspot_ceiling = hotspot_ceiling
+        self.release_hysteresis = release_hysteresis
         self.allow_below_minimum = allow_below_minimum
     }
 
@@ -276,6 +288,10 @@ struct SafetyConfig: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         temp_ceiling = try container.decodeLenientDoubleIfPresent(forKey: .temp_ceiling)
             ?? FanSafetyGuard.defaultCeilingCelsius
+        hotspot_ceiling = try container.decodeLenientDoubleIfPresent(forKey: .hotspot_ceiling)
+            ?? FanSafetyGuard.defaultHotSpotCeilingCelsius
+        release_hysteresis = try container.decodeLenientDoubleIfPresent(forKey: .release_hysteresis)
+            ?? FanSafetyGuard.defaultReleaseHysteresisCelsius
         allow_below_minimum = try container.decodeIfPresent(Bool.self, forKey: .allow_below_minimum) ?? false
     }
 }
@@ -927,21 +943,27 @@ public final class SmctlDaemon: @unchecked Sendable {
 
         // The guard is stateful (latch); it must be evaluated every tick — including
         // with manualPolicyActive == false — so the latch can release after cooling.
-        safetyGuard.configuredCeilingCelsius = FanSafetyGuard(
-            configuredCeilingCelsius: config.safety.temp_ceiling
-        ).configuredCeilingCelsius
+        safetyGuard.applyConfiguration(
+            ceilingCelsius: config.safety.temp_ceiling,
+            hotSpotCeilingCelsius: config.safety.hotspot_ceiling,
+            releaseHysteresisCelsius: config.safety.release_hysteresis
+        )
         let decision = safetyGuard.evaluate(samples: samples, manualPolicyActive: manualPolicyActive)
-        if decision.forceAuto {
+        switch decision.action {
+        case .none:
+            break
+        case .restoreAuto:
             logger.notice("Fan safety guard tripped: \(decision.reason ?? "unknown", privacy: .public); restoring all fans to auto")
+            restoreAutoAfterSafetyTripLocked()
+            return
+        case .holdMaximumRPM:
+            logger.notice("Fan safety guard tripped: \(decision.reason ?? "unknown", privacy: .public)")
             do {
-                try restoreFansAutoLocked(indices: capabilities.fans.map(\.index), clearPolicy: true)
-                config.fan.profile = "auto"
-                runtimeFanProfile = nil
-                try Self.writeConfig(config, path: configPath)
+                try holdFansAtMaximumLocked()
             } catch {
+                logger.error("Unable to hold fans at maximum RPM: \(String(describing: error), privacy: .public); restoring all fans to auto")
                 lastError = String(describing: error)
-                logger.error("Fan safety restore failed: \(String(describing: error), privacy: .public)")
-                SentryReporter.capture(error, context: "Fan safety restore failed")
+                restoreAutoAfterSafetyTripLocked()
             }
             return
         }
@@ -1057,8 +1079,9 @@ public final class SmctlDaemon: @unchecked Sendable {
         }
         throw DaemonError.unsupported(
             "Fan safety guard is latched (overheat or unreadable temperature sensors). "
-                + "Fans stay under system control until temperatures fall at least "
-                + "\(Int(FanSafetyGuard.releaseHysteresisCelsius))C below the ceiling."
+                + "Fans stay pinned at maximum (or under system control when sensors are unreadable) "
+                + "until temperatures fall at least "
+                + "\(Int(safetyGuard.releaseHysteresisCelsius))C below their ceilings."
         )
     }
 
@@ -1145,6 +1168,39 @@ public final class SmctlDaemon: @unchecked Sendable {
                 slewRateRPMPerSecond: curve.slew_rate,
                 fallSlewRateRPMPerSecond: curve.fall_slew_rate
             )
+        }
+    }
+
+    /// Overheat fallback: pin every fan to its hardware maximum while keeping
+    /// manual control. Throws when any fan cannot be driven so the caller can
+    /// fall back to system auto.
+    private func holdFansAtMaximumLocked() throws {
+        guard !capabilities.fans.isEmpty else {
+            throw DaemonError.unsupported("No controllable fans were detected.")
+        }
+        for fan in capabilities.fans {
+            guard fan.modeKey != nil else {
+                throw DaemonError.unsupported("Fan \(fan.index) has no writable mode key.")
+            }
+            guard let maximum = readNumericLocked(fan.maximumKey), maximum.isFinite, maximum > 0 else {
+                throw DaemonError.unsupported("Fan \(fan.index) maximum RPM is unreadable.")
+            }
+            _ = try setManualFanTargetLocked(index: fan.index, rpm: maximum)
+        }
+    }
+
+    /// Last-resort safety action when temperatures are unreadable or the maximum
+    /// RPM cannot be enforced: clear the policy and return fans to firmware control.
+    private func restoreAutoAfterSafetyTripLocked() {
+        do {
+            try restoreFansAutoLocked(indices: capabilities.fans.map(\.index), clearPolicy: true)
+            config.fan.profile = "auto"
+            runtimeFanProfile = nil
+            try Self.writeConfig(config, path: configPath)
+        } catch {
+            lastError = String(describing: error)
+            logger.error("Fan safety restore failed: \(String(describing: error), privacy: .public)")
+            SentryReporter.capture(error, context: "Fan safety restore failed")
         }
     }
 
@@ -1332,7 +1388,9 @@ public final class SmctlDaemon: @unchecked Sendable {
         profile = "\(config.fan.profile)"
 
         [safety]
-        temp_ceiling = \(FanSafetyGuard(configuredCeilingCelsius: config.safety.temp_ceiling).configuredCeilingCelsius)
+        temp_ceiling = \(FanSafetyGuard.normalizedCeiling(config.safety.temp_ceiling))
+        hotspot_ceiling = \(FanSafetyGuard.normalizedHotSpotCeiling(config.safety.hotspot_ceiling))
+        release_hysteresis = \(FanSafetyGuard.normalizedReleaseHysteresis(config.safety.release_hysteresis))
         allow_below_minimum = \(config.safety.allow_below_minimum ? "true" : "false")
 
         [update]

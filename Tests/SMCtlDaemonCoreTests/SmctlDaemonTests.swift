@@ -580,6 +580,22 @@ final class SmctlDaemonTests: XCTestCase {
         XCTAssertEqual(daemon.config.fan.curves.first?.hysteresis, 0)
     }
 
+    func testSafetyCeilingsAndReleaseHysteresisAreConfigurable() throws {
+        try """
+        [safety]
+        temp_ceiling = 101
+        hotspot_ceiling = 118
+        release_hysteresis = 3
+        """.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+
+        XCTAssertFalse(daemon.daemonStatus().lastError?.contains("failed to parse") ?? false)
+        XCTAssertEqual(daemon.config.safety.temp_ceiling, 101)
+        XCTAssertEqual(daemon.config.safety.hotspot_ceiling, 118)
+        XCTAssertEqual(daemon.config.safety.release_hysteresis, 3)
+    }
+
     func testMalformedConfigSurfacesInDaemonStatusAndFallsBackToDefaults() throws {
         // Part 2: a genuine type error must be visible in `daemon status`, not
         // silently swallowed while the daemon runs on defaults.
@@ -599,7 +615,7 @@ final class SmctlDaemonTests: XCTestCase {
         XCTAssertTrue(reported.contains("failed to parse"), "status should explain the failure: \(reported)")
     }
 
-    func testNanTomlCeilingStillRestoresOverheatedManualFan() throws {
+    func testNanTomlCeilingStillHoldsOverheatedManualFanAtMaximum() throws {
         try "[safety]\ntemp_ceiling = nan\n".write(toFile: configPath, atomically: true, encoding: .utf8)
         let backend = RecordingBackend()
         let daemon = makeDaemon(backend: backend, capabilities: .oneFan)
@@ -611,8 +627,49 @@ final class SmctlDaemonTests: XCTestCase {
         daemon.evaluateFanSubsystemLocked(samples: samples)
 
         XCTAssertTrue(daemon.safetyGuard.isLatched)
-        XCTAssertEqual(backend.values["F0Md"], [0])
+        XCTAssertEqual(
+            backend.values["F0Tg"], FanController.float32LittleEndianBytes(4900),
+            "overheat must pin the fan to its hardware maximum"
+        )
+        XCTAssertEqual(backend.values["F0Md"], [1], "fans must stay under manual control")
         XCTAssertEqual(daemon.safetyGuard.configuredCeilingCelsius, 100)
+    }
+
+    func testOverheatFallsBackToAutoWhenMaximumRPMIsUnreadable() throws {
+        let backend = RecordingBackend()
+        let daemon = makeDaemon(backend: backend, capabilities: .oneFan)
+        try daemon.setFanManual(index: 0, rpm: 2000, force: false)
+
+        var values = backend.values
+        values.removeValue(forKey: "F0Mx")
+        backend.values = values
+        let samples = [FanTemperatureSample(sensor: "TC0P", celsius: 105)]
+
+        daemon.evaluateFanSubsystemLocked(samples: samples)
+        daemon.evaluateFanSubsystemLocked(samples: samples)
+
+        XCTAssertTrue(daemon.safetyGuard.isLatched)
+        XCTAssertEqual(backend.values["F0Md"], [0], "unreadable maximum must fall back to auto")
+        XCTAssertEqual(daemon.config.fan.profile, "auto")
+    }
+
+    func testOverheatHoldReleasesBackToManualPolicyAfterCooling() throws {
+        let backend = RecordingBackend()
+        let daemon = makeDaemon(backend: backend, capabilities: .oneFan)
+        try daemon.setFanManual(index: 0, rpm: 2000, force: false)
+        let hot = [FanTemperatureSample(sensor: "TC0P", celsius: 105)]
+
+        daemon.evaluateFanSubsystemLocked(samples: hot)
+        daemon.evaluateFanSubsystemLocked(samples: hot)
+        XCTAssertEqual(backend.values["F0Tg"], FanController.float32LittleEndianBytes(4900))
+
+        daemon.evaluateFanSubsystemLocked(samples: [FanTemperatureSample(sensor: "TC0P", celsius: 94)])
+
+        XCTAssertFalse(daemon.safetyGuard.isLatched)
+        XCTAssertEqual(
+            backend.values["F0Tg"], FanController.float32LittleEndianBytes(2000),
+            "the manual target must resume once the latch releases"
+        )
     }
 
     // MARK: - Helpers
