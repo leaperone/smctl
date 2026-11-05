@@ -171,7 +171,7 @@ batt 的 socket 方案唯一实质优势是 curl 可调试；代价是鉴权只�
 
 - **读类请求**（sensors、status、config 读）：任何本地已签名客户端放行
 - **写类请求**（改策略、手动风扇、充放电、daemon 管理）：校验调用方 euid（root 或 admin 组）**且**代码签名匹配；不满足时 CLI 引导 `sudo smctl ...`
-- 安全关键操作双重门控：温度护栏不可关闭；怠速以下转速需 `--force` **且** 配置文件显式 `[safety] allow_below_minimum = true`，二者缺一不可；上限转速任何情况下不可越过
+- 安全关键操作双重门控：温度护栏不可关闭；过热时锁到硬件最高转速并保持手动，只有温度读不到时回系统 auto；怠速以下转速需 `--force` **且** 配置文件显式 `[safety] allow_below_minimum = true`，二者缺一不可；上限转速任何情况下不可越过
 
 ### 7.3 API 面（XPC 协议草案）
 
@@ -215,6 +215,7 @@ temp_ceiling = 100         # 非 Tp* 传感器护栏（℃），不可关闭，�
                            # （实测标定：AS 结温热点传感器负载下常态 95-103℃，见 field-notes-m4-mini.md §4）
 hotspot_ceiling = 120      # Tp* 热点传感器护栏（℃），默认 120，硬上限 125
 release_hysteresis = 5     # 锁存释放前需低于上限的度数，默认 5，最大 20
+                           # 超限动作：锁到硬件最高转速并保持手动；仅温度读不到时回 auto
 ```
 
 - CLI 改策略 = 通过 daemon API 写配置 + 立即生效（daemon 是 config 的唯一 owner，避免双写竞态）

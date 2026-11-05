@@ -949,17 +949,21 @@ public final class SmctlDaemon: @unchecked Sendable {
             releaseHysteresisCelsius: config.safety.release_hysteresis
         )
         let decision = safetyGuard.evaluate(samples: samples, manualPolicyActive: manualPolicyActive)
-        if decision.forceAuto {
+        switch decision.action {
+        case .none:
+            break
+        case .restoreAuto:
             logger.notice("Fan safety guard tripped: \(decision.reason ?? "unknown", privacy: .public); restoring all fans to auto")
+            restoreAutoAfterSafetyTripLocked()
+            return
+        case .holdMaximumRPM:
+            logger.notice("Fan safety guard tripped: \(decision.reason ?? "unknown", privacy: .public)")
             do {
-                try restoreFansAutoLocked(indices: capabilities.fans.map(\.index), clearPolicy: true)
-                config.fan.profile = "auto"
-                runtimeFanProfile = nil
-                try Self.writeConfig(config, path: configPath)
+                try holdFansAtMaximumLocked()
             } catch {
+                logger.error("Unable to hold fans at maximum RPM: \(String(describing: error), privacy: .public); restoring all fans to auto")
                 lastError = String(describing: error)
-                logger.error("Fan safety restore failed: \(String(describing: error), privacy: .public)")
-                SentryReporter.capture(error, context: "Fan safety restore failed")
+                restoreAutoAfterSafetyTripLocked()
             }
             return
         }
@@ -1075,7 +1079,8 @@ public final class SmctlDaemon: @unchecked Sendable {
         }
         throw DaemonError.unsupported(
             "Fan safety guard is latched (overheat or unreadable temperature sensors). "
-                + "Fans stay under system control until temperatures fall at least "
+                + "Fans stay pinned at maximum (or under system control when sensors are unreadable) "
+                + "until temperatures fall at least "
                 + "\(Int(safetyGuard.releaseHysteresisCelsius))C below their ceilings."
         )
     }
@@ -1163,6 +1168,39 @@ public final class SmctlDaemon: @unchecked Sendable {
                 slewRateRPMPerSecond: curve.slew_rate,
                 fallSlewRateRPMPerSecond: curve.fall_slew_rate
             )
+        }
+    }
+
+    /// Overheat fallback: pin every fan to its hardware maximum while keeping
+    /// manual control. Throws when any fan cannot be driven so the caller can
+    /// fall back to system auto.
+    private func holdFansAtMaximumLocked() throws {
+        guard !capabilities.fans.isEmpty else {
+            throw DaemonError.unsupported("No controllable fans were detected.")
+        }
+        for fan in capabilities.fans {
+            guard fan.modeKey != nil else {
+                throw DaemonError.unsupported("Fan \(fan.index) has no writable mode key.")
+            }
+            guard let maximum = readNumericLocked(fan.maximumKey), maximum.isFinite, maximum > 0 else {
+                throw DaemonError.unsupported("Fan \(fan.index) maximum RPM is unreadable.")
+            }
+            _ = try setManualFanTargetLocked(index: fan.index, rpm: maximum)
+        }
+    }
+
+    /// Last-resort safety action when temperatures are unreadable or the maximum
+    /// RPM cannot be enforced: clear the policy and return fans to firmware control.
+    private func restoreAutoAfterSafetyTripLocked() {
+        do {
+            try restoreFansAutoLocked(indices: capabilities.fans.map(\.index), clearPolicy: true)
+            config.fan.profile = "auto"
+            runtimeFanProfile = nil
+            try Self.writeConfig(config, path: configPath)
+        } catch {
+            lastError = String(describing: error)
+            logger.error("Fan safety restore failed: \(String(describing: error), privacy: .public)")
+            SentryReporter.capture(error, context: "Fan safety restore failed")
         }
     }
 

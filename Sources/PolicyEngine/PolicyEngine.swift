@@ -539,14 +539,39 @@ public struct FanCurveEngine: Sendable {
     }
 }
 
+/// What the daemon should do with fan control after one guard evaluation.
+public enum FanSafetyAction: Equatable, Sendable {
+    /// Manual policy keeps running normally.
+    case none
+    /// Pin every fan to its hardware maximum until the latch releases. Used when
+    /// readings are trustworthy but temperatures exceed a ceiling: the manual
+    /// policy may be asking for less than full speed, and handing the fans back
+    /// to system auto can reduce cooling below what is already applied.
+    case holdMaximumRPM
+    /// Hand fans back to system control. Used when the guard is blind: without
+    /// readable sensors there is no safe target to compute.
+    case restoreAuto
+}
+
 public struct FanSafetyDecision: Equatable, Sendable {
-    public var forceAuto: Bool
+    public var action: FanSafetyAction
     public var reason: String?
 
-    public init(forceAuto: Bool, reason: String? = nil) {
-        self.forceAuto = forceAuto
+    public init(action: FanSafetyAction, reason: String? = nil) {
+        self.action = action
         self.reason = reason
     }
+
+    /// Source-compatible with the previous single-flag decision. Prefer
+    /// `init(action:reason:)`; only `.restoreAuto` or `.none` can be expressed here.
+    public init(forceAuto: Bool, reason: String? = nil) {
+        self.init(action: forceAuto ? .restoreAuto : .none, reason: reason)
+    }
+
+    /// True when the daemon must stop manual control and restore system auto.
+    public var forceAuto: Bool { action == .restoreAuto }
+    /// True when the daemon must pin every fan to its hardware maximum.
+    public var holdMaximumRPM: Bool { action == .holdMaximumRPM }
 }
 
 public struct FanSafetyGuard: Codable, Equatable, Sendable {
@@ -621,14 +646,14 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
         guard manualPolicyActive else {
             // System is in control; nothing to enforce.
             consecutiveOverCeiling = 0
-            return FanSafetyDecision(forceAuto: false)
+            return FanSafetyDecision(action: .none)
         }
 
         guard !samples.isEmpty else {
             isLatched = true
             consecutiveOverCeiling = 0
             return FanSafetyDecision(
-                forceAuto: true,
+                action: .restoreAuto,
                 reason: "no readable temperature sensors while fans are under manual control"
             )
         }
@@ -645,8 +670,8 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
             if consecutiveOverCeiling >= Self.consecutiveTripsRequired {
                 isLatched = true
                 return FanSafetyDecision(
-                    forceAuto: true,
-                    reason: "temperature \(offender.sample.sensor) \(offender.sample.celsius)C held at/above safety ceiling \(offender.ceiling)C for \(consecutiveOverCeiling) consecutive checks"
+                    action: .holdMaximumRPM,
+                    reason: "temperature \(offender.sample.sensor) \(offender.sample.celsius)C held at/above safety ceiling \(offender.ceiling)C for \(consecutiveOverCeiling) consecutive checks; holding fans at maximum RPM"
                 )
             }
         } else {
@@ -654,11 +679,11 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
         }
         if isLatched {
             return FanSafetyDecision(
-                forceAuto: true,
-                reason: "safety latch active until temperatures fall \(Int(releaseHysteresisCelsius))C below their ceilings"
+                action: .holdMaximumRPM,
+                reason: "safety latch active until temperatures fall \(Int(releaseHysteresisCelsius))C below their ceilings; holding fans at maximum RPM"
             )
         }
-        return FanSafetyDecision(forceAuto: false)
+        return FanSafetyDecision(action: .none)
     }
 
     private func effectiveCeiling(for sample: FanTemperatureSample) -> Double {
