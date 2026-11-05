@@ -580,6 +580,22 @@ final class SmctlDaemonTests: XCTestCase {
         XCTAssertEqual(daemon.config.fan.curves.first?.hysteresis, 0)
     }
 
+    func testSafetyCeilingsAndReleaseHysteresisAreConfigurable() throws {
+        try """
+        [safety]
+        temp_ceiling = 101
+        hotspot_ceiling = 118
+        release_hysteresis = 3
+        """.write(toFile: configPath, atomically: true, encoding: .utf8)
+
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+
+        XCTAssertFalse(daemon.daemonStatus().lastError?.contains("failed to parse") ?? false)
+        XCTAssertEqual(daemon.config.safety.temp_ceiling, 101)
+        XCTAssertEqual(daemon.config.safety.hotspot_ceiling, 118)
+        XCTAssertEqual(daemon.config.safety.release_hysteresis, 3)
+    }
+
     func testMalformedConfigSurfacesInDaemonStatusAndFallsBackToDefaults() throws {
         // Part 2: a genuine type error must be visible in `daemon status`, not
         // silently swallowed while the daemon runs on defaults.

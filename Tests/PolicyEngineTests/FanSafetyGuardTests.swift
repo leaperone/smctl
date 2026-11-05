@@ -51,25 +51,60 @@ final class FanSafetyGuardTests: XCTestCase {
         var guardrail = FanSafetyGuard()
 
         XCTAssertFalse(
-            guardrail.evaluate(samples: [sample(105.859375, sensor: "Tp3P")], manualPolicyActive: true).forceAuto
+            guardrail.evaluate(samples: [sample(119.9, sensor: "Tp3P")], manualPolicyActive: true).forceAuto
         )
         XCTAssertFalse(
-            guardrail.evaluate(samples: [sample(105.859375, sensor: "Tp3P")], manualPolicyActive: true).forceAuto
+            guardrail.evaluate(samples: [sample(119.9, sensor: "Tp3P")], manualPolicyActive: true).forceAuto
         )
         XCTAssertFalse(guardrail.isLatched)
+        XCTAssertEqual(guardrail.configuredHotSpotCeilingCelsius, 120)
     }
 
     func testAppleSiliconHotspotSensorsStillTripAtHardCeiling() {
         var guardrail = FanSafetyGuard()
 
         XCTAssertFalse(
-            guardrail.evaluate(samples: [sample(110, sensor: "Tp3P")], manualPolicyActive: true).forceAuto
+            guardrail.evaluate(samples: [sample(120, sensor: "Tp3P")], manualPolicyActive: true).forceAuto
         )
-        let decision = guardrail.evaluate(samples: [sample(110, sensor: "Tp3P")], manualPolicyActive: true)
+        let decision = guardrail.evaluate(samples: [sample(120, sensor: "Tp3P")], manualPolicyActive: true)
         XCTAssertTrue(decision.forceAuto)
         XCTAssertTrue(guardrail.isLatched)
         XCTAssertTrue(decision.reason?.contains("Tp3P") ?? false)
-        XCTAssertTrue(decision.reason?.contains("110") ?? false)
+        XCTAssertTrue(decision.reason?.contains("120") ?? false)
+    }
+
+    func testHotSpotCeilingAndReleaseHysteresisAreConfigurable() {
+        var guardrail = FanSafetyGuard(
+            configuredCeilingCelsius: 100,
+            hotSpotCeilingCelsius: 118,
+            releaseHysteresisCelsius: 3
+        )
+        XCTAssertEqual(guardrail.configuredHotSpotCeilingCelsius, 118)
+
+        XCTAssertFalse(
+            guardrail.evaluate(samples: [sample(117.9, sensor: "Tp3P")], manualPolicyActive: true).forceAuto
+        )
+        XCTAssertFalse(
+            guardrail.evaluate(samples: [sample(118, sensor: "Tp3P")], manualPolicyActive: true).forceAuto
+        )
+        XCTAssertTrue(
+            guardrail.evaluate(samples: [sample(118, sensor: "Tp3P")], manualPolicyActive: true).forceAuto
+        )
+        XCTAssertTrue(guardrail.isLatched)
+
+        // Release threshold is 118 - 3 = 115.
+        XCTAssertTrue(
+            guardrail.evaluate(samples: [sample(116, sensor: "Tp3P")], manualPolicyActive: true).forceAuto
+        )
+        XCTAssertFalse(
+            guardrail.evaluate(samples: [sample(115, sensor: "Tp3P")], manualPolicyActive: true).forceAuto
+        )
+        XCTAssertFalse(guardrail.isLatched)
+    }
+
+    func testHotSpotCeilingClampsToHardMaximum() {
+        let guardrail = FanSafetyGuard(hotSpotCeilingCelsius: 999)
+        XCTAssertEqual(guardrail.configuredHotSpotCeilingCelsius, 125)
     }
 
     func testNonHotspotSensorsKeepBaseCeiling() {
@@ -122,16 +157,16 @@ final class FanSafetyGuardTests: XCTestCase {
     }
 
     func testHotspotLatchUsesHotspotReleaseThreshold() {
-        var guardrail = FanSafetyGuard()  // Tp* effective ceiling 110, release at 105
+        var guardrail = FanSafetyGuard()  // Tp* default ceiling 120, release at 115
 
-        _ = guardrail.evaluate(samples: [sample(110, sensor: "Tp3P")], manualPolicyActive: true)
-        _ = guardrail.evaluate(samples: [sample(110, sensor: "Tp3P")], manualPolicyActive: true)
+        _ = guardrail.evaluate(samples: [sample(120, sensor: "Tp3P")], manualPolicyActive: true)
+        _ = guardrail.evaluate(samples: [sample(120, sensor: "Tp3P")], manualPolicyActive: true)
         XCTAssertTrue(guardrail.isLatched)
 
-        XCTAssertTrue(guardrail.evaluate(samples: [sample(106, sensor: "Tp3P")], manualPolicyActive: true).forceAuto)
+        XCTAssertTrue(guardrail.evaluate(samples: [sample(116, sensor: "Tp3P")], manualPolicyActive: true).forceAuto)
         XCTAssertTrue(guardrail.isLatched)
 
-        XCTAssertFalse(guardrail.evaluate(samples: [sample(105, sensor: "Tp3P")], manualPolicyActive: true).forceAuto)
+        XCTAssertFalse(guardrail.evaluate(samples: [sample(115, sensor: "Tp3P")], manualPolicyActive: true).forceAuto)
         XCTAssertFalse(guardrail.isLatched)
     }
 

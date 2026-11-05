@@ -262,12 +262,24 @@ private struct LenientDictKey: CodingKey {
 
 struct SafetyConfig: Codable, Equatable, Sendable {
     var temp_ceiling: Double
+    /// Separate ceiling for Tp* hotspot sensors. Defaults higher than the base
+    /// ceiling because Apple Silicon hotspot readings run hot under normal load.
+    var hotspot_ceiling: Double
+    /// Degrees below a sensor's ceiling before the safety latch releases.
+    var release_hysteresis: Double
     /// Advanced opt-in: allows `fan set --force` to target below the fan's reported
     /// minimum RPM (e.g. full fan stop). Off by default; the flag alone is not enough.
     var allow_below_minimum: Bool
 
-    init(temp_ceiling: Double = FanSafetyGuard.defaultCeilingCelsius, allow_below_minimum: Bool = false) {
+    init(
+        temp_ceiling: Double = FanSafetyGuard.defaultCeilingCelsius,
+        hotspot_ceiling: Double = FanSafetyGuard.defaultHotSpotCeilingCelsius,
+        release_hysteresis: Double = FanSafetyGuard.defaultReleaseHysteresisCelsius,
+        allow_below_minimum: Bool = false
+    ) {
         self.temp_ceiling = temp_ceiling
+        self.hotspot_ceiling = hotspot_ceiling
+        self.release_hysteresis = release_hysteresis
         self.allow_below_minimum = allow_below_minimum
     }
 
@@ -276,6 +288,10 @@ struct SafetyConfig: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         temp_ceiling = try container.decodeLenientDoubleIfPresent(forKey: .temp_ceiling)
             ?? FanSafetyGuard.defaultCeilingCelsius
+        hotspot_ceiling = try container.decodeLenientDoubleIfPresent(forKey: .hotspot_ceiling)
+            ?? FanSafetyGuard.defaultHotSpotCeilingCelsius
+        release_hysteresis = try container.decodeLenientDoubleIfPresent(forKey: .release_hysteresis)
+            ?? FanSafetyGuard.defaultReleaseHysteresisCelsius
         allow_below_minimum = try container.decodeIfPresent(Bool.self, forKey: .allow_below_minimum) ?? false
     }
 }
@@ -927,9 +943,11 @@ public final class SmctlDaemon: @unchecked Sendable {
 
         // The guard is stateful (latch); it must be evaluated every tick — including
         // with manualPolicyActive == false — so the latch can release after cooling.
-        safetyGuard.configuredCeilingCelsius = FanSafetyGuard(
-            configuredCeilingCelsius: config.safety.temp_ceiling
-        ).configuredCeilingCelsius
+        safetyGuard.applyConfiguration(
+            ceilingCelsius: config.safety.temp_ceiling,
+            hotSpotCeilingCelsius: config.safety.hotspot_ceiling,
+            releaseHysteresisCelsius: config.safety.release_hysteresis
+        )
         let decision = safetyGuard.evaluate(samples: samples, manualPolicyActive: manualPolicyActive)
         if decision.forceAuto {
             logger.notice("Fan safety guard tripped: \(decision.reason ?? "unknown", privacy: .public); restoring all fans to auto")
@@ -1058,7 +1076,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         throw DaemonError.unsupported(
             "Fan safety guard is latched (overheat or unreadable temperature sensors). "
                 + "Fans stay under system control until temperatures fall at least "
-                + "\(Int(FanSafetyGuard.releaseHysteresisCelsius))C below the ceiling."
+                + "\(Int(safetyGuard.releaseHysteresisCelsius))C below their ceilings."
         )
     }
 
@@ -1332,7 +1350,9 @@ public final class SmctlDaemon: @unchecked Sendable {
         profile = "\(config.fan.profile)"
 
         [safety]
-        temp_ceiling = \(FanSafetyGuard(configuredCeilingCelsius: config.safety.temp_ceiling).configuredCeilingCelsius)
+        temp_ceiling = \(FanSafetyGuard.normalizedCeiling(config.safety.temp_ceiling))
+        hotspot_ceiling = \(FanSafetyGuard.normalizedHotSpotCeiling(config.safety.hotspot_ceiling))
+        release_hysteresis = \(FanSafetyGuard.normalizedReleaseHysteresis(config.safety.release_hysteresis))
         allow_below_minimum = \(config.safety.allow_below_minimum ? "true" : "false")
 
         [update]

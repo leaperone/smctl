@@ -211,8 +211,10 @@ slew_rate = 600            # RPM/s, rising target
 fall_slew_rate = 180       # RPM/s, falling target; defaults to slew_rate when omitted
 
 [safety]
-temp_ceiling = 100         # 温度护栏（℃），不可关闭，硬上限 105；连续 2 tick 超限才触发
+temp_ceiling = 100         # 非 Tp* 传感器护栏（℃），不可关闭，硬上限 105；连续 2 tick 超限才触发
                            # （实测标定：AS 结温热点传感器负载下常态 95-103℃，见 field-notes-m4-mini.md §4）
+hotspot_ceiling = 120      # Tp* 热点传感器护栏（℃），默认 120，硬上限 125
+release_hysteresis = 5     # 锁存释放前需低于上限的度数，默认 5，最大 20
 ```
 
 - CLI 改策略 = 通过 daemon API 写配置 + 立即生效（daemon 是 config 的唯一 owner，避免双写竞态）

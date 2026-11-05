@@ -552,29 +552,52 @@ public struct FanSafetyDecision: Equatable, Sendable {
 public struct FanSafetyGuard: Codable, Equatable, Sendable {
     /// Calibrated against field data: Apple Silicon junction hot-spot sensors (Tp0E/Tp3P
     /// class) can sit above 100C under ordinary sustained load. Non-hotspot sensors keep
-    /// the stricter base ceiling; Tp* sensors get a narrow allowance and still hard-trip.
+    /// the stricter base ceiling; Tp* sensors use their own, independently configurable
+    /// ceiling and still hard-trip above it.
     public static let defaultCeilingCelsius = 100.0
+    public static let defaultHotSpotCeilingCelsius = 120.0
     public static let hardMaximumCeilingCelsius = 105.0
     public static let hotSpotSensorPrefix = "Tp"
-    public static let hotSpotAllowanceCelsius = 10.0
-    public static let hotSpotHardMaximumCeilingCelsius = 110.0
+    public static let hotSpotHardMaximumCeilingCelsius = 125.0
     /// The latch releases only after cooling this far below the ceiling, so a trip
     /// cannot be immediately re-armed into a hot system.
-    public static let releaseHysteresisCelsius = 5.0
+    public static let defaultReleaseHysteresisCelsius = 5.0
+    public static let releaseHysteresisMaximumCelsius = 20.0
     /// Overheat must persist for this many consecutive ticks (1s cadence) to trip —
     /// debounces momentary hot-spot spikes while keeping reaction time under ~2.5s.
     /// Sensor blindness is NOT debounced: it trips immediately.
     public static let consecutiveTripsRequired = 2
 
     public var configuredCeilingCelsius: Double
+    public var configuredHotSpotCeilingCelsius: Double
+    public var releaseHysteresisCelsius: Double
     /// Set when the guard trips; manual fan control must be rejected while latched.
     public private(set) var isLatched: Bool
     private var consecutiveOverCeiling: Int
 
-    public init(configuredCeilingCelsius: Double = Self.defaultCeilingCelsius, isLatched: Bool = false) {
+    public init(
+        configuredCeilingCelsius: Double = Self.defaultCeilingCelsius,
+        hotSpotCeilingCelsius: Double = Self.defaultHotSpotCeilingCelsius,
+        releaseHysteresisCelsius: Double = Self.defaultReleaseHysteresisCelsius,
+        isLatched: Bool = false
+    ) {
         self.configuredCeilingCelsius = Self.normalizedCeiling(configuredCeilingCelsius)
+        self.configuredHotSpotCeilingCelsius = Self.normalizedHotSpotCeiling(hotSpotCeilingCelsius)
+        self.releaseHysteresisCelsius = Self.normalizedReleaseHysteresis(releaseHysteresisCelsius)
         self.isLatched = isLatched
         self.consecutiveOverCeiling = 0
+    }
+
+    /// Applies values from `/etc/smctl/config.toml` each tick. Values are clamped
+    /// to the same hard safety limits as the initializer.
+    public mutating func applyConfiguration(
+        ceilingCelsius: Double,
+        hotSpotCeilingCelsius: Double,
+        releaseHysteresisCelsius: Double
+    ) {
+        configuredCeilingCelsius = Self.normalizedCeiling(ceilingCelsius)
+        configuredHotSpotCeilingCelsius = Self.normalizedHotSpotCeiling(hotSpotCeilingCelsius)
+        self.releaseHysteresisCelsius = Self.normalizedReleaseHysteresis(releaseHysteresisCelsius)
     }
 
     /// One evaluation tick. Fail-safe semantics: while a manual fan policy is active the
@@ -582,12 +605,14 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
     /// temperature* counts as unsafe — blind manual control is never allowed.
     public mutating func evaluate(samples: [FanTemperatureSample], manualPolicyActive: Bool) -> FanSafetyDecision {
         configuredCeilingCelsius = Self.normalizedCeiling(configuredCeilingCelsius)
+        configuredHotSpotCeilingCelsius = Self.normalizedHotSpotCeiling(configuredHotSpotCeilingCelsius)
+        releaseHysteresisCelsius = Self.normalizedReleaseHysteresis(releaseHysteresisCelsius)
         let samples = samples.filter { $0.celsius.isFinite }
         // Latch release requires credible readings comfortably below each sensor's
-        // own effective ceiling. Hotspot-class Tp* readings use a higher ceiling
-        // than board/skin/proximity sensors.
+        // own effective ceiling. Hotspot-class Tp* readings use their own ceiling
+        // instead of the board/skin/proximity ceiling.
         if isLatched, !samples.isEmpty, samples.allSatisfy({ sample in
-            sample.celsius <= effectiveCeiling(for: sample) - Self.releaseHysteresisCelsius
+            sample.celsius <= effectiveCeiling(for: sample) - releaseHysteresisCelsius
         }) {
             isLatched = false
             consecutiveOverCeiling = 0
@@ -630,24 +655,33 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
         if isLatched {
             return FanSafetyDecision(
                 forceAuto: true,
-                reason: "safety latch active until temperature falls below \(configuredCeilingCelsius - Self.releaseHysteresisCelsius)C"
+                reason: "safety latch active until temperatures fall \(Int(releaseHysteresisCelsius))C below their ceilings"
             )
         }
         return FanSafetyDecision(forceAuto: false)
     }
 
     private func effectiveCeiling(for sample: FanTemperatureSample) -> Double {
-        guard sample.sensor.hasPrefix(Self.hotSpotSensorPrefix) else {
-            return configuredCeilingCelsius
-        }
-        return min(
-            configuredCeilingCelsius + Self.hotSpotAllowanceCelsius,
-            Self.hotSpotHardMaximumCeilingCelsius
-        )
+        sample.sensor.hasPrefix(Self.hotSpotSensorPrefix)
+            ? configuredHotSpotCeilingCelsius
+            : configuredCeilingCelsius
     }
 
-    private static func normalizedCeiling(_ value: Double) -> Double {
+    public static func normalizedCeiling(_ value: Double) -> Double {
         value.isFinite && value > 0 ? min(value, hardMaximumCeilingCelsius) : defaultCeilingCelsius
+    }
+
+    public static func normalizedHotSpotCeiling(_ value: Double) -> Double {
+        value.isFinite && value > 0
+            ? min(value, hotSpotHardMaximumCeilingCelsius)
+            : defaultHotSpotCeilingCelsius
+    }
+
+    public static func normalizedReleaseHysteresis(_ value: Double) -> Double {
+        guard value.isFinite, value >= 0 else {
+            return defaultReleaseHysteresisCelsius
+        }
+        return min(value, releaseHysteresisMaximumCelsius)
     }
 }
 
