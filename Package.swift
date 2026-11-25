@@ -12,8 +12,8 @@ let package = Package(
         .library(name: "PolicyEngine", targets: ["PolicyEngine"]),
         .library(name: "SMCtlProtocol", targets: ["SMCtlProtocol"]),
         .library(name: "SMCtlClient", targets: ["SMCtlClient"]),
-        .executable(name: "smctld", targets: ["smctld"]),
-        .executable(name: "smctl", targets: ["smctl"])
+        .executable(name: "pulsed", targets: ["smctld"]),
+        .executable(name: "pulse", targets: ["smctl"])
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
