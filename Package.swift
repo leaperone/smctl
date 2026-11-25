@@ -8,6 +8,7 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
+        .library(name: "ProductIdentity", targets: ["ProductIdentity"]),
         .library(name: "SMCCore", targets: ["SMCCore"]),
         .library(name: "PolicyEngine", targets: ["PolicyEngine"]),
         .library(name: "SMCtlProtocol", targets: ["SMCtlProtocol"]),

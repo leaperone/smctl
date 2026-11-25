@@ -47,6 +47,16 @@ public struct TemperatureGroupSummary: Codable, Equatable, Sendable {
     public var count: Int
     public var inactiveCount: Int
 
+    public init(group: String, label: String, averageCelsius: Double?, maximumCelsius: Double?, hottestKey: String?, count: Int, inactiveCount: Int) {
+        self.group = group
+        self.label = label
+        self.averageCelsius = averageCelsius
+        self.maximumCelsius = maximumCelsius
+        self.hottestKey = hottestKey
+        self.count = count
+        self.inactiveCount = inactiveCount
+    }
+
     public static func summarize(_ temperatures: [TemperatureDTO]) -> [TemperatureGroupSummary] {
         Dictionary(grouping: temperatures, by: \.group).map { group, readings in
             let active = readings.filter { FanTemperatureSample.plausibleCelsius.contains($0.celsius) }
