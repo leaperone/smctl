@@ -1,0 +1,4 @@
+# Pulse-owned files: keep our version when merging upstream smctl.
+# Requires once per clone: git config merge.ours.driver true
+README.md merge=ours
+LICENSE merge=ours
