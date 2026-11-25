@@ -331,6 +331,9 @@ public struct FanCurve: Codable, Equatable, Sendable {
     public var hysteresisCelsius: Double
     public var slewRateRPMPerSecond: Double?
     public var fallSlewRateRPMPerSecond: Double?
+    /// EMA time constant applied to the aggregated temperature before hysteresis;
+    /// nil or 0 disables smoothing. The safety guard always sees raw readings.
+    public var smoothingSeconds: Double?
 
     public init(
         name: String,
@@ -339,7 +342,8 @@ public struct FanCurve: Codable, Equatable, Sendable {
         points: [FanCurvePoint],
         hysteresisCelsius: Double = 0,
         slewRateRPMPerSecond: Double? = nil,
-        fallSlewRateRPMPerSecond: Double? = nil
+        fallSlewRateRPMPerSecond: Double? = nil,
+        smoothingSeconds: Double? = nil
     ) throws {
         let sortedPoints = points.sorted { $0.temperatureCelsius < $1.temperatureCelsius }
         guard sortedPoints.count >= 2 else {
@@ -355,6 +359,7 @@ public struct FanCurve: Codable, Equatable, Sendable {
         self.hysteresisCelsius = max(0, hysteresisCelsius)
         self.slewRateRPMPerSecond = slewRateRPMPerSecond.map { max(0, $0) }
         self.fallSlewRateRPMPerSecond = fallSlewRateRPMPerSecond.map { max(0, $0) }
+        self.smoothingSeconds = smoothingSeconds.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
     }
 
     public static func quiet(maxRPM: Double) -> FanCurve {
@@ -407,6 +412,7 @@ public struct FanCurveEngine: Sendable {
     public private(set) var lastEffectiveTemperature: Double?
     public private(set) var lastRPM: Double?
     public private(set) var lastEvaluationDate: Date?
+    public private(set) var smoother: TemperatureSmoother?
 
     public init(lastEffectiveTemperature: Double? = nil, lastRPM: Double? = nil, lastEvaluationDate: Date? = nil) {
         self.lastEffectiveTemperature = lastEffectiveTemperature
@@ -420,8 +426,9 @@ public struct FanCurveEngine: Sendable {
         now: Date
     ) throws -> FanCurveEvaluation {
         let aggregated = try Self.aggregate(samples: samples, sensors: curve.sensors, weights: curve.sensorWeights)
+        let smoothed = smoothedTemperature(aggregated, timeConstant: curve.smoothingSeconds, now: now)
         let effectiveTemperature = Self.hysteresisAdjustedTemperature(
-            aggregated: aggregated,
+            aggregated: smoothed,
             previous: lastEffectiveTemperature,
             hysteresis: curve.hysteresisCelsius
         )
@@ -443,6 +450,18 @@ public struct FanCurveEngine: Sendable {
             unclampedRPM: interpolated,
             targetRPM: target
         )
+    }
+
+    private mutating func smoothedTemperature(_ aggregated: Double, timeConstant: Double?, now: Date) -> Double {
+        guard let timeConstant, timeConstant > 0 else {
+            smoother = nil
+            return aggregated
+        }
+        var current = smoother ?? TemperatureSmoother(timeConstantSeconds: timeConstant)
+        current.timeConstantSeconds = timeConstant
+        let value = current.update(aggregated, now: now)
+        smoother = current
+        return value
     }
 
     static func hysteresisAdjustedTemperature(aggregated: Double, previous: Double?, hysteresis: Double) -> Double {
@@ -490,7 +509,7 @@ public struct FanCurveEngine: Sendable {
         weights: [String: Double] = [:]
     ) throws -> Double {
         let selected = samples.filter { sample in
-            sensors.isEmpty || sensors.contains(sample.sensor)
+            sensors.isEmpty || SensorSelector.matches(sample.sensor, anyOf: sensors)
         }
         guard !selected.isEmpty else {
             throw PolicyError.invalidFanCurve("no temperature samples match configured sensors")
@@ -501,7 +520,7 @@ public struct FanCurveEngine: Sendable {
             var weightedSum = 0.0
             var totalWeight = 0.0
             for sample in selected {
-                guard let weight = positiveWeights[sample.sensor] else {
+                guard let weight = SensorSelector.weight(for: sample.sensor, in: positiveWeights) else {
                     continue
                 }
                 weightedSum += sample.celsius * weight
