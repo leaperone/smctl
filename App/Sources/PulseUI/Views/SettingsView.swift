@@ -12,7 +12,7 @@ public struct SettingsView: View {
 
     public var body: some View {
         TabView {
-            GeneralSettings()
+            GeneralSettings(store: store)
                 .tabItem { Label("General", systemImage: "gearshape") }
             ServiceSettings(store: store)
                 .tabItem { Label("Service", systemImage: "lock.shield") }
@@ -25,18 +25,44 @@ public struct SettingsView: View {
 }
 
 struct GeneralSettings: View {
-    @AppStorage(SettingsKey.menuBarStyle) private var style: MenuBarStyle = .temperatureAndFan
+    let store: PulseStore
+    @AppStorage(SettingsKey.menuBarLayout) private var layout: MenuBarLayout = .stacked
+    @AppStorage(SettingsKey.menuBarItems) private var itemsText = MenuBarConfiguration.encodeItems(MenuBarConfiguration.defaultItems)
+    @AppStorage(SettingsKey.menuBarShowsIcon) private var showsIcon = true
     @AppStorage(SettingsKey.temperatureMetric) private var metric: TemperatureMetric = .cpuAverage
     @AppStorage(SettingsKey.fanSpeedUnit) private var unit: FanSpeedUnit = .rpm
     @State private var launchAtLogin = ServiceInstaller.launchesAtLogin
     @State private var loginError: String?
 
+    private var configuration: MenuBarConfiguration {
+        MenuBarConfiguration(layout: layout, items: MenuBarConfiguration.decodeItems(itemsText),
+                             showsIcon: showsIcon, metric: metric, unit: unit)
+    }
+
+    private func binding(for item: MenuBarItem) -> Binding<Bool> {
+        Binding {
+            MenuBarConfiguration.decodeItems(itemsText).contains(item)
+        } set: { enabled in
+            var items = MenuBarConfiguration.decodeItems(itemsText)
+            if enabled { items.append(item) } else { items.removeAll { $0 == item } }
+            itemsText = MenuBarConfiguration.encodeItems(items)
+        }
+    }
+
     var body: some View {
         Form {
             Section("Menu bar") {
-                Picker("Show", selection: $style) {
-                    ForEach(MenuBarStyle.allCases) { Text($0.title).tag($0) }
+                MenuBarPreview(state: store.menuBar, configuration: configuration)
+                Picker("Layout", selection: $layout) {
+                    ForEach(MenuBarLayout.allCases) { Text($0.title).tag($0) }
                 }
+                .pickerStyle(.segmented)
+                Toggle("Show icon", isOn: $showsIcon)
+                ForEach(MenuBarItem.allCases) { item in
+                    Toggle(item.title, isOn: binding(for: item))
+                }
+            }
+            Section("Readings") {
                 Picker("Temperature", selection: $metric) {
                     ForEach(TemperatureMetric.allCases) { Text($0.title).tag($0) }
                 }
@@ -61,6 +87,45 @@ struct GeneralSettings: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// The menu bar item as it will look, on a menu bar-like strip.
+public struct MenuBarPreview: View {
+    let state: MenuBarState
+    let configuration: MenuBarConfiguration
+
+    public init(state: MenuBarState, configuration: MenuBarConfiguration) {
+        self.state = state
+        self.configuration = configuration
+    }
+
+    public var body: some View {
+        let entries = state.entries(configuration)
+        let showsIcon = configuration.showsIcon || entries.isEmpty
+        HStack {
+            Spacer()
+            Group {
+                if configuration.layout == .stacked, !entries.isEmpty {
+                    Image(nsImage: MenuBarRenderer.stackedImage(entries: entries, symbol: showsIcon ? state.symbol : nil))
+                        .renderingMode(.template)
+                } else {
+                    HStack(spacing: 4) {
+                        if showsIcon { Image(systemName: state.symbol) }
+                        if !entries.isEmpty {
+                            Text(state.inlineText(configuration)).monospacedDigit()
+                        }
+                    }
+                    .font(.system(size: NSFont.menuBarFont(ofSize: 0).pointSize))
+                }
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 8)
+            .frame(height: 24)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            Spacer()
+        }
+        .accessibilityLabel("Menu bar preview")
     }
 }
 

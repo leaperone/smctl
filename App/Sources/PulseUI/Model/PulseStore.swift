@@ -71,6 +71,8 @@ public final class PulseStore {
     /// ~8 s average, which reads calmer and redraws the status item less often.
     @ObservationIgnored private var menuBarAverage = TemperatureSmoother(timeConstantSeconds: 8)
     @ObservationIgnored private var menuBarMaximum = TemperatureSmoother(timeConstantSeconds: 8)
+    @ObservationIgnored private var menuBarGPUAverage = TemperatureSmoother(timeConstantSeconds: 8)
+    @ObservationIgnored private var menuBarGPUMaximum = TemperatureSmoother(timeConstantSeconds: 8)
 
     public init(service: any PulseService = DaemonPulseService(), fallback: DirectSensorService? = DirectSensorService()) {
         self.service = service
@@ -162,12 +164,17 @@ public final class PulseStore {
     }
 
     private func updateMenuBar(now: Date) {
-        var smoothed = cpu
-        if let average = cpu?.averageCelsius { smoothed?.averageCelsius = menuBarAverage.update(average, now: now) }
-        if let maximum = cpu?.maximumCelsius { smoothed?.maximumCelsius = menuBarMaximum.update(maximum, now: now) }
+        var smoothedCPU = cpu
+        if let average = cpu?.averageCelsius { smoothedCPU?.averageCelsius = menuBarAverage.update(average, now: now) }
+        if let maximum = cpu?.maximumCelsius { smoothedCPU?.maximumCelsius = menuBarMaximum.update(maximum, now: now) }
+        var smoothedGPU = gpu
+        if let average = gpu?.averageCelsius { smoothedGPU?.averageCelsius = menuBarGPUAverage.update(average, now: now) }
+        if let maximum = gpu?.maximumCelsius { smoothedGPU?.maximumCelsius = menuBarGPUMaximum.update(maximum, now: now) }
         let next = menuBar.updated(
-            cpu: smoothed,
+            cpu: smoothedCPU,
+            gpu: smoothedGPU,
             fan: fans.first,
+            powerWatts: powerWatts,
             curveActive: daemonState.isConnected && activeProfile != "auto",
             latched: safetyLatched
         )
@@ -221,6 +228,16 @@ public final class PulseStore {
     /// CPU hot-spots on Apple Silicon (`Tp*`), Intel CPU sensors (`TC*`) otherwise.
     public var cpu: TemperatureGroupSummary? {
         groups.first { $0.group == "Tp" } ?? groups.first { $0.group == "TC" }
+    }
+
+    public var gpu: TemperatureGroupSummary? {
+        groups.first { $0.group == "Tg" } ?? groups.first { $0.group == "TG" }
+    }
+
+    /// Whole-system power (PSTR) when available, else the SoC package (PDTR).
+    public var powerWatts: Double? {
+        let power = telemetry?.power ?? []
+        return (power.first { $0.key == "PSTR" } ?? power.first { $0.key == "PDTR" })?.value
     }
 
     public var fans: [FanStatusDTO] { telemetry?.fans ?? [] }

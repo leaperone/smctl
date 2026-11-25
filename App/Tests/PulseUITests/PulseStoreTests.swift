@@ -2,6 +2,7 @@ import Foundation
 import PolicyEngine
 import SMCtlClient
 import SMCtlProtocol
+import AppKit
 import Testing
 @testable import PulseUI
 
@@ -110,28 +111,82 @@ struct MenuBarStateTests {
         FanStatusDTO(index: 0, actualRPM: rpm, targetRPM: rpm, minimumRPM: 1000, maximumRPM: 4900, mode: "manual")
     }
 
+    private func gpu(_ average: Double) -> TemperatureGroupSummary {
+        TemperatureGroupSummary(group: "Tg", label: "GPU", averageCelsius: average, maximumCelsius: average + 2,
+                                hottestKey: "Tg0D", count: 4, inactiveCount: 0)
+    }
+
     @Test func smallFluctuationsDoNotChangeTheState() {
-        let first = MenuBarState().updated(cpu: cpu(55.2, 70), fan: fan(1450), curveActive: true, latched: false)
-        let jitter = first.updated(cpu: cpu(55.8, 70.5), fan: fan(1462), curveActive: true, latched: false)
+        let first = MenuBarState().updated(cpu: cpu(55.2, 70), gpu: gpu(40), fan: fan(1450), powerWatts: 6.2, curveActive: true, latched: false)
+        let jitter = first.updated(cpu: cpu(55.8, 70.5), gpu: gpu(40.6), fan: fan(1462), powerWatts: 6.5, curveActive: true, latched: false)
         #expect(jitter == first, "jitter inside the deadbands must not redraw the menu bar")
-        let moved = first.updated(cpu: cpu(56.1, 70), fan: fan(1450), curveActive: true, latched: false)
+        let moved = first.updated(cpu: cpu(56.1, 70), gpu: gpu(40), fan: fan(1450), powerWatts: 6.2, curveActive: true, latched: false)
         #expect(moved != first)
         #expect(moved.cpuAverage == 56.1)
     }
 
-    @Test func textFollowsStyleMetricAndUnit() {
-        let state = MenuBarState().updated(cpu: cpu(55.4, 71.6), fan: fan(2950), curveActive: true, latched: false)
-        #expect(state.text(style: .temperatureAndFan, metric: .cpuAverage, unit: .rpm) == "55°  2950")
-        #expect(state.text(style: .temperature, metric: .cpuMaximum, unit: .rpm) == "72°")
-        #expect(state.text(style: .fan, metric: .cpuAverage, unit: .percent) == "50%")
-        #expect(state.text(style: .icon, metric: .cpuAverage, unit: .rpm) == "")
-        let fanless = MenuBarState().updated(cpu: cpu(40, 45), fan: nil, curveActive: false, latched: false)
-        #expect(fanless.text(style: .temperatureAndFan, metric: .cpuAverage, unit: .rpm) == "40°")
+    @Test func entriesFollowItemsMetricAndUnit() {
+        let state = MenuBarState().updated(cpu: cpu(55.4, 71.6), gpu: gpu(41.2), fan: fan(2950), powerWatts: 6.24, curveActive: true, latched: false)
+        let all = MenuBarConfiguration(layout: .stacked, items: MenuBarItem.allCases)
+        #expect(state.entries(all).map(\.value) == ["55°", "41°", "2950", "6.2W"])
+        #expect(state.entries(all).map(\.label) == ["CPU", "GPU", "FAN", "PWR"])
+        let hottestPercent = MenuBarConfiguration(items: [.cpu, .fan], metric: .cpuMaximum, unit: .percent)
+        #expect(state.entries(hottestPercent).map(\.value) == ["72°", "50%"])
     }
 
-    @Test func missingReadingsShowADash() {
-        let state = MenuBarState().updated(cpu: nil, fan: nil, curveActive: false, latched: false)
-        #expect(state.text(style: .temperature, metric: .cpuAverage, unit: .rpm) == "–")
+    @Test func inlineTextLabelsTemperaturesOnlyWhenAmbiguous() {
+        let state = MenuBarState().updated(cpu: cpu(55.4, 71.6), gpu: gpu(41.2), fan: fan(2950), curveActive: true, latched: false)
+        #expect(state.inlineText(MenuBarConfiguration(layout: .inline, items: [.cpu, .fan])) == "55°  2950")
+        #expect(state.inlineText(MenuBarConfiguration(layout: .inline, items: [.cpu, .gpu, .fan])) == "CPU 55°  GPU 41°  2950")
+    }
+
+    @Test func fanlessMacsSkipTheFanAndMissingReadingsShowADash() {
+        let fanless = MenuBarState().updated(cpu: cpu(40, 45), fan: nil, curveActive: false, latched: false)
+        #expect(fanless.entries(MenuBarConfiguration(items: [.cpu, .fan])).map(\.item) == [.cpu])
+        let empty = MenuBarState().updated(cpu: nil, fan: nil, curveActive: false, latched: false)
+        #expect(empty.entries(MenuBarConfiguration(items: [.cpu, .gpu])).map(\.value) == ["–", "–"])
+    }
+
+    @Test func itemsAreStoredInCanonicalOrder() {
+        #expect(MenuBarConfiguration.decodeItems("fan,cpu,bogus") == [.cpu, .fan])
+        #expect(MenuBarConfiguration.encodeItems([.power, .cpu]) == "cpu,power")
+        #expect(MenuBarConfiguration.decodeItems("") == [])
+    }
+
+    @Test func symbolReflectsControlAndSafety() {
+        #expect(MenuBarState().updated(cpu: nil, fan: nil, curveActive: false, latched: false).symbol == "fan")
+        #expect(MenuBarState().updated(cpu: nil, fan: nil, curveActive: true, latched: false).symbol == "fan.fill")
+        #expect(MenuBarState().updated(cpu: nil, fan: nil, curveActive: true, latched: true).symbol == "exclamationmark.triangle.fill")
+    }
+}
+
+@MainActor
+struct MenuBarRendererTests {
+    private let entries = [
+        MenuBarState.Entry(item: .cpu, label: "CPU", value: "52°"),
+        MenuBarState.Entry(item: .fan, label: "FAN", value: "999")
+    ]
+
+    @Test func stackedIsNarrowerThanInlineAndFitsTheMenuBar() {
+        let image = MenuBarRenderer.stackedImage(entries: entries, symbol: "fan")
+        #expect(image.isTemplate)
+        #expect(image.size.height <= NSStatusBar.system.thickness)
+        #expect(image.size.width < 70)
+    }
+
+    @Test func widthDoesNotChangeWhenValuesGrow() {
+        let small = MenuBarRenderer.stackedImage(entries: entries, symbol: nil)
+        let large = MenuBarRenderer.stackedImage(entries: [
+            MenuBarState.Entry(item: .cpu, label: "CPU", value: "104°"),
+            MenuBarState.Entry(item: .fan, label: "FAN", value: "4900")
+        ], symbol: nil)
+        #expect(small.size.width == large.size.width)
+    }
+
+    @Test func extraItemsAddColumns() {
+        let two = MenuBarRenderer.stackedImage(entries: entries, symbol: nil)
+        let three = MenuBarRenderer.stackedImage(entries: entries + [MenuBarState.Entry(item: .gpu, label: "GPU", value: "41°")], symbol: nil)
+        #expect(three.size.width > two.size.width)
     }
 }
 

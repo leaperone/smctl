@@ -11,7 +11,7 @@ public final class StatusItemController: NSObject, NSPopoverDelegate {
     private let store: PulseStore
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
-    private var rendered: (text: String, symbol: String)?
+    private var renderedKey: String?
     private var defaultsObserver: NSObjectProtocol?
 
     public init(store: PulseStore, openSettings: @escaping @MainActor () -> Void) {
@@ -56,25 +56,34 @@ public final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     private func render() {
-        let defaults = UserDefaults.standard
-        let style = defaults.string(forKey: SettingsKey.menuBarStyle).flatMap(MenuBarStyle.init) ?? .temperatureAndFan
-        let metric = defaults.string(forKey: SettingsKey.temperatureMetric).flatMap(TemperatureMetric.init) ?? .cpuAverage
-        let unit = defaults.string(forKey: SettingsKey.fanSpeedUnit).flatMap(FanSpeedUnit.init) ?? .rpm
+        let configuration = MenuBarConfiguration.load()
         let state = store.menuBar
-        let text = state.text(style: style, metric: metric, unit: unit)
-        let symbol = state.latched ? "exclamationmark.triangle.fill" : (state.curveActive ? "fan.fill" : "fan")
-        guard rendered?.text != text || rendered?.symbol != symbol, let button = statusItem.button else {
+        let entries = state.entries(configuration)
+        // Never leave the item empty: no readings means the icon.
+        let showsIcon = configuration.showsIcon || entries.isEmpty
+        let symbol = state.symbol
+        let key = "\(configuration.layout)|\(showsIcon)|\(symbol)|" + entries.map { "\($0.label)=\($0.value)" }.joined(separator: ",")
+        guard key != renderedKey, let button = statusItem.button else {
             return
         }
-        if rendered?.symbol != symbol {
-            let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Pulse")
-            image?.isTemplate = true
-            button.image = image
+        renderedKey = key
+        switch configuration.layout {
+        case .stacked where !entries.isEmpty:
+            button.image = MenuBarRenderer.stackedImage(entries: entries, symbol: showsIcon ? symbol : nil)
+            button.title = ""
+        default:
+            let text = entries.isEmpty ? "" : state.inlineText(configuration)
+            if showsIcon {
+                let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Pulse")
+                image?.isTemplate = true
+                button.image = image
+            } else {
+                button.image = nil
+            }
+            let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.menuBarFont(ofSize: 0).pointSize, weight: .regular)
+            button.attributedTitle = NSAttributedString(string: showsIcon && !text.isEmpty ? " \(text)" : text, attributes: [.font: font])
         }
-        rendered = (text, symbol)
-        let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.menuBarFont(ofSize: 0).pointSize, weight: .regular)
-        button.attributedTitle = NSAttributedString(string: text.isEmpty ? "" : " \(text)", attributes: [.font: font])
-        button.setAccessibilityValue(text)
+        button.setAccessibilityValue(entries.map { "\($0.item.title) \($0.value)" }.joined(separator: ", "))
     }
 
     @objc private func togglePopover(_ sender: Any?) {

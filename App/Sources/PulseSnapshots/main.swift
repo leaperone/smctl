@@ -54,6 +54,28 @@ func main() async {
             await render(PopoverView(store: store), scheme: scheme, to: output.appendingPathComponent("\(name)-\(scheme == .dark ? "dark" : "light").png"))
         }
     }
+    // Menu bar item variants, drawn on light and dark menu bar strips.
+    let state = normal.menuBar
+    let variants: [(String, MenuBarConfiguration)] = [
+        ("stacked-cpu-fan", MenuBarConfiguration(layout: .stacked, items: [.cpu, .fan])),
+        ("stacked-all", MenuBarConfiguration(layout: .stacked, items: MenuBarItem.allCases)),
+        ("stacked-noicon", MenuBarConfiguration(layout: .stacked, items: [.cpu, .gpu], showsIcon: false)),
+        ("inline-cpu-fan", MenuBarConfiguration(layout: .inline, items: [.cpu, .fan]))
+    ]
+    for (name, configuration) in variants {
+        for scheme in [ColorScheme.light, .dark] {
+            await render(MenuBarPreview(state: state, configuration: configuration).frame(width: 220).padding(8),
+                         scheme: scheme, to: output.appendingPathComponent("menubar-\(name)-\(scheme == .dark ? "dark" : "light").png"))
+        }
+    }
+    for scheme in [ColorScheme.light, .dark] {
+        await render(SettingsView(store: normal), scheme: scheme, to: output.appendingPathComponent("settings-\(scheme == .dark ? "dark" : "light").png"))
+    }
+    // Preset curves for the README (assets/img/curves-{light,dark}.png).
+    for scheme in [ColorScheme.light, .dark] {
+        await render(CurvesChart.presets.frame(width: 720, height: 360).padding(24),
+                     scheme: scheme, to: output.appendingPathComponent("curves-\(scheme == .dark ? "dark" : "light").png"))
+    }
 }
 
 await main()
