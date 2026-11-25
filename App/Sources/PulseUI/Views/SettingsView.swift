@@ -3,40 +3,84 @@ import ProductIdentity
 import SMCtlProtocol
 import SwiftUI
 
+/// Settings panes, hosted by `SettingsWindowController` in a toolbar-style tab
+/// view, like the Settings windows of Apple's apps.
+public enum SettingsPane: String, CaseIterable, Sendable {
+    case general, service, about
+
+    public var title: String {
+        switch self {
+        case .general: return "General"
+        case .service: return "Service"
+        case .about: return "About"
+        }
+    }
+
+    public var systemImage: String {
+        switch self {
+        case .general: return "gearshape"
+        case .service: return "lock.shield"
+        case .about: return "info.circle"
+        }
+    }
+
+    /// Fixed sizes: a grouped Form has no reliable intrinsic height, and an
+    /// unsized pane was laid out empty until the user switched tabs.
+    public var size: CGSize {
+        switch self {
+        case .general: return CGSize(width: 500, height: 720)
+        case .service: return CGSize(width: 500, height: 420)
+        case .about: return CGSize(width: 500, height: 300)
+        }
+    }
+}
+
 public struct SettingsView: View {
     let store: PulseStore
+    let pane: SettingsPane
 
-    public init(store: PulseStore) {
+    public init(store: PulseStore, pane: SettingsPane) {
         self.store = store
+        self.pane = pane
     }
 
     public var body: some View {
-        TabView {
-            GeneralSettings(store: store)
-                .tabItem { Label("General", systemImage: "gearshape") }
-            ServiceSettings(store: store)
-                .tabItem { Label("Service", systemImage: "lock.shield") }
-            AboutView()
-                .tabItem { Label("About", systemImage: "info.circle") }
+        Group {
+            switch pane {
+            case .general: GeneralSettings(store: store)
+            case .service: ServiceSettings(store: store)
+            case .about: AboutView()
+            }
         }
-        .frame(width: 460)
-        .scenePadding()
+        .frame(width: pane.size.width, height: pane.size.height)
     }
 }
 
 struct GeneralSettings: View {
     let store: PulseStore
+    @AppStorage(SettingsKey.menuBarIcon) private var icon: MenuBarIcon = .pulse
+    @AppStorage(SettingsKey.menuBarHeartbeat) private var heartbeat: HeartbeatMode = .whenWarm
+    @AppStorage(SettingsKey.menuBarShowsReadings) private var showsReadings = true
     @AppStorage(SettingsKey.menuBarLayout) private var layout: MenuBarLayout = .stacked
     @AppStorage(SettingsKey.menuBarItems) private var itemsText = MenuBarConfiguration.encodeItems(MenuBarConfiguration.defaultItems)
-    @AppStorage(SettingsKey.menuBarShowsIcon) private var showsIcon = true
     @AppStorage(SettingsKey.temperatureMetric) private var metric: TemperatureMetric = .cpuAverage
     @AppStorage(SettingsKey.fanSpeedUnit) private var unit: FanSpeedUnit = .rpm
     @State private var launchAtLogin = ServiceInstaller.launchesAtLogin
     @State private var loginError: String?
 
     private var configuration: MenuBarConfiguration {
-        MenuBarConfiguration(layout: layout, items: MenuBarConfiguration.decodeItems(itemsText),
-                             showsIcon: showsIcon, metric: metric, unit: unit)
+        MenuBarConfiguration(icon: icon, heartbeat: heartbeat, showsReadings: showsReadings, layout: layout,
+                             items: MenuBarConfiguration.decodeItems(itemsText), metric: metric, unit: unit)
+    }
+
+    private var heartbeatHelp: String {
+        var text = icon == .pulse ? "The dot turns from green to yellow, orange and red as the CPU warms up. " : ""
+        switch heartbeat {
+        case .off: text += "The icon stays still."
+        case .whenWarm: text += "It starts beating above \(Int(HeartbeatMode.warmThresholdCelsius)) °C, faster as the Mac heats up (40 to 120 beats per minute). Still at rest, so it costs nothing."
+        case .always: text += "It beats all the time, faster as the Mac heats up (40 to 120 beats per minute). Each beat redraws the menu bar, which costs about 2–3% CPU."
+        }
+        return text
     }
 
     private func binding(for item: MenuBarItem) -> Binding<Bool> {
@@ -51,23 +95,38 @@ struct GeneralSettings: View {
 
     var body: some View {
         Form {
-            Section("Menu bar") {
+            Section {
                 MenuBarPreview(state: store.menuBar, configuration: configuration)
-                Picker("Layout", selection: $layout) {
-                    ForEach(MenuBarLayout.allCases) { Text($0.title).tag($0) }
+            }
+            Section("Icon") {
+                Picker("Icon", selection: $icon) {
+                    ForEach(MenuBarIcon.allCases) { Text($0.title).tag($0) }
                 }
-                .pickerStyle(.segmented)
-                Toggle("Show icon", isOn: $showsIcon)
-                ForEach(MenuBarItem.allCases) { item in
-                    Toggle(item.title, isOn: binding(for: item))
+                if icon.canAnimate {
+                    Picker("Heartbeat", selection: $heartbeat) {
+                        ForEach(HeartbeatMode.allCases) { Text($0.title).tag($0) }
+                    }
+                    Text(heartbeatHelp)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             Section("Readings") {
-                Picker("Temperature", selection: $metric) {
-                    ForEach(TemperatureMetric.allCases) { Text($0.title).tag($0) }
-                }
-                Picker("Fan speed", selection: $unit) {
-                    ForEach(FanSpeedUnit.allCases) { Text($0.title).tag($0) }
+                Toggle("Show readings", isOn: $showsReadings)
+                if showsReadings {
+                    Picker("Layout", selection: $layout) {
+                        ForEach(MenuBarLayout.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    ForEach(MenuBarItem.allCases) { item in
+                        Toggle(item.title, isOn: binding(for: item))
+                    }
+                    Picker("Temperature", selection: $metric) {
+                        ForEach(TemperatureMetric.allCases) { Text($0.title).tag($0) }
+                    }
+                    Picker("Fan speed", selection: $unit) {
+                        ForEach(FanSpeedUnit.allCases) { Text($0.title).tag($0) }
+                    }
                 }
             }
             Section {
@@ -90,42 +149,54 @@ struct GeneralSettings: View {
     }
 }
 
-/// The menu bar item as it will look, on a menu bar-like strip.
+/// The menu bar item as it will look, beating like the real one, on a menu
+/// bar-like strip.
 public struct MenuBarPreview: View {
     let state: MenuBarState
     let configuration: MenuBarConfiguration
+    let animated: Bool
 
-    public init(state: MenuBarState, configuration: MenuBarConfiguration) {
+    public init(state: MenuBarState, configuration: MenuBarConfiguration, animated: Bool = true) {
         self.state = state
         self.configuration = configuration
+        self.animated = animated
     }
 
     public var body: some View {
         let entries = state.entries(configuration)
-        let showsIcon = configuration.showsIcon || entries.isEmpty
+        let base = MenuBarDrawing(
+            icon: configuration.effectiveIcon(hasReadings: !entries.isEmpty),
+            layout: configuration.layout,
+            entries: entries,
+            heatCelsius: state.heatCelsius,
+            latched: state.latched,
+            fanSymbol: state.symbol
+        )
+        // The preview beats whenever the mode is not off, so the effect is visible.
+        let beats = animated && configuration.heartbeat != .off && base.icon.canAnimate
         HStack {
             Spacer()
-            Group {
-                if configuration.layout == .stacked, !entries.isEmpty {
-                    Image(nsImage: MenuBarRenderer.stackedImage(entries: entries, symbol: showsIcon ? state.symbol : nil))
-                        .renderingMode(.template)
-                } else {
-                    HStack(spacing: 4) {
-                        if showsIcon { Image(systemName: state.symbol) }
-                        if !entries.isEmpty {
-                            Text(state.inlineText(configuration)).monospacedDigit()
-                        }
-                    }
-                    .font(.system(size: NSFont.menuBarFont(ofSize: 0).pointSize))
-                }
+            TimelineView(.animation(minimumInterval: 1.0 / 12, paused: !beats)) { context in
+                Image(nsImage: MenuBarRenderer.image(Self.frame(base, at: context.date, beating: beats)))
+                    .renderingMode(base.isTemplate ? .template : .original)
             }
             .foregroundStyle(.primary)
-            .padding(.horizontal, 8)
-            .frame(height: 24)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .padding(.horizontal, 10)
+            .frame(height: 26)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
             Spacer()
         }
         .accessibilityLabel("Menu bar preview")
+    }
+
+    /// The status item's beat envelope, evaluated at `date`.
+    static func frame(_ base: MenuBarDrawing, at date: Date, beating: Bool) -> MenuBarDrawing {
+        guard beating else { return base }
+        var frame = base
+        let period = 60 / MenuBarState.beatsPerMinute(celsius: base.heatCelsius)
+        let phase = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period)
+        frame.beat = phase < 0.16 ? 1 : 0
+        return frame
     }
 }
 

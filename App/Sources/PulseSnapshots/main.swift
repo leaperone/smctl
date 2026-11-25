@@ -59,18 +59,45 @@ func main() async {
     let variants: [(String, MenuBarConfiguration)] = [
         ("stacked-cpu-fan", MenuBarConfiguration(layout: .stacked, items: [.cpu, .fan])),
         ("stacked-all", MenuBarConfiguration(layout: .stacked, items: MenuBarItem.allCases)),
-        ("stacked-noicon", MenuBarConfiguration(layout: .stacked, items: [.cpu, .gpu], showsIcon: false)),
+        ("stacked-noicon", MenuBarConfiguration(icon: .none, layout: .stacked, items: [.cpu, .gpu])),
+        ("heartbeat-stacked", MenuBarConfiguration(icon: .heartbeat, layout: .stacked, items: [.cpu, .fan])),
+        ("fan-inline", MenuBarConfiguration(icon: .fan, layout: .inline, items: [.cpu, .fan])),
+        ("pulse-only", MenuBarConfiguration(icon: .pulse, showsReadings: false)),
+        ("heartbeat-only", MenuBarConfiguration(icon: .heartbeat, showsReadings: false)),
         ("inline-cpu-fan", MenuBarConfiguration(layout: .inline, items: [.cpu, .fan]))
     ]
     for (name, configuration) in variants {
         for scheme in [ColorScheme.light, .dark] {
-            await render(MenuBarPreview(state: state, configuration: configuration).frame(width: 220).padding(8),
+            await render(MenuBarPreview(state: state, configuration: configuration, animated: false).frame(width: 220).padding(8),
                          scheme: scheme, to: output.appendingPathComponent("menubar-\(name)-\(scheme == .dark ? "dark" : "light").png"))
         }
     }
     for scheme in [ColorScheme.light, .dark] {
-        await render(SettingsView(store: normal), scheme: scheme, to: output.appendingPathComponent("settings-\(scheme == .dark ? "dark" : "light").png"))
+        await render(SettingsView(store: normal, pane: .general), scheme: scheme, to: output.appendingPathComponent("settings-\(scheme == .dark ? "dark" : "light").png"))
     }
+    // Heartbeat frames (rest, decay, peak) at several temperatures.
+    let strip = VStack(alignment: .leading, spacing: 10) {
+        ForEach([MenuBarIcon.pulse, .heartbeat], id: \.self) { icon in
+            HStack(spacing: 18) {
+                ForEach([50.0, 70.0, 88.0, 100.0], id: \.self) { celsius in
+                    HStack(spacing: 6) {
+                        ForEach([0.0, 0.45, 1.0], id: \.self) { beat in
+                            let drawing = MenuBarDrawing(icon: icon, layout: .stacked, entries: [], heatCelsius: celsius, beat: beat)
+                            Image(nsImage: MenuBarRenderer.image(drawing))
+                                .renderingMode(drawing.isTemplate ? .template : .original)
+                        }
+                    }
+                    .padding(4)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 5))
+                }
+            }
+        }
+    }
+    .padding(10)
+    for scheme in [ColorScheme.light, .dark] {
+        await render(strip, scheme: scheme, to: output.appendingPathComponent("beats-\(scheme == .dark ? "dark" : "light").png"))
+    }
+
     // Preset curves for the README (assets/img/curves-{light,dark}.png).
     for scheme in [ColorScheme.light, .dark] {
         await render(CurvesChart.presets.frame(width: 720, height: 360).padding(24),

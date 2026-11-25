@@ -160,6 +160,39 @@ struct MenuBarStateTests {
     }
 }
 
+struct MenuBarConfigurationTests {
+    @Test func defaultsArePulseDotStackedCPUAndFanBeatingWhenWarm() {
+        let configuration = MenuBarConfiguration.load(from: UserDefaults(suiteName: "pulse-tests-\(UUID())")!)
+        #expect(configuration.icon == .pulse)
+        #expect(configuration.heartbeat == .whenWarm)
+        #expect(configuration.showsReadings)
+        #expect(configuration.layout == .stacked)
+        #expect(configuration.items == [.cpu, .fan])
+    }
+
+    @Test func readingsCanBeHiddenAndTheItemIsNeverEmpty() {
+        let state = MenuBarState().updated(cpu: nil, fan: nil, curveActive: false, latched: false)
+        let iconOnly = MenuBarConfiguration(icon: .heartbeat, showsReadings: false)
+        #expect(state.entries(iconOnly).isEmpty)
+        #expect(iconOnly.effectiveIcon(hasReadings: false) == .heartbeat)
+        let nothing = MenuBarConfiguration(icon: .none, showsReadings: false)
+        #expect(nothing.effectiveIcon(hasReadings: false) == .pulse, "an empty item would be unclickable")
+        #expect(MenuBarConfiguration(icon: .none).effectiveIcon(hasReadings: true) == .none)
+    }
+
+    @Test func heartbeatModesAndRate() {
+        #expect(!HeartbeatMode.off.beats(celsius: 99))
+        #expect(HeartbeatMode.always.beats(celsius: 40))
+        #expect(!HeartbeatMode.whenWarm.beats(celsius: 64.9))
+        #expect(HeartbeatMode.whenWarm.beats(celsius: 65))
+        #expect(!HeartbeatMode.whenWarm.beats(celsius: nil))
+        #expect(MenuBarState.beatsPerMinute(celsius: 30) == 40)
+        #expect(MenuBarState.beatsPerMinute(celsius: 70) == 80)
+        #expect(MenuBarState.beatsPerMinute(celsius: 110) == 120)
+        #expect(MenuBarState.beatsPerMinute(celsius: 60) < MenuBarState.beatsPerMinute(celsius: 80))
+    }
+}
+
 @MainActor
 struct MenuBarRendererTests {
     private let entries = [
@@ -167,26 +200,62 @@ struct MenuBarRendererTests {
         MenuBarState.Entry(item: .fan, label: "FAN", value: "999")
     ]
 
-    @Test func stackedIsNarrowerThanInlineAndFitsTheMenuBar() {
-        let image = MenuBarRenderer.stackedImage(entries: entries, symbol: "fan")
-        #expect(image.isTemplate)
-        #expect(image.size.height <= NSStatusBar.system.thickness)
-        #expect(image.size.width < 70)
+    private func drawing(_ icon: MenuBarIcon = .pulse, _ entries: [MenuBarState.Entry]? = nil, layout: MenuBarLayout = .stacked,
+                         celsius: Double = 55, beat: Double = 0) -> MenuBarDrawing {
+        MenuBarDrawing(icon: icon, layout: layout, entries: entries ?? self.entries, heatCelsius: celsius, beat: beat)
     }
 
-    @Test func widthDoesNotChangeWhenValuesGrow() {
-        let small = MenuBarRenderer.stackedImage(entries: entries, symbol: nil)
-        let large = MenuBarRenderer.stackedImage(entries: [
+    @Test func stackedFitsTheMenuBarAndIsNarrowerThanInline() {
+        let stacked = MenuBarRenderer.image(drawing())
+        let inline = MenuBarRenderer.image(drawing(layout: .inline))
+        #expect(stacked.size.height <= NSStatusBar.system.thickness)
+        #expect(stacked.size.width < 70)
+        #expect(stacked.size.width <= inline.size.width)
+    }
+
+    @Test func onlyTheColouredDotIsNotATemplate() {
+        #expect(!MenuBarRenderer.image(drawing(.pulse)).isTemplate)
+        #expect(MenuBarRenderer.image(drawing(.heartbeat)).isTemplate)
+        #expect(MenuBarRenderer.image(drawing(.fan)).isTemplate)
+        #expect(MenuBarRenderer.image(drawing(.none)).isTemplate)
+        var latched = drawing(.pulse)
+        latched.latched = true
+        #expect(MenuBarRenderer.image(latched).isTemplate, "the warning replaces the dot")
+    }
+
+    @Test func widthIsStableAcrossBeatsAndGrowingValues() {
+        let rest = MenuBarRenderer.image(drawing(beat: 0))
+        let peak = MenuBarRenderer.image(drawing(beat: 1))
+        #expect(rest.size.width == peak.size.width, "a beat must not shift the menu bar")
+        let large = MenuBarRenderer.image(drawing(.pulse, [
             MenuBarState.Entry(item: .cpu, label: "CPU", value: "104°"),
             MenuBarState.Entry(item: .fan, label: "FAN", value: "4900")
-        ], symbol: nil)
-        #expect(small.size.width == large.size.width)
+        ]))
+        #expect(rest.size.width == large.size.width)
     }
 
-    @Test func extraItemsAddColumns() {
-        let two = MenuBarRenderer.stackedImage(entries: entries, symbol: nil)
-        let three = MenuBarRenderer.stackedImage(entries: entries + [MenuBarState.Entry(item: .gpu, label: "GPU", value: "41°")], symbol: nil)
+    @Test func extraItemsAddColumnsAndIconOnlyIsCompact() {
+        let two = MenuBarRenderer.image(drawing())
+        let three = MenuBarRenderer.image(drawing(.pulse, entries + [MenuBarState.Entry(item: .gpu, label: "GPU", value: "41°")]))
         #expect(three.size.width > two.size.width)
+        #expect(MenuBarRenderer.image(drawing(.pulse, [])).size.width <= 16)
+    }
+
+    @Test func textIsCentredOnCapHeight() {
+        let font = MenuBarRenderer.valueFont
+        let baseline = (MenuBarRenderer.height + font.capHeight) / 2
+        let top = baseline - font.capHeight
+        #expect(abs(top - (MenuBarRenderer.height - baseline)) < 0.001, "equal space above caps and below baseline")
+        let origin = MenuBarRenderer.origin(x: 0, baseline: baseline, font: font)
+        #expect(abs(origin.y + font.ascender - baseline) < 0.001)
+    }
+
+    @Test func heatColoursFollowTemperature() {
+        #expect(MenuBarRenderer.heatColor(50) == .systemGreen)
+        #expect(MenuBarRenderer.heatColor(70) == .systemYellow)
+        #expect(MenuBarRenderer.heatColor(90) == .systemOrange)
+        #expect(MenuBarRenderer.heatColor(100) == .systemRed)
+        #expect(MenuBarRenderer.heatColor(nil) == .systemGray)
     }
 }
 

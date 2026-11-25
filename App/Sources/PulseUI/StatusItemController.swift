@@ -8,11 +8,20 @@ import SwiftUI
 /// symbol actually changes.
 @MainActor
 public final class StatusItemController: NSObject, NSPopoverDelegate {
+    /// Beat envelope: (delay since the previous frame, beat intensity). Two image
+    /// updates per beat (each costs ~15 ms of AppKit status item work on
+    /// macOS 26); the rest of the period shows the rest frame.
+    static let beatFrames: [(delay: TimeInterval, beat: Double)] = [(0, 1), (0.16, 0)]
+
     private let store: PulseStore
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private var renderedKey: String?
-    private var defaultsObserver: NSObjectProtocol?
+    private var frameCache: [Double: NSImage] = [:]
+    private var frameCacheKey: String?
+    private var observers: [NSObjectProtocol] = []
+    private var beatTimer: Timer?
+    private var screensAsleep = false
 
     public init(store: PulseStore, openSettings: @escaping @MainActor () -> Void) {
         self.store = store
@@ -30,15 +39,26 @@ public final class StatusItemController: NSObject, NSPopoverDelegate {
         if let button = statusItem.button {
             button.target = self
             button.action = #selector(togglePopover(_:))
-            button.imagePosition = .imageLeading
+            button.imagePosition = .imageOnly
             button.setAccessibilityLabel("Pulse")
         }
 
-        defaultsObserver = NotificationCenter.default.addObserver(
-            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
-        ) { [weak self] _ in
+        let center = NotificationCenter.default
+        let workspace = NSWorkspace.shared.notificationCenter
+        let refresh: @Sendable (Notification) -> Void = { [weak self] _ in
             MainActor.assumeIsolated { self?.render() }
         }
+        observers = [
+            center.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main, using: refresh),
+            center.addObserver(forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: .main, using: refresh),
+            workspace.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main, using: refresh),
+            workspace.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.screensAsleep = true; self?.render() }
+            },
+            workspace.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.screensAsleep = false; self?.render() }
+            }
+        ]
         observeMenuBarState()
     }
 
@@ -55,35 +75,101 @@ public final class StatusItemController: NSObject, NSPopoverDelegate {
         render()
     }
 
-    private func render() {
+    /// The drawing for the current state and settings, at rest.
+    private func drawing() -> (MenuBarDrawing, MenuBarConfiguration) {
         let configuration = MenuBarConfiguration.load()
         let state = store.menuBar
         let entries = state.entries(configuration)
-        // Never leave the item empty: no readings means the icon.
-        let showsIcon = configuration.showsIcon || entries.isEmpty
-        let symbol = state.symbol
-        let key = "\(configuration.layout)|\(showsIcon)|\(symbol)|" + entries.map { "\($0.label)=\($0.value)" }.joined(separator: ",")
-        guard key != renderedKey, let button = statusItem.button else {
+        let drawing = MenuBarDrawing(
+            icon: configuration.effectiveIcon(hasReadings: !entries.isEmpty),
+            layout: configuration.layout,
+            entries: entries,
+            heatCelsius: state.heatCelsius,
+            latched: state.latched,
+            fanSymbol: state.symbol
+        )
+        return (drawing, configuration)
+    }
+
+    private var shouldAnimate: Bool {
+        let (drawing, configuration) = drawing()
+        return configuration.heartbeat.beats(celsius: drawing.heatCelsius) && drawing.icon.canAnimate
+            && !drawing.latched && !screensAsleep
+            && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            && !ProcessInfo.processInfo.isLowPowerModeEnabled
+    }
+
+    /// Shows the rest frame for the current state and (re)starts the heartbeat.
+    private func render() {
+        show(beat: 0)
+        if shouldAnimate {
+            if beatTimer == nil { scheduleBeat(after: 0.3) }
+        } else {
+            beatTimer?.invalidate()
+            beatTimer = nil
+        }
+    }
+
+    /// Sets the button image for `beat`, touching AppKit only when it changes.
+    private func show(beat: Double) {
+        let (base, _) = drawing()
+        let stateKey = "\(base.icon)|\(base.layout)|\(base.latched)|\(base.fanSymbol)|\(MenuBarRenderer.heatColor(base.heatCelsius))|"
+            + base.entries.map { "\($0.label)=\($0.value)" }.joined(separator: ",")
+        if stateKey != frameCacheKey {
+            frameCache.removeAll()
+            frameCacheKey = stateKey
+        }
+        let key = stateKey + "|\(beat)"
+        guard key != renderedKey, let button = statusItem.button else { return }
+        renderedKey = key
+        let image: NSImage
+        if let cached = frameCache[beat] {
+            image = cached
+        } else {
+            var frame = base
+            frame.beat = beat
+            image = MenuBarRenderer.image(frame)
+            frameCache[beat] = image
+        }
+        button.image = image
+        button.title = ""
+        button.setAccessibilityValue(base.entries.map { "\($0.item.title) \($0.value)" }.joined(separator: ", "))
+    }
+
+    private func scheduleBeat(after delay: TimeInterval) {
+        beatTimer?.invalidate()
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.beat(frame: 0) }
+        }
+        timer.tolerance = 0.03
+        RunLoop.main.add(timer, forMode: .common)
+        beatTimer = timer
+    }
+
+    /// Plays one heartbeat, then waits for the next one at the current heart rate.
+    private func beat(frame index: Int) {
+        guard shouldAnimate else {
+            beatTimer = nil
+            show(beat: 0)
             return
         }
-        renderedKey = key
-        switch configuration.layout {
-        case .stacked where !entries.isEmpty:
-            button.image = MenuBarRenderer.stackedImage(entries: entries, symbol: showsIcon ? symbol : nil)
-            button.title = ""
-        default:
-            let text = entries.isEmpty ? "" : state.inlineText(configuration)
-            if showsIcon {
-                let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Pulse")
-                image?.isTemplate = true
-                button.image = image
-            } else {
-                button.image = nil
+        let frames = Self.beatFrames
+        show(beat: frames[index].beat)
+        let next = index + 1
+        let delay: TimeInterval
+        if next < frames.count {
+            delay = frames[next].delay
+            let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated { self?.beat(frame: next) }
             }
-            let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.menuBarFont(ofSize: 0).pointSize, weight: .regular)
-            button.attributedTitle = NSAttributedString(string: showsIcon && !text.isEmpty ? " \(text)" : text, attributes: [.font: font])
+            timer.tolerance = 0.02
+            RunLoop.main.add(timer, forMode: .common)
+            beatTimer = timer
+        } else {
+            let period = 60 / MenuBarState.beatsPerMinute(celsius: store.menuBar.heatCelsius)
+            let elapsed = frames.map(\.delay).reduce(0, +)
+            scheduleBeat(after: max(0.2, period - elapsed))
         }
-        button.setAccessibilityValue(entries.map { "\($0.item.title) \($0.value)" }.joined(separator: ", "))
     }
 
     @objc private func togglePopover(_ sender: Any?) {
@@ -104,8 +190,8 @@ public final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 }
 
-/// The settings window, owned explicitly: a menu bar-only app has no app menu,
-/// and SettingsLink needs a SwiftUI scene around the popover.
+/// The settings window: a toolbar-style tab view (like Safari's or Xcode's
+/// Settings), one fixed-size SwiftUI pane per tab.
 @MainActor
 public final class SettingsWindowController {
     private let store: PulseStore
@@ -117,11 +203,26 @@ public final class SettingsWindowController {
 
     public func show() {
         if window == nil {
-            let controller = NSHostingController(rootView: SettingsView(store: store))
-            let window = NSWindow(contentViewController: controller)
+            let tabs = NSTabViewController()
+            tabs.tabStyle = .toolbar
+            tabs.transitionOptions = [.crossfade, .allowUserInteraction]
+            tabs.canPropagateSelectedChildViewControllerTitle = false
+            for pane in SettingsPane.allCases {
+                let controller = NSHostingController(rootView: SettingsView(store: store, pane: pane))
+                controller.sizingOptions = [.preferredContentSize]
+                controller.preferredContentSize = pane.size
+                controller.title = pane.title
+                let item = NSTabViewItem(viewController: controller)
+                item.label = pane.title
+                item.image = NSImage(systemSymbolName: pane.systemImage, accessibilityDescription: pane.title)
+                tabs.addTabViewItem(item)
+            }
+            let window = NSWindow(contentViewController: tabs)
             window.title = "Pulse Settings"
             window.styleMask = [.titled, .closable, .miniaturizable]
+            window.toolbarStyle = .preference
             window.isReleasedWhenClosed = false
+            window.setContentSize(SettingsPane.general.size)
             window.center()
             self.window = window
         }
