@@ -85,7 +85,7 @@ On détecte les autres contrôleurs de ventilateurs (daemon smctl, TG Pro, Macs 
 
 - [x] **Phase 0, fondations** : fork, build, tests, daemon ad hoc sous macOS 27.2, écriture sur le ventilateur vérifiée, licence MIT, centralisation des identifiants
 - [x] **Phase 1a, moteur** : conversion % → RPM (`FanSpeedRange`), `FanCurveShape` (compilation adaptative), motifs de capteurs, EMA
-- [ ] **Phase 1b, daemon** : config TOML étendue, presets, zone morte d'écriture, XPC (`getTelemetry`, CRUD des courbes, preview)
+- [x] **Phase 1b, daemon** : config TOML étendue, presets, zone morte d'écriture, XPC (`getTelemetry`, CRUD des courbes, preview)
 - [ ] **Phase 1c, CLI** : `pulse status`, `pulse fan curve …`, détection des conflits
 - [ ] **Phase 2, app de barre des menus** : XcodeGen, label, popover, sélecteur de profil, installation du service, réglages
 - [ ] **Phase 3, éditeur** : graphique interactif, formes, poignées et raideur, conversion en points, aperçu live, bascule %/RPM
