@@ -4,6 +4,7 @@ import XCTest
 @testable import SMCtlDaemonCore
 @testable import SMCCore
 import PolicyEngine
+import ProductIdentity
 import SMCtlProtocol
 
 final class SmctlDaemonTests: XCTestCase {
@@ -11,7 +12,7 @@ final class SmctlDaemonTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        setenv("SMCTL_SENTRY_DISABLED", "1", 1)
+        setenv("\(ProductIdentity.environmentPrefix)_SENTRY_DISABLED", "1", 1)
         configPath = NSTemporaryDirectory() + "smctl-test-\(UUID().uuidString).toml"
     }
 
@@ -19,7 +20,7 @@ final class SmctlDaemonTests: XCTestCase {
         if let configPath {
             try? FileManager.default.removeItem(atPath: configPath)
         }
-        unsetenv("SMCTL_SENTRY_DISABLED")
+        unsetenv("\(ProductIdentity.environmentPrefix)_SENTRY_DISABLED")
         super.tearDown()
     }
 

@@ -96,7 +96,7 @@ let package = Package(
         ),
         .testTarget(
             name: "SMCtlDaemonCoreTests",
-            dependencies: ["SMCtlDaemonCore"]
+            dependencies: ["ProductIdentity", "SMCtlDaemonCore"]
         ),
         .testTarget(
             name: "smctlTests",
