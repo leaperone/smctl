@@ -149,18 +149,25 @@ struct FanCurveConfig: Codable, Equatable, Sendable {
     var sensors: [String]
     var points: [[FanPointValue]]
     var hysteresis: Double
-    var slew_rate: Double?
-    var fall_slew_rate: Double?
+    var slew_rate: FanRateValue?
+    var fall_slew_rate: FanRateValue?
     var weights: [String: Double]?
+    // Pulse extensions (see FanCurveConfig+Spec.swift); all optional.
+    var label: String?
+    var shape: FanShapeConfig?
+    var smoothing: Double?
 
     init(
         name: String,
         sensors: [String] = [],
         points: [[FanPointValue]],
         hysteresis: Double = 0,
-        slew_rate: Double? = nil,
-        fall_slew_rate: Double? = nil,
-        weights: [String: Double]? = nil
+        slew_rate: FanRateValue? = nil,
+        fall_slew_rate: FanRateValue? = nil,
+        weights: [String: Double]? = nil,
+        label: String? = nil,
+        shape: FanShapeConfig? = nil,
+        smoothing: Double? = nil
     ) {
         self.name = name
         self.sensors = sensors
@@ -169,10 +176,14 @@ struct FanCurveConfig: Codable, Equatable, Sendable {
         self.slew_rate = slew_rate
         self.fall_slew_rate = fall_slew_rate
         self.weights = weights
+        self.label = label
+        self.shape = shape
+        self.smoothing = smoothing
     }
 
     enum CodingKeys: String, CodingKey {
         case name, sensors, points, hysteresis, slew_rate, fall_slew_rate, weights
+        case label, shape, smoothing
     }
 
     // Custom decoding so optional numeric tuning fields default rather than throwing
@@ -181,17 +192,22 @@ struct FanCurveConfig: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         name = try container.decode(String.self, forKey: .name)
         sensors = try container.decodeIfPresent([String].self, forKey: .sensors) ?? []
-        points = try container.decode([[FanPointValue]].self, forKey: .points)
+        // A shape-based curve has no points.
+        points = try container.decodeIfPresent([[FanPointValue]].self, forKey: .points) ?? []
         hysteresis = try container.decodeLenientDoubleIfPresent(forKey: .hysteresis) ?? 0
-        slew_rate = try container.decodeLenientDoubleIfPresent(forKey: .slew_rate)
-        fall_slew_rate = try container.decodeLenientDoubleIfPresent(forKey: .fall_slew_rate)
+        slew_rate = try container.decodeIfPresent(FanRateValue.self, forKey: .slew_rate)
+        fall_slew_rate = try container.decodeIfPresent(FanRateValue.self, forKey: .fall_slew_rate)
         weights = try container.decodeLenientDoubleDictionaryIfPresent(forKey: .weights)
+        label = try container.decodeIfPresent(String.self, forKey: .label)
+        shape = try container.decodeIfPresent(FanShapeConfig.self, forKey: .shape)
+        smoothing = try container.decodeLenientDoubleIfPresent(forKey: .smoothing)
     }
 }
 
 enum FanPointValue: Codable, Equatable, Sendable {
     case number(Double)
     case maximum
+    case percent(Double)
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
@@ -211,7 +227,11 @@ enum FanPointValue: Codable, Equatable, Sendable {
             self = .maximum
             return
         }
-        throw DecodingError.dataCorruptedError(in: container, debugDescription: "Fan point values must be numbers or 'max'.")
+        if string.hasSuffix("%"), let value = Double(string.dropLast().trimmingCharacters(in: .whitespaces)) {
+            self = .percent(value)
+            return
+        }
+        throw DecodingError.dataCorruptedError(in: container, debugDescription: "Fan point values must be numbers, percentages like '40%', or 'max'.")
     }
 
     func encode(to encoder: Encoder) throws {
@@ -221,6 +241,8 @@ enum FanPointValue: Codable, Equatable, Sendable {
             try container.encode(value)
         case .maximum:
             try container.encode("max")
+        case .percent(let value):
+            try container.encode("\(FanSpeedValue.percent(value).configString)")
         }
     }
 }
@@ -308,30 +330,34 @@ public final class SmctlDaemon: @unchecked Sendable {
     static let period: TimeInterval = 10
     static let foregroundDischargeLease: TimeInterval = 30
 
-    private let queue = DispatchQueue(label: "\(ProductIdentity.logSubsystem).daemon.state")
+    let queue = DispatchQueue(label: "\(ProductIdentity.logSubsystem).daemon.state")
     var config = DaemonConfig()
     private var chargeMachine = ChargeStateMachine(period: SmctlDaemon.period)
     private var sleepMachine = SleepStateMachine(policy: .strict)
-    private var capabilities = Capabilities()
+    var capabilities = Capabilities()
     var ftstGate = FtstGateManager()
     var manualFanTargets: [Int: Double] = [:]
     private var pendingFanRestores: Set<Int> = []
     private var foregroundDischarge: ForegroundDischarge?
-    private var fanCurveEngines: [Int: FanCurveEngine] = [:]
-    private var runtimeFanProfile: String?
+    var fanCurveEngines: [Int: FanCurveEngine] = [:]
+    var runtimeFanProfile: String?
     // Stateful: carries the safety latch across ticks; ceiling refreshed from config.
     var safetyGuard = FanSafetyGuard()
+    // Pulse: cached per-tick state served by getTelemetry without extra SMC I/O.
+    var lastSnapshot: SensorSnapshot?
+    var lastCurveEvaluations: [Int: FanCurveEvaluation] = [:]
+    var lastSafetyTripReason: String?
     // Stateful: carries per-rule debounce/cooldown across ticks.
     var alertEngine = AlertEngine()
     private let alertRunner = AlertActionRunner()
     private var alertHistory: [AlertEvent] = []
     private static let alertHistoryLimit = 50
     private var lastEvaluation: Date?
-    private var lastError: String?
+    var lastError: String?
     /// Set when the on-disk config fails to parse. The daemon keeps running on
     /// defaults, so without this the failure was invisible — `daemon status` showed
     /// `last error: -` while silently ignoring the user's config (issue #9).
-    private var configError: String?
+    var configError: String?
     private var lastWriteError: String?
     private var timer: DispatchSourceTimer?
     private var fanTimer: DispatchSourceTimer?
@@ -342,7 +368,7 @@ public final class SmctlDaemon: @unchecked Sendable {
     private var powerNotifier: io_object_t = 0
 
     private let backend: (any SMCWriteBackend)?
-    private let reader: SensorReader?
+    let reader: SensorReader?
 
     public convenience init() {
         var backend: SMCConnection?
@@ -660,7 +686,7 @@ public final class SmctlDaemon: @unchecked Sendable {
                 guard capabilities.fans.contains(where: { $0.modeKey != nil }) else {
                     throw DaemonError.unsupported("No writable fan mode keys were detected on this Mac/system.")
                 }
-                _ = try curveForProfileLocked(normalized, maximumRPM: capabilities.fans.first.flatMap { readNumericLocked($0.maximumKey) } ?? 6000)
+                _ = try curveForProfileLocked(normalized, range: firstFanRangeLocked())
                 manualFanTargets.removeAll()
                 fanCurveEngines.removeAll()
                 runtimeFanProfile = nil
@@ -791,7 +817,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         return value > 0
     }
 
-    private func readNumericLocked(_ key: String) -> Double? {
+    func readNumericLocked(_ key: String) -> Double? {
         guard let value = try? backend?.readValue(key) else {
             return nil
         }
@@ -933,6 +959,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         ).configuredCeilingCelsius
         let decision = safetyGuard.evaluate(samples: samples, manualPolicyActive: manualPolicyActive)
         if decision.forceAuto {
+            lastSafetyTripReason = decision.reason
             logger.notice("Fan safety guard tripped: \(decision.reason ?? "unknown", privacy: .public); restoring all fans to auto")
             do {
                 try restoreFansAutoLocked(indices: capabilities.fans.map(\.index), clearPolicy: true)
@@ -1049,7 +1076,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         }
     }
 
-    private func rejectIfSafetyLatchedLocked() throws {
+    func rejectIfSafetyLatchedLocked() throws {
         guard pendingFanRestores.isEmpty else {
             throw DaemonError.unsupported("Manual fan control is unavailable until pending auto restoration succeeds.")
         }
@@ -1068,6 +1095,10 @@ public final class SmctlDaemon: @unchecked Sendable {
             return
         }
         for (index, rpm) in manualFanTargets.sorted(by: { $0.key < $1.key }) {
+            if let fan = capabilities.fans.first(where: { $0.index == index }),
+               !fanTargetNeedsWriteLocked(fan: fan, target: rpm, range: fanRangeLocked(fan)) {
+                continue
+            }
             _ = try setManualFanTargetLocked(index: index, rpm: rpm)
         }
     }
@@ -1102,54 +1133,31 @@ public final class SmctlDaemon: @unchecked Sendable {
         for fan in capabilities.fans {
             let maximum = readNumericLocked(fan.maximumKey) ?? 6000
             let minimum = readNumericLocked(fan.minimumKey) ?? 0
-            let curve = try curveForProfileLocked(profile, maximumRPM: maximum)
+            let range = FanSpeedRange(minimumRPM: minimum, maximumRPM: maximum)
+            let curve = try curveForProfileLocked(profile, range: range)
             var engine = fanCurveEngines[fan.index] ?? FanCurveEngine()
             let evaluation = try engine.evaluate(curve: curve, samples: samples, now: Date())
             fanCurveEngines[fan.index] = engine
+            lastCurveEvaluations[fan.index] = evaluation
             let target = min(maximum, max(minimum, evaluation.targetRPM))
+            guard fanTargetNeedsWriteLocked(fan: fan, target: target, range: range) else { continue }
             _ = try setManualFanTargetLocked(index: fan.index, rpm: target)
         }
     }
 
-    private func curveForProfileLocked(_ profile: String, maximumRPM: Double) throws -> FanCurve {
+    func curveForProfileLocked(_ profile: String, range: FanSpeedRange) throws -> FanCurve {
         switch profile {
         case "quiet":
-            return .quiet(maxRPM: maximumRPM)
+            return .quiet(maxRPM: range.maximumRPM)
         case "full":
-            return .full(maxRPM: maximumRPM)
+            return .full(maxRPM: range.maximumRPM)
         default:
-            guard let curve = config.fan.curves.first(where: { $0.name == profile }) else {
-                throw DaemonError.unsupported("Fan profile '\(profile)' is not configured.")
-            }
-            let points = try curve.points.map { values -> FanCurvePoint in
-                guard values.count == 2 else {
-                    throw DaemonError.unsupported("Fan curve '\(curve.name)' points must contain [temperature, rpm].")
-                }
-                guard case .number(let temperature) = values[0] else {
-                    throw DaemonError.unsupported("Fan curve '\(curve.name)' temperature must be numeric.")
-                }
-                let rpm: Double
-                switch values[1] {
-                case .number(let value):
-                    rpm = value
-                case .maximum:
-                    rpm = maximumRPM
-                }
-                return FanCurvePoint(temperature, rpm)
-            }
-            return try FanCurve(
-                name: curve.name,
-                sensors: curve.sensors,
-                sensorWeights: curve.weights ?? [:],
-                points: points,
-                hysteresisCelsius: curve.hysteresis,
-                slewRateRPMPerSecond: curve.slew_rate,
-                fallSlewRateRPMPerSecond: curve.fall_slew_rate
-            )
+            // Pulse presets and config curves (RPM, percent or shape) — FanCurveConfig+Spec.swift.
+            return try fanCurveSpecLocked(named: profile).resolve(for: range)
         }
     }
 
-    private func restoreFansAutoLocked(indices: [Int], clearPolicy: Bool = false) throws {
+    func restoreFansAutoLocked(indices: [Int], clearPolicy: Bool = false) throws {
         let controller = try fanControllerLocked()
         let ordered = indices.sorted()
         for (offset, index) in ordered.enumerated() {
@@ -1197,7 +1205,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         currentFanProfileLocked() != "auto" || !manualFanTargets.isEmpty || ftstGate.hasManualFans
     }
 
-    private func currentFanProfileLocked() -> String {
+    func currentFanProfileLocked() -> String {
         runtimeFanProfile ?? config.fan.profile
     }
 
@@ -1209,12 +1217,14 @@ public final class SmctlDaemon: @unchecked Sendable {
         guard let reader else {
             return []
         }
-        return reader.snapshot().temperatures.compactMap {
+        let snapshot = reader.snapshot()
+        lastSnapshot = snapshot
+        return snapshot.temperatures.compactMap {
             $0.celsius.isFinite ? FanTemperatureSample(sensor: $0.key, celsius: $0.celsius) : nil
         }
     }
 
-    private func readUInt8Locked(_ key: String) -> UInt8? {
+    func readUInt8Locked(_ key: String) -> UInt8? {
         guard let value = try? backend?.readValue(key) else {
             return nil
         }
@@ -1260,7 +1270,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         )
     }
 
-    private func makeFansStatusLocked(message: String?) -> FansStatusDTO {
+    func makeFansStatusLocked(message: String?) -> FansStatusDTO {
         let statuses = fanControllerStatusLocked().map { status in
             FanStatusDTO(
                 index: status.index,
@@ -1319,7 +1329,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         }
     }
 
-    private static func writeConfig(_ config: DaemonConfig, path: String) throws {
+    static func writeConfig(_ config: DaemonConfig, path: String) throws {
         let directory = (path as NSString).deletingLastPathComponent
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         var text = """
@@ -1347,25 +1357,7 @@ public final class SmctlDaemon: @unchecked Sendable {
 
         """
         for curve in config.fan.curves {
-            text += """
-
-            [[fan.curves]]
-            name = "\(curve.name)"
-            sensors = [\(curve.sensors.map { "\"\($0)\"" }.joined(separator: ", "))]
-            points = [\(curve.points.map(formatFanPoint).joined(separator: ", "))]
-            hysteresis = \(curve.hysteresis)
-
-            """
-            if let slewRate = curve.slew_rate {
-                text += "slew_rate = \(slewRate)\n"
-            }
-            if let fallSlewRate = curve.fall_slew_rate {
-                text += "fall_slew_rate = \(fallSlewRate)\n"
-            }
-            if let weights = curve.weights, !weights.isEmpty {
-                let pairs = weights.sorted { $0.key < $1.key }.map { "\"\($0.key)\" = \($0.value)" }.joined(separator: ", ")
-                text += "weights = { \(pairs) }\n"
-            }
+            text += formatCurveConfig(curve)
         }
         // Round-trip alert rules so a battery/fan write never silently drops the
         // user's alert config (writeConfig rewrites the whole file).
@@ -1390,13 +1382,15 @@ public final class SmctlDaemon: @unchecked Sendable {
         return lines.joined(separator: "\n") + "\n"
     }
 
-    private static func formatFanPoint(_ values: [FanPointValue]) -> String {
+    static func formatFanPoint(_ values: [FanPointValue]) -> String {
         "[" + values.map { value in
             switch value {
             case .number(let number):
                 return String(number)
             case .maximum:
                 return "\"max\""
+            case .percent(let value):
+                return "\"\(FanSpeedValue.percent(value).configString)\""
             }
         }.joined(separator: ", ") + "]"
     }
@@ -1445,7 +1439,7 @@ private func powerCallback(
 }
 
 final class XPCService: NSObject, SMCtlDaemonXPCProtocol {
-    private let daemon: SmctlDaemon
+    let daemon: SmctlDaemon
     private weak var connection: NSXPCConnection?
     private let owner: UUID
 
@@ -1534,7 +1528,7 @@ final class XPCService: NSObject, SMCtlDaemonXPCProtocol {
         }
     }
 
-    private func doWrite(_ reply: @escaping (Data?, String?) -> Void, _ body: () throws -> Void) {
+    func doWrite(_ reply: @escaping (Data?, String?) -> Void, _ body: () throws -> Void) {
         do {
             try authorizeWrite()
             try body()
@@ -1588,7 +1582,7 @@ final class XPCService: NSObject, SMCtlDaemonXPCProtocol {
         return groups.prefix(Int(count)).contains(admin.pointee.gr_gid)
     }
 
-    private func send<T: Encodable>(_ value: T, _ reply: @escaping (Data?, String?) -> Void) {
+    func send<T: Encodable>(_ value: T, _ reply: @escaping (Data?, String?) -> Void) {
         do {
             reply(try SMCtlProtocolCoding.encode(value), nil)
         } catch {
@@ -1607,7 +1601,7 @@ public final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
     public func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
         let owner = UUID()
         let daemon = self.daemon
-        connection.exportedInterface = NSXPCInterface(with: SMCtlDaemonXPCProtocol.self)
+        connection.exportedInterface = NSXPCInterface(with: PulseDaemonXPCProtocol.self)
         connection.exportedObject = XPCService(daemon: daemon, connection: connection, owner: owner)
         connection.invalidationHandler = { [weak daemon] in daemon?.cancelForegroundDischarge(owner: owner) }
         connection.interruptionHandler = { [weak daemon] in daemon?.cancelForegroundDischarge(owner: owner) }

@@ -7,7 +7,7 @@ public final class DaemonClient {
 
     public init() {
         connection = NSXPCConnection(machServiceName: SMCtlProtocolInfo.machServiceName, options: .privileged)
-        connection.remoteObjectInterface = NSXPCInterface(with: SMCtlDaemonXPCProtocol.self)
+        connection.remoteObjectInterface = NSXPCInterface(with: PulseDaemonXPCProtocol.self)
         // Resumed exactly once here; a second resume would trap (over-resume).
         connection.resume()
     }
@@ -107,8 +107,8 @@ public final class DaemonClient {
         }
     }
 
-    private func call<T: Decodable>(
-        _ body: (SMCtlDaemonXPCProtocol, @escaping (Data?, String?) -> Void) -> Void
+    func call<T: Decodable>(
+        _ body: (PulseDaemonXPCProtocol, @escaping (Data?, String?) -> Void) -> Void
     ) throws -> T {
         // Note: the connection is resumed exactly once in init. Resuming an already
         // active NSXPCConnection is an over-resume and traps (SIGTRAP).
@@ -124,7 +124,7 @@ public final class DaemonClient {
                 box.error = String(describing: error)
             }
             semaphore.signal()
-        } as? SMCtlDaemonXPCProtocol
+        } as? PulseDaemonXPCProtocol
         guard let proxy else {
             throw SMCtlClientError("Could not create XPC proxy.")
         }
@@ -174,15 +174,15 @@ public final class DaemonClient {
 
         if ping.version != SMCtlProtocolInfo.version {
             emit("""
-            warning: smctl is \(SMCtlProtocolInfo.version) but the running smctld is \(ping.version).
+            warning: \(ProductIdentity.cliName) is \(SMCtlProtocolInfo.version) but the running \(ProductIdentity.daemonName) is \(ping.version).
             Install this version of the protected helper and restart the daemon:
-              sudo smctl daemon install
+              sudo \(ProductIdentity.cliName) daemon install
             """)
         } else if let latest = ping.latestVersion,
                   SMCtlProtocolInfo.isVersion(latest, newerThan: SMCtlProtocolInfo.version) {
             emit("""
-            note: smctl \(latest) is available (you have \(SMCtlProtocolInfo.version)). Upgrade:
-              brew upgrade smctl && sudo smctl daemon install
+            note: \(ProductIdentity.cliName) \(latest) is available (you have \(SMCtlProtocolInfo.version)). Upgrade:
+              \(ProductIdentity.upgradeCommand) && sudo \(ProductIdentity.cliName) daemon install
             """)
         }
     }

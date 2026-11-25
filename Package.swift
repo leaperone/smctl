@@ -32,11 +32,11 @@ let package = Package(
         .target(name: "PolicyEngine"),
         .target(
             name: "SMCtlProtocol",
-            dependencies: ["ProductIdentity"]
+            dependencies: ["ProductIdentity", "PolicyEngine"]
         ),
         .target(
             name: "SMCtlClient",
-            dependencies: ["ProductIdentity", "SMCtlProtocol"]
+            dependencies: ["ProductIdentity", "SMCtlProtocol", "PolicyEngine"]
         ),
         .target(
             name: "DisplayDDC",
