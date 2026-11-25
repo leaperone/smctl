@@ -752,10 +752,7 @@ struct DaemonInstall: ParsableCommand {
         try plist.write(toFile: Self.plistPath, atomically: true, encoding: .utf8)
         try runProcess("/bin/chmod", ["0644", Self.plistPath])
         try runProcess("/usr/sbin/chown", ["root:wheel", Self.plistPath])
-        if (try? runProcess("/bin/launchctl", ["print", "system/\(SMCtlProtocolInfo.machServiceName)"])) != nil {
-            try runProcess("/bin/launchctl", ["bootout", "system/\(SMCtlProtocolInfo.machServiceName)"])
-        }
-        try runProcess("/bin/launchctl", ["bootstrap", "system", Self.plistPath])
+        try reloadLaunchDaemon(label: SMCtlProtocolInfo.machServiceName, plistPath: Self.plistPath)
         print("Installed \(ProductIdentity.daemonName) at \(Self.installedHelperPath)")
         printFanControlConflictWarning()
     }

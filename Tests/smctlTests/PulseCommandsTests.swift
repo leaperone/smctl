@@ -165,3 +165,69 @@ final class PulseCommandsTests: XCTestCase {
         XCTAssertTrue(text.contains("TG Pro: RUNNING"))
     }
 }
+
+/// Simulates launchd: bootout takes a few polls to finish, bootstrap fails
+/// while the old job is still there.
+final class ReloadLaunchDaemonTests: XCTestCase {
+    final class FakeLaunchd {
+        var loaded: Bool
+        var pollsUntilGone: Int
+        var bootstrapFailures: Int
+        var calls: [[String]] = []
+
+        init(loaded: Bool, pollsUntilGone: Int = 0, bootstrapFailures: Int = 0) {
+            self.loaded = loaded
+            self.pollsUntilGone = pollsUntilGone
+            self.bootstrapFailures = bootstrapFailures
+        }
+
+        var stoppingRequested = false
+
+        func run(_ arguments: [String]) -> (status: Int32, output: String) {
+            calls.append(arguments)
+            switch arguments.first {
+            case "print":
+                if stoppingRequested, loaded {
+                    if pollsUntilGone == 0 { loaded = false } else { pollsUntilGone -= 1 }
+                }
+                return (loaded ? 0 : 113, "")
+            case "bootout":
+                stoppingRequested = true
+                return (0, "")
+            case "bootstrap":
+                if loaded { return (5, "Bootstrap failed: 5: Input/output error") }
+                if bootstrapFailures > 0 { bootstrapFailures -= 1; return (5, "Bootstrap failed: 5: Input/output error") }
+                loaded = true
+                stoppingRequested = false
+                return (0, "")
+            default:
+                return (1, "")
+            }
+        }
+    }
+
+    func testReinstallWaitsForTheOldJobBeforeBootstrapping() throws {
+        let launchd = FakeLaunchd(loaded: true, pollsUntilGone: 6)
+        try reloadLaunchDaemon(label: "x", plistPath: "/p", launchctl: launchd.run, sleep: { _ in })
+        XCTAssertTrue(launchd.loaded, "a reinstall must leave the daemon loaded")
+        XCTAssertEqual(launchd.calls.filter { $0.first == "bootstrap" }.count, 1, "no failed bootstrap while the old job was stopping")
+    }
+
+    func testFreshInstallBootstrapsOnce() throws {
+        let launchd = FakeLaunchd(loaded: false)
+        try reloadLaunchDaemon(label: "x", plistPath: "/p", launchctl: launchd.run, sleep: { _ in })
+        XCTAssertTrue(launchd.loaded)
+        XCTAssertFalse(launchd.calls.contains { $0.first == "bootout" })
+    }
+
+    func testTransientBootstrapFailuresAreRetried() throws {
+        let launchd = FakeLaunchd(loaded: false, bootstrapFailures: 2)
+        try reloadLaunchDaemon(label: "x", plistPath: "/p", launchctl: launchd.run, sleep: { _ in })
+        XCTAssertTrue(launchd.loaded)
+    }
+
+    func testPersistentFailureIsReported() {
+        let launchd = FakeLaunchd(loaded: false, bootstrapFailures: 99)
+        XCTAssertThrowsError(try reloadLaunchDaemon(label: "x", plistPath: "/p", launchctl: launchd.run, sleep: { _ in }))
+    }
+}

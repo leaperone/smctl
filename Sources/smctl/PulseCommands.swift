@@ -474,6 +474,54 @@ func printFanControlConflictWarning(_ conflicts: [FanControlConflict] = FanContr
     print("Quit or uninstall them before using \(ProductIdentity.cliName) fan profiles.")
 }
 
+// MARK: - LaunchDaemon reload
+
+/// `launchctl bootout` returns before the job has fully stopped; bootstrapping
+/// right away then fails ("service already loaded" / I/O error 5) and a
+/// reinstall left the daemon unloaded. Wait for the old job to disappear, then
+/// bootstrap with a few retries.
+func reloadLaunchDaemon(
+    label: String,
+    plistPath: String,
+    launchctl: (_ arguments: [String]) -> (status: Int32, output: String) = runLaunchctl,
+    sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) }
+) throws {
+    let service = "system/\(label)"
+    if launchctl(["print", service]).status == 0 {
+        _ = launchctl(["bootout", service])
+        for _ in 0..<50 where launchctl(["print", service]).status == 0 {
+            sleep(0.2)
+        }
+    }
+    var lastOutput = ""
+    for attempt in 0..<5 {
+        let result = launchctl(["bootstrap", "system", plistPath])
+        if result.status == 0 { return }
+        lastOutput = result.output
+        // Already loaded counts as success (e.g. launchd raced us and reloaded it).
+        if launchctl(["print", service]).status == 0 { return }
+        if attempt < 4 { sleep(0.5) }
+    }
+    throw ValidationError("launchctl bootstrap failed: \(lastOutput.trimmingCharacters(in: .whitespacesAndNewlines))")
+}
+
+private func runLaunchctl(_ arguments: [String]) -> (status: Int32, output: String) {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    process.arguments = arguments
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = pipe
+    do {
+        try process.run()
+    } catch {
+        return (-1, String(describing: error))
+    }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    return (process.terminationStatus, String(decoding: data, as: UTF8.self))
+}
+
 // MARK: - Parsing (internal for tests)
 
 /// `60:10%,80:45%,95:max` → points. Speeds accept %, RPM or max.
