@@ -24,6 +24,8 @@ public enum ProductIdentity {
     public static let legacyLaunchDaemonPlistPaths: [String] = []
     /// GitHub API endpoint the daemon polls for update hints.
     public static let latestReleaseAPIURL = "https://api.github.com/repos/fstormacq/pulse/releases/latest"
+    /// Shell command suggested when a newer release is available (before reinstalling the daemon).
+    public static let upgradeCommand = "git pull && swift build -c release"
     /// Prefix of environment variables read by the daemon and passed to alert commands.
     public static let environmentPrefix = "PULSE"
 }
