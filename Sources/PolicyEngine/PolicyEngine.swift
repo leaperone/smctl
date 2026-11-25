@@ -314,8 +314,15 @@ public struct FanCurvePoint: Codable, Equatable, Sendable {
 }
 
 public struct FanTemperatureSample: Codable, Equatable, Sendable {
+    /// Readings outside this range come from powered-down blocks (an idle GPU
+    /// reports ~0 °C) or glitches. Macs are specified for 10–35 °C ambient, so
+    /// nothing real reads below 5 °C.
+    public static let plausibleCelsius: ClosedRange<Double> = 5...150
+
     public var sensor: String
     public var celsius: Double
+
+    public var isPlausible: Bool { Self.plausibleCelsius.contains(celsius) }
 
     public init(sensor: String, celsius: Double) {
         self.sensor = sensor
@@ -514,12 +521,16 @@ public struct FanCurveEngine: Sendable {
         guard !selected.isEmpty else {
             throw PolicyError.invalidFanCurve("no temperature samples match configured sensors")
         }
+        // Ignore powered-down sensors so they cannot drag an average down; if every
+        // selected sensor is powered down, that block really is cold.
+        let plausible = selected.filter(\.isPlausible)
+        let pool = plausible.isEmpty ? selected : plausible
 
         let positiveWeights = weights.filter { $0.value > 0 }
         if !positiveWeights.isEmpty {
             var weightedSum = 0.0
             var totalWeight = 0.0
-            for sample in selected {
+            for sample in pool {
                 guard let weight = SensorSelector.weight(for: sample.sensor, in: positiveWeights) else {
                     continue
                 }
@@ -531,7 +542,7 @@ public struct FanCurveEngine: Sendable {
             }
         }
 
-        return selected.map(\.celsius).max() ?? 0
+        return pool.map(\.celsius).max() ?? 0
     }
 
     private func slewLimitedTarget(rawTarget: Double, riseSlewRate: Double?, fallSlewRate: Double?, now: Date) -> Double {

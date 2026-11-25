@@ -259,6 +259,19 @@ final class SensorSelectorTests: XCTestCase {
         XCTAssertEqual(try FanCurveEngine.aggregate(samples: samples, sensors: ["Tp*"], weights: ["Tp*": 1]), 76, accuracy: 1e-9)
         XCTAssertThrowsError(try FanCurveEngine.aggregate(samples: samples, sensors: ["Tz*"]))
     }
+
+    func testPoweredDownSensorsDoNotDragAveragesDown() throws {
+        let samples = [
+            FanTemperatureSample(sensor: "Tp01", celsius: 80),
+            FanTemperatureSample(sensor: "Tg0C", celsius: 0.8),
+            FanTemperatureSample(sensor: "Tg0D", celsius: -1.2)
+        ]
+        XCTAssertEqual(try FanCurveEngine.aggregate(samples: samples, sensors: ["Tp*", "Tg*"], weights: ["Tp*": 1, "Tg*": 1]), 80)
+        // Every selected sensor powered down: that block is cold, not an error.
+        XCTAssertEqual(try FanCurveEngine.aggregate(samples: samples, sensors: ["Tg*"]), 0.8, accuracy: 1e-9)
+        XCTAssertFalse(FanTemperatureSample(sensor: "x", celsius: 151).isPlausible)
+        XCTAssertTrue(FanTemperatureSample(sensor: "x", celsius: 35).isPlausible)
+    }
 }
 
 final class TemperatureSmootherTests: XCTestCase {
