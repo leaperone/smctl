@@ -306,7 +306,9 @@ public struct FanCurveSpec: Codable, Equatable, Sendable {
 /// Built-in percent-based profiles. They aggregate every sensor with `max`, like
 /// smctl's `quiet`, because Apple Silicon hot-spots (`Tp*`) lead the heat: they
 /// idle around 55–65 °C and reach 95–105 °C under sustained load.
-/// Values are starting points to be tuned against real traces.
+/// Every preset smooths its input over at least ~5 s (EMA time constant), so a
+/// one-second hot-spot spike never revs the fan. Values are starting points to
+/// be tuned against real traces.
 public enum FanCurvePresets {
     /// Names that user curves may not take: system modes, smctl built-ins and Pulse presets.
     public static let reservedNames: Set<String> = ["auto", "manual", "quiet", "full", "silent", "balanced", "performance"]
@@ -320,13 +322,13 @@ public enum FanCurvePresets {
     public static let balanced = preset(
         name: "balanced", label: "Balanced",
         shape: (.sigmoid, 70, 100, 0, 1, 8),
-        hysteresis: 3, rise: 8, fall: 3, smoothing: 5
+        hysteresis: 3, rise: 8, fall: 3, smoothing: 6
     )
 
     public static let performance = preset(
         name: "performance", label: "Performance",
         shape: (.logarithmic, 60, 95, 0.1, 1, 3),
-        hysteresis: 2, rise: 15, fall: 4, smoothing: 3
+        hysteresis: 2, rise: 10, fall: 4, smoothing: 5
     )
 
     public static let all: [FanCurveSpec] = [silent, balanced, performance]

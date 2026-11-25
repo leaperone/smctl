@@ -111,6 +111,12 @@ final class FanCurveSpecTests: XCTestCase {
         XCTAssertTrue(fractions(105).allSatisfy { $0 == 1 })
     }
 
+    func testPresetsSmoothAtLeastFiveSeconds() {
+        for preset in FanCurvePresets.all {
+            XCTAssertGreaterThanOrEqual(preset.smoothingSeconds ?? 0, 5, preset.name)
+        }
+    }
+
     func testPresetsRiseFasterThanTheyFall() {
         for preset in FanCurvePresets.all {
             guard case .percentPerSecond(let rise) = preset.riseRate, case .percentPerSecond(let fall) = preset.fallRate else {
