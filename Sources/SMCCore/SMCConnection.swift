@@ -12,6 +12,10 @@ public final class SMCConnection: SMCWriteBackend, @unchecked Sendable {
 
     private var connection: io_connect_t = 0
     private let queue = DispatchQueue(label: "\(ProductIdentity.logSubsystem).smc-connection")
+    /// Key size/type never change while the system runs; caching them halves the
+    /// IOKit round trips of every read and write. Only successful lookups are cached.
+    private var keyInfoCache: [String: SMCKeyInfo] = [:]
+    private let keyInfoLock = NSLock()
 
     public init() throws {
         let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSMC"))
@@ -35,11 +39,15 @@ public final class SMCConnection: SMCWriteBackend, @unchecked Sendable {
     }
 
     public func readKeyInfo(_ key: String) throws -> SMCKeyInfo {
+        if let cached = keyInfoLock.withLock({ keyInfoCache[key] }) {
+            return cached
+        }
         var input = SMCParamStruct()
         input.key = try FourCharCode.make(key)
         input.data8 = Self.commandReadKeyInfo
-        let output = try call(input)
-        return output.keyInfo
+        let info = try call(input).keyInfo
+        keyInfoLock.withLock { keyInfoCache[key] = info }
+        return info
     }
 
     public func readValue(_ key: String) throws -> SMCReadValue {
