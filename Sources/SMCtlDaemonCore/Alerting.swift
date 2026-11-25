@@ -2,8 +2,9 @@ import Foundation
 import OSLog
 import PolicyEngine
 import SMCtlProtocol
+import ProductIdentity
 
-private let alertLogger = Logger(subsystem: "one.leaper.smctl", category: "alert")
+private let alertLogger = Logger(subsystem: ProductIdentity.logSubsystem, category: "alert")
 
 /// TOML mapping for one `[[alert]]` table. Mirrors `FanCurveConfig`'s relationship
 /// to `FanCurve`: this is the on-disk shape, `rule` is the engine's view.
@@ -192,7 +193,7 @@ enum AlertAction: Equatable, Sendable {
 /// `allow_below_minimum`. Commands run via argv arrays only; no shell, no string
 /// interpolation into a shell, so there is no command-injection surface.
 final class AlertActionRunner: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "one.leaper.smctl.alert.actions", attributes: .concurrent)
+    private let queue = DispatchQueue(label: "\(ProductIdentity.logSubsystem).alert.actions", attributes: .concurrent)
     private let slots: DispatchSemaphore
     private let execTimeout: TimeInterval
     private let webhookTimeout: TimeInterval
@@ -236,7 +237,7 @@ final class AlertActionRunner: @unchecked Sendable {
         var request = URLRequest(url: url, timeoutInterval: webhookTimeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("smctl-alert/\(SMCtlProtocolInfo.version)", forHTTPHeaderField: "User-Agent")
+        request.setValue("\(ProductIdentity.cliName)-alert/\(SMCtlProtocolInfo.version)", forHTTPHeaderField: "User-Agent")
         request.httpBody = webhookBody(event)
 
         let semaphore = DispatchSemaphore(value: 0)
@@ -278,11 +279,11 @@ final class AlertActionRunner: @unchecked Sendable {
         // Pass structured fields via the environment too, so scripts can read them
         // without positional-argument juggling.
         var environment = ProcessInfo.processInfo.environment
-        environment["SMCTL_ALERT_NAME"] = event.ruleName
-        environment["SMCTL_ALERT_KIND"] = event.kind.rawValue
-        environment["SMCTL_ALERT_TRIGGER"] = event.triggerKind.rawValue
-        environment["SMCTL_ALERT_REASON"] = event.reason
-        if let value = event.value { environment["SMCTL_ALERT_VALUE"] = String(value) }
+        environment["\(ProductIdentity.environmentPrefix)_ALERT_NAME"] = event.ruleName
+        environment["\(ProductIdentity.environmentPrefix)_ALERT_KIND"] = event.kind.rawValue
+        environment["\(ProductIdentity.environmentPrefix)_ALERT_TRIGGER"] = event.triggerKind.rawValue
+        environment["\(ProductIdentity.environmentPrefix)_ALERT_REASON"] = event.reason
+        if let value = event.value { environment["\(ProductIdentity.environmentPrefix)_ALERT_VALUE"] = String(value) }
         process.environment = environment
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice

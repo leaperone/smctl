@@ -21,17 +21,22 @@ let package = Package(
         .package(url: "https://github.com/getsentry/sentry-cocoa.git", from: "9.17.1")
     ],
     targets: [
+        .target(name: "ProductIdentity"),
         .target(
             name: "SMCCore",
+            dependencies: ["ProductIdentity"],
             linkerSettings: [
                 .linkedFramework("IOKit")
             ]
         ),
         .target(name: "PolicyEngine"),
-        .target(name: "SMCtlProtocol"),
+        .target(
+            name: "SMCtlProtocol",
+            dependencies: ["ProductIdentity"]
+        ),
         .target(
             name: "SMCtlClient",
-            dependencies: ["SMCtlProtocol"]
+            dependencies: ["ProductIdentity", "SMCtlProtocol"]
         ),
         .target(
             name: "DisplayDDC",
@@ -44,6 +49,7 @@ let package = Package(
         .target(
             name: "SMCtlDaemonCore",
             dependencies: [
+                "ProductIdentity",
                 "SMCCore",
                 "PolicyEngine",
                 "SMCtlProtocol",
@@ -64,6 +70,7 @@ let package = Package(
         .executableTarget(
             name: "smctl",
             dependencies: [
+                "ProductIdentity",
                 "SMCCore",
                 "SMCtlProtocol",
                 "SMCtlClient",
@@ -93,7 +100,7 @@ let package = Package(
         ),
         .testTarget(
             name: "smctlTests",
-            dependencies: ["smctl", "DisplayDDC"]
+            dependencies: ["ProductIdentity", "smctl", "DisplayDDC"]
         )
     ]
 )

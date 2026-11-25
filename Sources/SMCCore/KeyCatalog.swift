@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import ProductIdentity
 
 public struct SMCKeyWrite: Codable, Equatable, Sendable {
     public var key: String
@@ -92,7 +93,7 @@ public struct Capabilities: Codable, Equatable {
 }
 
 public struct KeyCatalog {
-    private static let logger = Logger(subsystem: "one.leaper.smctl", category: "KeyCatalog")
+    private static let logger = Logger(subsystem: ProductIdentity.logSubsystem, category: "KeyCatalog")
 
     public var temperatureCandidates: [String]
     public var batteryCandidates: [String]

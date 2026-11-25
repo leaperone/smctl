@@ -4,6 +4,7 @@ import Foundation
 import SMCCore
 import SMCtlClient
 import SMCtlProtocol
+import ProductIdentity
 
 private func mapDaemonClient<T>(_ body: () throws -> T) throws -> T {
     do {
@@ -47,14 +48,14 @@ func currentExecutablePath() -> String? {
 /// target — so the LaunchDaemon keeps pointing at a valid binary across `brew upgrade`.
 func smctldPath(besideExecutable executablePath: String, fileExists: (String) -> Bool) -> String? {
     let directory = URL(fileURLWithPath: executablePath).deletingLastPathComponent()
-    let candidate = directory.appendingPathComponent("smctld").standardizedFileURL.path
+    let candidate = directory.appendingPathComponent(ProductIdentity.daemonName).standardizedFileURL.path
     return fileExists(candidate) ? candidate : nil
 }
 
 @main
 struct SMCtl: ParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "smctl",
+        commandName: ProductIdentity.cliName,
         abstract: "Mac hardware control utility.",
         version: SMCtlProtocolInfo.version,
         subcommands: [Sensors.self, Fan.self, Battery.self, Power.self, Display.self, Alert.self, Daemon.self, Debug.self]
@@ -101,7 +102,7 @@ struct Sensors: ParsableCommand {
     }
 
     private func printHuman(_ snapshot: SensorSnapshot) {
-        print("smctl sensors  \(CLIFormatters.iso8601.string(from: snapshot.timestamp))")
+        print("\(ProductIdentity.cliName) sensors  \(CLIFormatters.iso8601.string(from: snapshot.timestamp))")
         print("")
 
         print("Temperatures")
@@ -183,7 +184,7 @@ struct Sensors: ParsableCommand {
 struct Fan: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "fan",
-        abstract: "Inspect and control fans through smctld.",
+        abstract: "Inspect and control fans through \(ProductIdentity.daemonName).",
         subcommands: [FanStatus.self, FanSet.self, FanAuto.self, FanProfile.self]
     )
 }
@@ -228,7 +229,7 @@ struct FanSet: ParsableCommand {
             let status = try mapDaemonClient { try client.getFans() }
             indices = status.fans.map(\.index)
             guard !indices.isEmpty else {
-                print("No fans were reported by smctld.")
+                print("No fans were reported by \(ProductIdentity.daemonName).")
                 return
             }
         }
@@ -270,7 +271,7 @@ struct FanProfile: ParsableCommand {
 struct Battery: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "battery",
-        abstract: "Inspect and control battery charge policy through smctld.",
+        abstract: "Inspect and control battery charge policy through \(ProductIdentity.daemonName).",
         subcommands: [BatteryStatus.self, Maintain.self, Charge.self, Discharge.self, Charging.self, Adapter.self]
     )
 }
@@ -351,7 +352,7 @@ struct Charging: ParsableCommand {
         // A maintain policy re-evaluates every few seconds and will overwrite a
         // manual toggle that disagrees with it — warn instead of silently losing.
         if let status: BatteryStatusDTO = try? client.getBatteryStatus(), status.upperBound < 100 {
-            print("Note: maintain \(status.configuredLimit) is active and may override this on its next evaluation. Use 'smctl battery maintain stop' first for manual control.")
+            print("Note: maintain \(status.configuredLimit) is active and may override this on its next evaluation. Use '\(ProductIdentity.cliName) battery maintain stop' first for manual control.")
         }
     }
 }
@@ -369,7 +370,7 @@ struct Adapter: ParsableCommand {
         if enabled {
             print("Adapter power enabled.")
         } else {
-            print("Adapter power cut: the Mac now runs on battery even while plugged in. Restore with 'smctl battery adapter on'.")
+            print("Adapter power cut: the Mac now runs on battery even while plugged in. Restore with '\(ProductIdentity.cliName) battery adapter on'.")
         }
     }
 }
@@ -402,7 +403,7 @@ struct Discharge: ParsableCommand {
             return
         }
         guard initial.foregroundDischargeSupported == true else {
-            throw ValidationError("This smctld cannot safely supervise foreground discharge. Run 'sudo smctl daemon install' to update it.")
+            throw ValidationError("This \(ProductIdentity.daemonName) cannot safely supervise foreground discharge. Run 'sudo \(ProductIdentity.cliName) daemon install' to update it.")
         }
         guard let charge = initial.chargePercent else {
             print("No readable battery was found; active discharge is unsupported on this Mac.")
@@ -480,7 +481,7 @@ struct PowerStatus: ParsableCommand {
 }
 
 private func printPower(_ snapshot: PowerSnapshot) {
-    print("smctl power  \(CLIFormatters.iso8601.string(from: snapshot.timestamp))")
+    print("\(ProductIdentity.cliName) power  \(CLIFormatters.iso8601.string(from: snapshot.timestamp))")
     print("")
     print("  Thermal pressure   \(snapshot.thermalPressure.rawValue)")
     print("  CPU throttling     \(throttleDescription(snapshot.cpu))")
@@ -525,7 +526,7 @@ private func watts(_ value: Double?) -> String {
 struct Alert: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "alert",
-        abstract: "Inspect and test temperature/event alerts (configured in /etc/smctl/config.toml).",
+        abstract: "Inspect and test temperature/event alerts (configured in \(ProductIdentity.configPath)).",
         subcommands: [AlertList.self, AlertStatus.self, AlertTest.self],
         defaultSubcommand: AlertStatus.self
     )
@@ -572,7 +573,7 @@ struct AlertTest: ParsableCommand {
 
     func run() throws {
         try mapDaemonClient { try DaemonClient().testAlert(name: name) }
-        print("Fired action for alert '\(name)'. Check your webhook/command (or `log show --predicate 'subsystem == \"one.leaper.smctl\"'`).")
+        print("Fired action for alert '\(name)'. Check your webhook/command (or `log show --predicate 'subsystem == \"\(ProductIdentity.logSubsystem)\"'`).")
     }
 }
 
@@ -580,9 +581,9 @@ private func printAlertStatus(_ status: AlertStatusDTO) {
     print("Alerts")
     if status.rules.isEmpty {
         if status.definitions?.isEmpty == false {
-            print("  No valid alert rules. Run `smctl alert list` to inspect config problems.")
+            print("  No valid alert rules. Run `\(ProductIdentity.cliName) alert list` to inspect config problems.")
         } else {
-            print("  No alert rules configured. Add [[alert]] tables to /etc/smctl/config.toml.")
+            print("  No alert rules configured. Add [[alert]] tables to \(ProductIdentity.configPath).")
         }
     } else {
         for rule in status.rules {
@@ -603,7 +604,7 @@ private func printAlertStatus(_ status: AlertStatusDTO) {
 private func printAlertDefinitions(_ definitions: [AlertRuleDefinitionDTO]) {
     print("Alert rules")
     guard !definitions.isEmpty else {
-        print("  No alert rules configured. Add [[alert]] tables to /etc/smctl/config.toml.")
+        print("  No alert rules configured. Add [[alert]] tables to \(ProductIdentity.configPath).")
         return
     }
 
@@ -658,17 +659,17 @@ private func formatNumber(_ value: Double) -> String {
 struct Daemon: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "daemon",
-        abstract: "Install, remove, and inspect smctld.",
+        abstract: "Install, remove, and inspect \(ProductIdentity.daemonName).",
         subcommands: [DaemonInstall.self, DaemonUninstall.self, DaemonRestart.self, DaemonStatus.self, DaemonPing.self, DaemonLogs.self]
     )
 }
 
 struct DaemonPing: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "ping", abstract: "Round-trip check that smctld is alive.")
+    static let configuration = CommandConfiguration(commandName: "ping", abstract: "Round-trip check that \(ProductIdentity.daemonName) is alive.")
 
     func run() throws {
         let ping: PingDTO = try mapDaemonClient { try DaemonClient().ping() }
-        print("smctld ok \(ping.version) \(CLIFormatters.iso8601.string(from: ping.timestamp))")
+        print("\(ProductIdentity.daemonName) ok \(ping.version) \(CLIFormatters.iso8601.string(from: ping.timestamp))")
     }
 }
 
@@ -680,10 +681,10 @@ struct DaemonRestart: ParsableCommand {
 
     func run() throws {
         guard geteuid() == 0 else {
-            throw ValidationError("daemon restart must be run as root. Try: sudo smctl daemon restart")
+            throw ValidationError("daemon restart must be run as root. Try: sudo \(ProductIdentity.cliName) daemon restart")
         }
         try runProcess("/bin/launchctl", ["kickstart", "-k", "system/\(SMCtlProtocolInfo.machServiceName)"])
-        print("smctld restarted.")
+        print("\(ProductIdentity.daemonName) restarted.")
     }
 }
 
@@ -699,7 +700,7 @@ struct DaemonStatus: ParsableCommand {
             print(try CLIJSON.encodeString(status))
             return
         }
-        print("smctld")
+        print(ProductIdentity.daemonName)
         print("  config: \(status.configPath)")
         print("  period: \(format(status.periodSeconds))s")
         print("  last evaluation: \(status.lastEvaluation.map { CLIFormatters.iso8601.string(from: $0) } ?? "-")")
@@ -712,7 +713,7 @@ struct DaemonStatus: ParsableCommand {
 }
 
 struct DaemonLogs: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "logs", abstract: "Show recent smctld log messages (wraps `log show`).")
+    static let configuration = CommandConfiguration(commandName: "logs", abstract: "Show recent \(ProductIdentity.daemonName) log messages (wraps `log show`).")
 
     @Option(name: .long, help: "How far back to look, e.g. 10m, 1h, 2d.")
     var last: String = "1h"
@@ -723,7 +724,7 @@ struct DaemonLogs: ParsableCommand {
         process.arguments = [
             "show",
             "--last", last,
-            "--predicate", "subsystem == \"one.leaper.smctl\"",
+            "--predicate", "subsystem == \"\(ProductIdentity.logSubsystem)\"",
             "--style", "compact",
             "--info"
         ]
@@ -736,11 +737,11 @@ struct DaemonLogs: ParsableCommand {
 }
 
 struct DaemonInstall: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "install", abstract: "Register smctld as a LaunchDaemon (requires root).")
+    static let configuration = CommandConfiguration(commandName: "install", abstract: "Register \(ProductIdentity.daemonName) as a LaunchDaemon (requires root).")
 
     func run() throws {
         guard geteuid() == 0 else {
-            throw ValidationError("daemon install must be run as root. Try: sudo smctl daemon install")
+            throw ValidationError("daemon install must be run as root. Try: sudo \(ProductIdentity.cliName) daemon install")
         }
 
         let source = try Self.currentSmctldPath()
@@ -755,11 +756,11 @@ struct DaemonInstall: ParsableCommand {
             try runProcess("/bin/launchctl", ["bootout", "system/\(SMCtlProtocolInfo.machServiceName)"])
         }
         try runProcess("/bin/launchctl", ["bootstrap", "system", Self.plistPath])
-        print("Installed smctld at \(Self.installedHelperPath)")
+        print("Installed \(ProductIdentity.daemonName) at \(Self.installedHelperPath)")
     }
 
-    static let plistPath = "/Library/LaunchDaemons/one.leaper.smctl.daemon.plist"
-    static let installedHelperPath = "/Library/PrivilegedHelperTools/one.leaper.smctl.daemon"
+    static let plistPath = ProductIdentity.launchDaemonPlistPath
+    static let installedHelperPath = ProductIdentity.installedHelperPath
 
     static func installHelper(from source: URL, to destination: URL) throws {
         let manager = FileManager.default
@@ -772,13 +773,13 @@ struct DaemonInstall: ParsableCommand {
         }
         try validateHelperDirectory(directory)
         // Source ACLs can grant write access before they are cleared.
-        let stagingDirectory = directory.appendingPathComponent(".smctld-\(UUID().uuidString)")
+        let stagingDirectory = directory.appendingPathComponent(".\(ProductIdentity.daemonName)-\(UUID().uuidString)")
         try manager.createDirectory(at: stagingDirectory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         defer { try? manager.removeItem(at: stagingDirectory) }
-        let staging = stagingDirectory.appendingPathComponent("smctld")
+        let staging = stagingDirectory.appendingPathComponent(ProductIdentity.daemonName)
         try manager.copyItem(at: source.resolvingSymlinksInPath(), to: staging)
         guard lstat(staging.path, &info) == 0, info.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG) else {
-            throw ValidationError("The smctld helper must be a regular file.")
+            throw ValidationError("The \(ProductIdentity.daemonName) helper must be a regular file.")
         }
         guard let emptyACL = acl_init(0) else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
         defer { acl_free(UnsafeMutableRawPointer(emptyACL)) }
@@ -821,7 +822,7 @@ struct DaemonInstall: ParsableCommand {
                 fileExists: { FileManager.default.isExecutableFile(atPath: $0) }
             )
         else {
-            throw ValidationError("Could not find smctld next to the current smctl executable.")
+            throw ValidationError("Could not find \(ProductIdentity.daemonName) next to the current \(ProductIdentity.cliName) executable.")
         }
         return path
     }
@@ -840,11 +841,11 @@ struct DaemonInstall: ParsableCommand {
 }
 
 struct DaemonUninstall: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "uninstall", abstract: "Stop smctld, restore hardware defaults, remove the LaunchDaemon (requires root).")
+    static let configuration = CommandConfiguration(commandName: "uninstall", abstract: "Stop \(ProductIdentity.daemonName), restore hardware defaults, remove the LaunchDaemon (requires root).")
 
     func run() throws {
         guard geteuid() == 0 else {
-            throw ValidationError("daemon uninstall must be run as root. Try: sudo smctl daemon uninstall")
+            throw ValidationError("daemon uninstall must be run as root. Try: sudo \(ProductIdentity.cliName) daemon uninstall")
         }
 
         // The connection must be resumed for the restore calls to be delivered; if the
@@ -854,7 +855,7 @@ struct DaemonUninstall: ParsableCommand {
         _ = try? client.setChargingEnabled(true)
         _ = try? client.setAdapterEnabled(true)
         // Current identifier plus the pre-0.1.2 legacy one (dev.smctl.*).
-        for plistPath in [DaemonInstall.plistPath, "/Library/LaunchDaemons/dev.smctl.daemon.plist"] {
+        for plistPath in [DaemonInstall.plistPath] + ProductIdentity.legacyLaunchDaemonPlistPaths {
             _ = try? runProcess("/bin/launchctl", ["bootout", "system", plistPath])
             if FileManager.default.fileExists(atPath: plistPath) {
                 try FileManager.default.removeItem(atPath: plistPath)
@@ -863,7 +864,7 @@ struct DaemonUninstall: ParsableCommand {
         if FileManager.default.fileExists(atPath: DaemonInstall.installedHelperPath) {
             try FileManager.default.removeItem(atPath: DaemonInstall.installedHelperPath)
         }
-        print("Uninstalled smctld and restored fans plus charging/adapter power when supported.")
+        print("Uninstalled \(ProductIdentity.daemonName) and restored fans plus charging/adapter power when supported.")
     }
 }
 
@@ -899,7 +900,7 @@ private func printFansStatus(_ status: FansStatusDTO) {
     print("Fans")
     print("  profile: \(status.profile)")
     if status.fans.isEmpty {
-        print("  No fans reported by smctld.")
+        print("  No fans reported by \(ProductIdentity.daemonName).")
     } else {
         for fan in status.fans {
             print("  Fan \(fan.index): actual \(formatOptionalRPM(fan.actualRPM)), target \(formatOptionalRPM(fan.targetRPM)), min \(formatOptionalRPM(fan.minimumRPM)), max \(formatOptionalRPM(fan.maximumRPM)), mode \(fan.mode)")

@@ -1,8 +1,9 @@
 import Foundation
+import ProductIdentity
 
 public enum SMCtlProtocolInfo {
     public static let version = "0.2.4"
-    public static let machServiceName = "one.leaper.smctl.daemon"
+    public static let machServiceName = ProductIdentity.machServiceName
 
     /// Numeric-component semver comparison, tolerant of a leading "v".
     /// Non-numeric/garbage versions compare as not-newer (fail closed: no false alarm).

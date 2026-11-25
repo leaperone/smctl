@@ -2,8 +2,9 @@ import Foundation
 import OSLog
 import Sentry
 import SMCtlProtocol
+import ProductIdentity
 
-private let sentryLogger = Logger(subsystem: "one.leaper.smctl", category: "sentry")
+private let sentryLogger = Logger(subsystem: ProductIdentity.logSubsystem, category: "sentry")
 
 enum SentryReporter {
     private static let lock = NSLock()
@@ -11,9 +12,9 @@ enum SentryReporter {
 
     static func startIfConfigured(config: SentryConfig) {
         let environment = ProcessInfo.processInfo.environment
-        guard environment["SMCTL_SENTRY_DISABLED"] != "1" else { return }
+        guard environment["\(ProductIdentity.environmentPrefix)_SENTRY_DISABLED"] != "1" else { return }
 
-        let dsn = firstNonEmpty(environment["SMCTL_SENTRY_DSN"], config.dsn)
+        let dsn = firstNonEmpty(environment["\(ProductIdentity.environmentPrefix)_SENTRY_DSN"], config.dsn)
 
         guard let dsn else { return }
 
@@ -25,13 +26,13 @@ enum SentryReporter {
         started = true
         lock.unlock()
 
-        let sentryEnvironment = firstNonEmpty(environment["SMCTL_SENTRY_ENVIRONMENT"], config.environment) ?? "production"
+        let sentryEnvironment = firstNonEmpty(environment["\(ProductIdentity.environmentPrefix)_SENTRY_ENVIRONMENT"], config.environment) ?? "production"
         let tracesSampleRate = min(max(config.traces_sample_rate, 0), 1)
 
         SentrySDK.start { options in
             options.dsn = dsn
             options.environment = sentryEnvironment
-            options.releaseName = "smctl@\(SMCtlProtocolInfo.version)"
+            options.releaseName = "\(ProductIdentity.cliName)@\(SMCtlProtocolInfo.version)"
             options.debug = config.debug
             options.sendDefaultPii = false
             options.tracesSampleRate = NSNumber(value: tracesSampleRate)
@@ -53,7 +54,7 @@ enum SentryReporter {
     static func capture(_ error: Error, context: String) {
         guard isStarted else { return }
         let report = NSError(
-            domain: "one.leaper.smctl.daemon",
+            domain: ProductIdentity.machServiceName,
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: "\(context): \(String(describing: error))"]
         )

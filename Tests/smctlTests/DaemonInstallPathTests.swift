@@ -1,5 +1,6 @@
 import XCTest
 import Darwin
+import ProductIdentity
 @testable import smctl
 
 final class DaemonInstallPathTests: XCTestCase {
@@ -73,39 +74,39 @@ final class DaemonInstallPathTests: XCTestCase {
     func testLaunchDaemonExecutesTheProtectedCopy() throws {
         let data = Data(try DaemonInstall.plist().utf8)
         let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
-        XCTAssertEqual(plist["ProgramArguments"] as? [String], ["/Library/PrivilegedHelperTools/one.leaper.smctl.daemon"])
+        XCTAssertEqual(plist["ProgramArguments"] as? [String], [ProductIdentity.installedHelperPath])
         XCTAssertEqual(plist["KeepAlive"] as? Bool, true)
     }
 
     func testResolvesSmctldNextToExecutable() {
         let path = smctldPath(
-            besideExecutable: "/opt/homebrew/bin/smctl",
-            fileExists: { $0 == "/opt/homebrew/bin/smctld" }
+            besideExecutable: "/opt/homebrew/bin/\(ProductIdentity.cliName)",
+            fileExists: { $0 == "/opt/homebrew/bin/\(ProductIdentity.daemonName)" }
         )
-        XCTAssertEqual(path, "/opt/homebrew/bin/smctld")
+        XCTAssertEqual(path, "/opt/homebrew/bin/\(ProductIdentity.daemonName)")
     }
 
     func testKeepsSymlinkDirectorySoItSurvivesBrewUpgrade() {
         // Must NOT resolve /opt/homebrew/bin's symlink to the versioned Cellar path;
         // the LaunchDaemon points at the stable symlink directory (#8).
         let path = smctldPath(
-            besideExecutable: "/opt/homebrew/bin/smctl",
+            besideExecutable: "/opt/homebrew/bin/\(ProductIdentity.cliName)",
             fileExists: { _ in true }
         )
-        XCTAssertEqual(path, "/opt/homebrew/bin/smctld")
+        XCTAssertEqual(path, "/opt/homebrew/bin/\(ProductIdentity.daemonName)")
     }
 
     func testReturnsNilWhenSiblingMissing() {
         XCTAssertNil(
-            smctldPath(besideExecutable: "/usr/local/bin/smctl", fileExists: { _ in false })
+            smctldPath(besideExecutable: "/usr/local/bin/\(ProductIdentity.cliName)", fileExists: { _ in false })
         )
     }
 
     func testNormalizesRelativeComponents() {
         let path = smctldPath(
-            besideExecutable: "/opt/homebrew/bin/./smctl",
-            fileExists: { $0 == "/opt/homebrew/bin/smctld" }
+            besideExecutable: "/opt/homebrew/bin/./\(ProductIdentity.cliName)",
+            fileExists: { $0 == "/opt/homebrew/bin/\(ProductIdentity.daemonName)" }
         )
-        XCTAssertEqual(path, "/opt/homebrew/bin/smctld")
+        XCTAssertEqual(path, "/opt/homebrew/bin/\(ProductIdentity.daemonName)")
     }
 }

@@ -7,8 +7,9 @@ import PolicyEngine
 import SMCCore
 import SMCtlProtocol
 import TOMLKit
+import ProductIdentity
 
-private let logger = Logger(subsystem: "one.leaper.smctl", category: "daemon")
+private let logger = Logger(subsystem: ProductIdentity.logSubsystem, category: "daemon")
 /// Resolved once at startup; non-nil iff this binary is Developer ID signed.
 private let enforcedTeamID = CodeSignPolicy.ownTeamID()
 private let ioMessageCanSystemSleep = natural_t(0xe0000270)
@@ -292,7 +293,7 @@ enum DaemonError: Error, CustomStringConvertible {
         case .unauthorized:
             return "Write requests require root or an admin user."
         case .untrustedClient:
-            return "Write requests require a client signed by the same Developer ID team as smctld."
+            return "Write requests require a client signed by the same Developer ID team as \(ProductIdentity.daemonName)."
         }
     }
 }
@@ -307,7 +308,7 @@ public final class SmctlDaemon: @unchecked Sendable {
     static let period: TimeInterval = 10
     static let foregroundDischargeLease: TimeInterval = 30
 
-    private let queue = DispatchQueue(label: "one.leaper.smctl.daemon.state")
+    private let queue = DispatchQueue(label: "\(ProductIdentity.logSubsystem).daemon.state")
     var config = DaemonConfig()
     private var chargeMachine = ChargeStateMachine(period: SmctlDaemon.period)
     private var sleepMachine = SleepStateMachine(policy: .strict)
@@ -357,7 +358,7 @@ public final class SmctlDaemon: @unchecked Sendable {
             backend: backend,
             reader: reader,
             capabilities: reader?.capabilities() ?? Capabilities(),
-            configPath: "/etc/smctl/config.toml",
+            configPath: ProductIdentity.configPath,
             initialError: initialError
         )
     }
@@ -418,9 +419,9 @@ public final class SmctlDaemon: @unchecked Sendable {
     }
 
     private func performUpdateCheck() {
-        guard let url = URL(string: "https://api.github.com/repos/leaperone/smctl/releases/latest") else { return }
+        guard let url = URL(string: ProductIdentity.latestReleaseAPIURL) else { return }
         var request = URLRequest(url: url, timeoutInterval: 15)
-        request.setValue("smctl/\(SMCtlProtocolInfo.version)", forHTTPHeaderField: "User-Agent")
+        request.setValue("\(ProductIdentity.cliName)/\(SMCtlProtocolInfo.version)", forHTTPHeaderField: "User-Agent")
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         let task = URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
             guard
@@ -1039,7 +1040,7 @@ public final class SmctlDaemon: @unchecked Sendable {
                 ruleName: name,
                 kind: .fired,
                 triggerKind: trigger,
-                reason: "Test trigger via 'smctl alert test'",
+                reason: "Test trigger via '\(ProductIdentity.cliName) alert test'",
                 value: nil,
                 timestamp: Date()
             )
@@ -1626,8 +1627,8 @@ public func smctldHandleTermination(daemon: SmctlDaemon) -> Never {
 /// Startup-mode banner, emitted once the daemon is listening.
 public func smctldLogStartupMode() {
     if let enforcedTeamID {
-        logger.notice("smctld started; XPC write authorization requires team \(enforcedTeamID, privacy: .public)")
+        logger.notice("\(ProductIdentity.daemonName, privacy: .public) started; XPC write authorization requires team \(enforcedTeamID, privacy: .public)")
     } else {
-        logger.notice("smctld started; unsigned build, XPC write authorization is euid-gated only")
+        logger.notice("\(ProductIdentity.daemonName, privacy: .public) started; unsigned build, XPC write authorization is euid-gated only")
     }
 }

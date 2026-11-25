@@ -1,5 +1,6 @@
 import Foundation
 import SMCtlProtocol
+import ProductIdentity
 
 public final class DaemonClient {
     private let connection: NSXPCConnection
@@ -118,7 +119,7 @@ public final class DaemonClient {
             let nsError = error as NSError
             if nsError.domain == NSCocoaErrorDomain, nsError.code == 4099 {
                 // Connection invalidated: the mach service is not registered with launchd.
-                box.error = "smctld is not running. Install it with 'sudo smctl daemon install' (check with 'smctl daemon status')."
+                box.error = "\(ProductIdentity.daemonName) is not running. Install it with 'sudo \(ProductIdentity.cliName) daemon install' (check with '\(ProductIdentity.cliName) daemon status')."
             } else {
                 box.error = String(describing: error)
             }
@@ -134,7 +135,7 @@ public final class DaemonClient {
         }
         // Bounded wait: never hang the CLI on a wedged daemon or undelivered message.
         if semaphore.wait(timeout: .now() + 15) == .timedOut {
-            throw SMCtlClientError("Timed out waiting for smctld (15s). Check 'smctl daemon status'.")
+            throw SMCtlClientError("Timed out waiting for \(ProductIdentity.daemonName) (15s). Check '\(ProductIdentity.cliName) daemon status'.")
         }
 
         if let error = box.error {

@@ -1,6 +1,7 @@
 import ArgumentParser
 import DisplayDDC
 import Foundation
+import ProductIdentity
 
 // MARK: - DDC display access
 
@@ -39,12 +40,12 @@ enum DisplayControl {
         }
         if let index = Int(selector) {
             guard let match = displays.first(where: { $0.index == index }) else {
-                throw ValidationError("No display with index \(index). See 'smctl display list'.")
+                throw ValidationError("No display with index \(index). See '\(ProductIdentity.cliName) display list'.")
             }
             return match
         }
         guard let match = displays.first(where: { $0.uuid.caseInsensitiveCompare(selector) == .orderedSame }) else {
-            throw ValidationError("No display with UUID \(selector). See 'smctl display list'.")
+            throw ValidationError("No display with UUID \(selector). See '\(ProductIdentity.cliName) display list'.")
         }
         return match
     }
@@ -131,7 +132,7 @@ struct DisplayBrightness: ParsableCommand {
     @Argument(help: "New brightness (0-100). Omit to read the current value.")
     var value: Int?
 
-    @Option(name: .customLong("display"), help: "Display index or UUID (see 'smctl display list').")
+    @Option(name: .customLong("display"), help: "Display index or UUID (see '\(ProductIdentity.cliName) display list').")
     var display: String?
 
     @Flag(name: .long, help: "Print machine-readable JSON.")
@@ -186,7 +187,7 @@ struct DisplayPower: ParsableCommand {
     @Argument(help: "'on' or 'off'. Omit to read the current state.")
     var state: State?
 
-    @Option(name: .customLong("display"), help: "Display index or UUID (see 'smctl display list').")
+    @Option(name: .customLong("display"), help: "Display index or UUID (see '\(ProductIdentity.cliName) display list').")
     var display: String?
 
     func run() throws {
@@ -208,7 +209,7 @@ struct DisplayPower: ParsableCommand {
                reading.curValue == Int(state.vcpValue) {
                 print("\(target.name): \(state.rawValue)")
                 if state == .off {
-                    print("Wake it with: smctl display power on --display \(target.index)")
+                    print("Wake it with: \(ProductIdentity.cliName) display power on --display \(target.index)")
                 }
                 return
             }
