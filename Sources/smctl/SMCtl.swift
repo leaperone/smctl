@@ -58,7 +58,7 @@ struct SMCtl: ParsableCommand {
         commandName: ProductIdentity.cliName,
         abstract: "Mac hardware control utility.",
         version: SMCtlProtocolInfo.version,
-        subcommands: [Sensors.self, Fan.self, Battery.self, Power.self, Display.self, Alert.self, Daemon.self, Debug.self]
+        subcommands: [Status.self, Sensors.self, Fan.self, Battery.self, Power.self, Display.self, Alert.self, Daemon.self, Debug.self]
     )
 }
 
@@ -185,7 +185,7 @@ struct Fan: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "fan",
         abstract: "Inspect and control fans through \(ProductIdentity.daemonName).",
-        subcommands: [FanStatus.self, FanSet.self, FanAuto.self, FanProfile.self]
+        subcommands: [FanStatus.self, FanSet.self, FanAuto.self, FanProfile.self, FanCurveCommand.self]
     )
 }
 
@@ -757,6 +757,7 @@ struct DaemonInstall: ParsableCommand {
         }
         try runProcess("/bin/launchctl", ["bootstrap", "system", Self.plistPath])
         print("Installed \(ProductIdentity.daemonName) at \(Self.installedHelperPath)")
+        printFanControlConflictWarning()
     }
 
     static let plistPath = ProductIdentity.launchDaemonPlistPath

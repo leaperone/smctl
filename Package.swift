@@ -72,6 +72,7 @@ let package = Package(
             dependencies: [
                 "ProductIdentity",
                 "SMCCore",
+                "PolicyEngine",
                 "SMCtlProtocol",
                 "SMCtlClient",
                 "DisplayDDC",
