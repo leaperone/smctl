@@ -11,12 +11,17 @@ Pulse is a lightweight, native Swift app for Apple silicon Macs. It shows your M
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/img/menubar-stacked-dark.png">
-    <img src="assets/img/menubar-stacked-light.png" alt="Stacked menu bar item: CPU 55°, FAN 1341" height="44">
+    <img src="assets/img/menubar-stacked-light.png" alt="Pulse dot with CPU 55° over FAN 1341" height="44">
   </picture>
   &nbsp;
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/img/menubar-inline-dark.png">
-    <img src="assets/img/menubar-inline-light.png" alt="Inline menu bar item: 55° 1341" height="44">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/img/menubar-heartbeat-dark.png">
+    <img src="assets/img/menubar-heartbeat-light.png" alt="Heartbeat icon with CPU and fan readings" height="44">
+  </picture>
+  &nbsp;
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/img/menubar-pulse-dark.png">
+    <img src="assets/img/menubar-pulse-light.png" alt="Pulse dot alone" height="44">
   </picture>
 </p>
 
@@ -26,12 +31,23 @@ Pulse is a lightweight, native Swift app for Apple silicon Macs. It shows your M
 
 | | |
 |---|---|
-| **Menu bar** | CPU and GPU temperature, fan speed (RPM or %), and power draw. Readings appear **inline** or **stacked** on two small lines, with an optional icon. Readings are smoothed over ~8 s and only redraw when the visible value changes. |
+| **Menu bar** | A **pulse dot** coloured by temperature (green → yellow → orange → red) that **beats like a heart**, faster as the Mac heats up (40 to 120 bpm). Alternatives are a heartbeat trace, a fan, or no icon. Readings are optional: CPU and GPU temperature, fan speed (RPM or %), and power draw, **stacked** on two small lines or inline. Values are smoothed over ~8 s and centred on cap height, with fixed widths so nothing shifts. |
 | **Popover** | Average and hottest sensor per group (CPU, GPU, board), fan speed and curve target, a 5-minute history, and one-click profiles. Warnings appear when the fan service is missing, the safety guard has engaged, or another fan app is running. |
 | **Profiles** | *Auto* (macOS), *Silent*, *Balanced*, *Performance*, and your own curves. |
 | **Custom curves** | Percent-based shapes (linear, sigmoid, exponential, logarithmic, steps) that you stretch with start/end temperatures, a floor, a ceiling and a steepness. You can also use explicit points. |
 | **`pulse` CLI** | `pulse status` gives an overview for SSH. `pulse fan curve …` creates, previews, edits and deletes curves. Every command supports `--json`. |
-| **Footprint** | The app uses ~0.2% CPU and ~19 MB at idle. The daemon reads the SMC once per second, skips redundant fan writes and caches SMC key metadata. |
+| **Footprint** | The app uses ~0.3% CPU and ~20 MB at idle. The daemon reads the SMC once per second, skips redundant fan writes and caches SMC key metadata. |
+
+### The heartbeat
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/img/menubar-beats-dark.png">
+    <img src="assets/img/menubar-beats-light.png" alt="Pulse dot and heartbeat frames at rest and at the peak of a beat, from cool to hot" width="560">
+  </picture>
+</p>
+
+By default the icon beats **only when the Mac is warm** (CPU above 65 °C). At rest it stays still and costs nothing. Every beat redraws the menu bar item, which macOS 26 repeats for each display and appearance. *Always* therefore costs about 2–3% CPU, while *When warm* costs nothing until the Mac is working hard anyway. The heartbeat stops while the screens sleep, in Low Power Mode, with Reduce Motion, and when the safety guard engages.
 
 ## Profiles and curves
 
