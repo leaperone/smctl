@@ -67,15 +67,6 @@ struct StatusReport: Codable, Equatable {
         var message: String?
     }
 
-    struct TemperatureGroup: Codable, Equatable {
-        var group: String
-        var label: String
-        var maximumCelsius: Double
-        var averageCelsius: Double
-        var hottestKey: String
-        var count: Int
-    }
-
     struct Fan: Codable, Equatable {
         var index: Int
         var actualRPM: Double?
@@ -89,7 +80,7 @@ struct StatusReport: Codable, Equatable {
     var timestamp: Date
     var daemon: DaemonState
     var profile: String?
-    var groups: [TemperatureGroup]
+    var groups: [TemperatureGroupSummary]
     var temperatures: [TemperatureDTO]
     var fans: [Fan]
     var curve: [FanCurveStateDTO]
@@ -148,7 +139,7 @@ struct StatusReport: Codable, Equatable {
         self.daemon = daemon
         self.profile = profile
         self.temperatures = temperatures
-        self.groups = Self.groups(temperatures)
+        self.groups = TemperatureGroupSummary.summarize(temperatures)
         self.fans = fans.map { fan in
             var percent: Double?
             if let actual = fan.actualRPM, let minimum = fan.minimumRPM, let maximum = fan.maximumRPM, maximum > minimum {
@@ -161,21 +152,6 @@ struct StatusReport: Codable, Equatable {
         self.power = power
         self.safety = safety
         self.conflicts = conflicts
-    }
-
-    static func groups(_ temperatures: [TemperatureDTO]) -> [TemperatureGroup] {
-        Dictionary(grouping: temperatures, by: \.group).compactMap { group, readings in
-            guard let hottest = readings.max(by: { $0.celsius < $1.celsius }) else { return nil }
-            return TemperatureGroup(
-                group: group,
-                label: SensorGroups.label(for: group),
-                maximumCelsius: hottest.celsius,
-                averageCelsius: readings.map(\.celsius).reduce(0, +) / Double(readings.count),
-                hottestKey: hottest.key,
-                count: readings.count
-            )
-        }
-        .sorted { (SensorGroups.sortKey(for: $0.group), $0.group) < (SensorGroups.sortKey(for: $1.group), $1.group) }
     }
 
     var humanDescription: String {
@@ -196,8 +172,15 @@ struct StatusReport: Codable, Equatable {
         out += "\nTemperatures\n"
         if groups.isEmpty { out += "  none readable\n" }
         for group in groups {
-            out += "  " + pad(group.label, 8) + pad(celsius(group.maximumCelsius), 9)
-                + "max \(group.hottestKey) · avg \(celsius(group.averageCelsius)) · \(group.count) sensor\(group.count == 1 ? "" : "s")\n"
+            var line = "  " + pad(group.label, 8)
+            if let average = group.averageCelsius, let maximum = group.maximumCelsius, let hottest = group.hottestKey {
+                line += "avg " + pad(celsius(average), 9) + "max " + pad(celsius(maximum), 9) + pad("(\(hottest))", 7)
+            } else {
+                line += pad("sensors off (powered down)", 39)
+            }
+            line += "· \(group.count) sensor\(group.count == 1 ? "" : "s")"
+            if group.inactiveCount > 0, group.averageCelsius != nil { line += ", \(group.inactiveCount) off" }
+            out += line + "\n"
         }
 
         out += "\nFans\n"

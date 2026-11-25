@@ -1,5 +1,6 @@
 import Darwin
 import XCTest
+import SMCtlProtocol
 @testable import SMCtlClient
 
 final class PulseSystemInfoTests: XCTestCase {
@@ -58,5 +59,28 @@ final class PulseSystemInfoTests: XCTestCase {
         XCTAssertEqual(SensorGroups.label(for: "Qx"), "Qx")
         XCTAssertLessThan(SensorGroups.sortKey(for: "Tp"), SensorGroups.sortKey(for: "Ts"))
         XCTAssertEqual(SensorGroups.pattern(for: "Tp"), "Tp*")
+    }
+}
+
+final class TemperatureGroupSummaryTests: XCTestCase {
+    func testPoweredDownSensorsAreExcludedButCounted() {
+        let summaries = TemperatureGroupSummary.summarize([
+            TemperatureDTO(key: "Tg0C", group: "Tg", celsius: 0.8),
+            TemperatureDTO(key: "Tg0D", group: "Tg", celsius: 36),
+            TemperatureDTO(key: "Tg0H", group: "Tg", celsius: 34),
+            TemperatureDTO(key: "Tp01", group: "Tp", celsius: 50),
+            TemperatureDTO(key: "Ts00", group: "Ts", celsius: -0.5)
+        ])
+        XCTAssertEqual(summaries.map(\.label), ["CPU", "GPU", "Board"])
+        let gpu = summaries[1]
+        XCTAssertEqual(gpu.averageCelsius, 35)
+        XCTAssertEqual(gpu.maximumCelsius, 36)
+        XCTAssertEqual(gpu.hottestKey, "Tg0D")
+        XCTAssertEqual(gpu.count, 3)
+        XCTAssertEqual(gpu.inactiveCount, 1)
+        let board = summaries[2]
+        XCTAssertNil(board.averageCelsius)
+        XCTAssertNil(board.maximumCelsius)
+        XCTAssertEqual(board.inactiveCount, 1)
     }
 }

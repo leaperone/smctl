@@ -1,6 +1,8 @@
 import Darwin
 import Foundation
+import PolicyEngine
 import ProductIdentity
+import SMCtlProtocol
 
 // MARK: - Sensor groups
 
@@ -29,6 +31,37 @@ public enum SensorGroups {
     /// Curve sensor pattern selecting a whole group, e.g. `Tp*`.
     public static func pattern(for group: String) -> String {
         "\(group)*"
+    }
+}
+
+/// Per-group temperature summary shared by `pulse status` and the app.
+/// Powered-down sensors (an idle GPU reads ~0 °C) are counted but excluded
+/// from the average and maximum.
+public struct TemperatureGroupSummary: Codable, Equatable, Sendable {
+    public var group: String
+    public var label: String
+    /// Nil when every sensor of the group is powered down.
+    public var averageCelsius: Double?
+    public var maximumCelsius: Double?
+    public var hottestKey: String?
+    public var count: Int
+    public var inactiveCount: Int
+
+    public static func summarize(_ temperatures: [TemperatureDTO]) -> [TemperatureGroupSummary] {
+        Dictionary(grouping: temperatures, by: \.group).map { group, readings in
+            let active = readings.filter { FanTemperatureSample.plausibleCelsius.contains($0.celsius) }
+            let hottest = active.max { $0.celsius < $1.celsius }
+            return TemperatureGroupSummary(
+                group: group,
+                label: SensorGroups.label(for: group),
+                averageCelsius: active.isEmpty ? nil : active.map(\.celsius).reduce(0, +) / Double(active.count),
+                maximumCelsius: hottest?.celsius,
+                hottestKey: hottest?.key,
+                count: readings.count,
+                inactiveCount: readings.count - active.count
+            )
+        }
+        .sorted { (SensorGroups.sortKey(for: $0.group), $0.group) < (SensorGroups.sortKey(for: $1.group), $1.group) }
     }
 }
 

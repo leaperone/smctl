@@ -125,20 +125,26 @@ final class PulseCommandsTests: XCTestCase {
         }
     }
 
-    func testStatusGroupsAreOrderedAndSummarized() {
-        let temperatures = [
-            TemperatureDTO(key: "Ts00", group: "Ts", celsius: 40),
-            TemperatureDTO(key: "Tg0P", group: "Tg", celsius: 50),
-            TemperatureDTO(key: "Tp01", group: "Tp", celsius: 60),
-            TemperatureDTO(key: "Tp3P", group: "Tp", celsius: 80),
-            TemperatureDTO(key: "Zz01", group: "Zz", celsius: 30)
-        ]
-        let groups = StatusReport.groups(temperatures)
-        XCTAssertEqual(groups.map(\.label), ["CPU", "GPU", "Board", "Zz"])
-        XCTAssertEqual(groups[0].maximumCelsius, 80)
-        XCTAssertEqual(groups[0].hottestKey, "Tp3P")
-        XCTAssertEqual(groups[0].averageCelsius, 70)
-        XCTAssertEqual(groups[0].count, 2)
+    func testStatusListsAverageBeforeMaximumAndHandlesPoweredDownGroups() {
+        let report = StatusReport(
+            timestamp: Date(), daemon: .init(running: true, version: "0.2.4", message: nil), profile: "auto",
+            temperatures: [
+                TemperatureDTO(key: "Tp01", group: "Tp", celsius: 40),
+                TemperatureDTO(key: "Tp3P", group: "Tp", celsius: 60),
+                TemperatureDTO(key: "Tg0C", group: "Tg", celsius: 0.8),
+                TemperatureDTO(key: "Tg0D", group: "Tg", celsius: -1.2)
+            ],
+            fans: [], curve: [], power: [], safety: nil, conflicts: []
+        )
+        let lines = report.humanDescription.split(separator: "\n").map(String.init)
+        let cpu = try? XCTUnwrap(lines.first { $0.hasPrefix("  CPU") })
+        XCTAssertNotNil(cpu)
+        if let cpu, let avg = cpu.range(of: "avg 50.0 °C"), let max = cpu.range(of: "max 60.0 °C") {
+            XCTAssertLessThan(avg.lowerBound, max.lowerBound, cpu)
+        } else {
+            XCTFail("CPU line: \(String(describing: cpu))")
+        }
+        XCTAssertTrue(lines.contains { $0.hasPrefix("  GPU") && $0.contains("sensors off") }, report.humanDescription)
     }
 
     func testStatusTextFlagsLatchedSafetyAndRunningConflicts() {
@@ -152,6 +158,7 @@ final class PulseCommandsTests: XCTestCase {
         )
         let text = report.humanDescription
         XCTAssertTrue(text.contains("profile balanced"))
+        XCTAssertTrue(text.contains("avg 104.0 °C"))
         XCTAssertTrue(text.contains("50%"), "fan percent of its range")
         XCTAssertTrue(text.contains("LATCHED"))
         XCTAssertTrue(text.contains("hot-spots 110.0 °C"))
