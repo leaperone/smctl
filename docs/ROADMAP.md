@@ -74,7 +74,8 @@ On accepte des motifs (`"Tp*"` pour les hotspots CPU, `"Tg*"` pour le GPU, `"Ts*
 ### 2.9 App
 - **Interface** : SwiftUI, `MenuBarExtra(.window)`, Observation. L'éditeur utilise Swift Charts.
 - **Cible** : macOS 26 ou plus pour l'app ; le package reste en macOS 14.
-- **Projet** : généré par XcodeGen depuis `project.yml`.
+- **Projet** : package SwiftPM séparé dans `App/` (macOS 26), qui dépend du package principal. `App/Package.swift` s'ouvre dans Xcode ; `scripts/build-app.sh` assemble `dist/Pulse.app`. Pas de XcodeGen.
+- **Barre des menus** : `NSStatusItem` + `NSPopover` en AppKit, avec les vues en SwiftUI. `MenuBarExtra` redessinait l'élément à chaque mise à jour de la scène (environ 3,6 % de CPU au repos).
 - **Packaging** : `pulse` et `pulsed` sont embarqués dans `Contents/Helpers/`. L'installation du service passe par `pulse daemon install` avec les droits administrateur. Lancement à l'ouverture de session via `SMAppService.mainApp`, et `LSUIElement` pour ne pas apparaître dans le Dock.
 - **Signature** : ad hoc pour un usage perso. Les écritures sont autorisées aux comptes admin (vérifié sous macOS 27.2).
 
@@ -87,7 +88,7 @@ On détecte les autres contrôleurs de ventilateurs (daemon smctl, TG Pro, Macs 
 - [x] **Phase 1a, moteur** : conversion % → RPM (`FanSpeedRange`), `FanCurveShape` (compilation adaptative), motifs de capteurs, EMA
 - [x] **Phase 1b, daemon** : config TOML étendue, presets, zone morte d'écriture, XPC (`getTelemetry`, CRUD des courbes ; l’aperçu est calculé côté client avec PolicyEngine)
 - [x] **Phase 1c, CLI** : `pulse status`, `pulse fan curve …`, détection des conflits
-- [ ] **Phase 2, app de barre des menus** : XcodeGen, label, popover, sélecteur de profil, installation du service, réglages
+- [x] **Phase 2, app de barre des menus** : package `App/`, libellé, popover, sélecteur de profil, installation du service, réglages (au repos : environ 0,2 % de CPU, 19 Mo)
 - [ ] **Phase 3, éditeur** : graphique interactif, formes, poignées et raideur, conversion en points, aperçu live, bascule %/RPM
 - [ ] **Phase 4, finitions** : notification quand le garde-fou se déclenche, lancement au login, déclencheurs (horaire de nuit), validation sur MacBook
 
