@@ -117,8 +117,9 @@ public final class DaemonClient {
 
         let proxy = connection.remoteObjectProxyWithErrorHandler { error in
             let nsError = error as NSError
-            if nsError.domain == NSCocoaErrorDomain, nsError.code == 4099 {
-                // Connection invalidated: the mach service is not registered with launchd.
+            if nsError.domain == NSCocoaErrorDomain, nsError.code == 4099 || nsError.code == 4097 {
+                // Connection invalidated (4099) or interrupted before a reply (4097): the
+                // mach service is not registered with launchd, or the daemon went away.
                 box.error = "\(ProductIdentity.daemonName) is not running. Install it with 'sudo \(ProductIdentity.cliName) daemon install' (check with '\(ProductIdentity.cliName) daemon status')."
             } else {
                 box.error = String(describing: error)
