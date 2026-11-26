@@ -26,8 +26,16 @@ trap restore EXIT
 
 echo "1. Activating $PROFILE so fans are under Pulse's control…"
 "$PULSE" fan profile "$PROFILE" >/dev/null
-echo "2. Lowering the safety ceiling to 45 °C (any sensor above it trips the guard)…"
-sed -i '' -E 's/^temp_ceiling = .*/temp_ceiling = 45.0/' "$CONFIG"
+# A fixed ceiling fails on a cool Mac (a Mac mini idles near 35 °C), so it sits
+# 3 °C below the hottest reading right now. Tp* hot-spots get +10 °C on top of
+# the ceiling, so they count 10 °C lower.
+CEILING="$("$PULSE" status --json | python3 -c '
+import json, sys
+temps = json.load(sys.stdin)["temperatures"]
+hottest = max(t["celsius"] - (10 if t["key"].startswith("Tp") else 0) for t in temps)
+print(max(int(hottest) - 3, 20))')"
+echo "2. Lowering the safety ceiling to $CEILING °C (any sensor above it trips the guard)…"
+sed -i '' -E "s/^temp_ceiling = .*/temp_ceiling = $CEILING.0/" "$CONFIG"
 "$PULSE" daemon restart >/dev/null
 "$PULSE" fan profile "$PROFILE" >/dev/null
 

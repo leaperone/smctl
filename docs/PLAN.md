@@ -423,7 +423,7 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
   - « auto » et « manual » ne sont jamais proposés à la reprise ;
   - la télémétrie de secours (lecture directe des capteurs, sans daemon) est ignorée : elle ne connaît pas le garde-fou et produirait un faux « retour à la normale ».
 - **Réglages > General** : interrupteur, activé par défaut, regroupé avec « Open Pulse at login ». Fenêtre passée à 780 × 760 pour que General tienne sans défiler.
-- `scripts/test-safety-notification.sh` (avec `sudo`) : abaisse le plafond à 45 °C pour déclencher le garde-fou, attend, puis restaure la config, même après Ctrl-C.
+- `scripts/test-safety-notification.sh` (avec `sudo`) : abaisse le plafond 3 °C sous la température la plus haute du moment pour déclencher le garde-fou (un plafond fixe à 45 °C ne déclenchait rien sur un Mac mini au repos), attend, puis restaure la config, même après Ctrl-C.
 - 5 tests : transitions, lancement, messages, respect du réglage. 74 tests côté app au total.
 
 **Ce qui n'a pas marché, et ce qu'on en retient :**

@@ -328,7 +328,7 @@ t_conflict() {
 
 t_safety() {
     needs_fans 10 || return
-    info "Le plafond passe à 45 °C pour déclencher le garde-fou, puis la config est restaurée."
+    info "Le plafond passe 3 °C sous la température actuelle pour déclencher le garde-fou, puis la config est restaurée."
     sudo "$ROOT/scripts/test-safety-notification.sh" "$CURVE" "$PULSE" || { record 10 "${TITLES[9]}" skip "script interrompu"; return; }
     local engaged released
     yesno "As-tu vu la notification « Temperature limit reached » ?" && engaged=yes || engaged=no
