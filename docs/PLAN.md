@@ -183,7 +183,7 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 
 ### 4d. Validation sur MacBook (nécessite ton MacBook)
 
-> 🟡 **En cours depuis le 26/11/2026** sur MacBook Pro M1 Pro (voir le journal). Restent tes vérifications : icône à côté de l'encoche, règle « On Battery », réinstallation du daemon.
+> ✅ **Terminée le 26/11/2026** sur MacBook Pro M1 Pro (voir le journal).
 - Chemin `Ftst` (les MacBook Pro M-series ont besoin du déblocage d'écriture), fonctions batterie de smctl, modèle sans ventilateur (MacBook Air : surveillance seule, éléments liés au ventilateur masqués).
 - Commande de diagnostic `pulse doctor` à créer : elle produira un rapport à me transmettre.
 
@@ -544,3 +544,5 @@ macOS n'offre donc **aucun signal fiable**, et sa propre heuristique ne reconna�
 **Ajustements :**
 - **4e** : `pulse doctor --test-fans` devient la première étape de la campagne, sur chaque Mac.
 - **4f** : profiler l'app (0,37 %) et le daemon (0,52 %) sur le M1 Pro, après la réinstallation ; la mémoire de l'app (78 Mo) reste ouverte.
+
+**Clôture (même jour) :** tes trois vérifications sont bonnes : icône visible à côté de l'encoche, bascule « On Battery → Silent » puis retour, daemon réinstallé. Le daemon réinstallé à 18 h 07 contient le correctif : plus aucune erreur « Battery policy evaluation failed » depuis. CPU du daemon au repos : environ 0,4 % sur 30 s, encore au-dessus de l'objectif ; c'est l'objet de la 4f.
