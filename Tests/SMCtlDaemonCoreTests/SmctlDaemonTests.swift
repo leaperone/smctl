@@ -112,6 +112,31 @@ final class SmctlDaemonTests: XCTestCase {
         )
     }
 
+    func testNoChargingControlKeysLeavesChargingToMacOSWithoutErrors() throws {
+        // M1 Pro on macOS 27: battery readable, no CH0B/CHTE. With no limit set the
+        // policy must neither write nor report an error every period.
+        let backend = RecordingBackend()
+        backend.values["BUIC"] = [80]
+        backend.values["AC-W"] = [1]
+        let daemon = makeDaemon(backend: backend, capabilities: .oneFan)
+
+        try daemon.setChargeLimit("100")
+
+        XCTAssertFalse(backend.writes.contains { $0.key.hasPrefix("CH") }, "writes: \(backend.writes)")
+        XCTAssertNil(daemon.daemonStatus().lastError)
+    }
+
+    func testChargeLimitWithoutChargingControlKeysIsReportedNotWritten() throws {
+        let backend = RecordingBackend()
+        backend.values["BUIC"] = [80]
+        let daemon = makeDaemon(backend: backend, capabilities: .oneFan)
+
+        try daemon.setChargeLimit("80")
+
+        XCTAssertFalse(backend.writes.contains { $0.key.hasPrefix("CH") })
+        XCTAssertTrue(daemon.daemonStatus().lastError?.contains("no charging control keys") ?? false)
+    }
+
     // MARK: - Below-minimum gating
 
     func testForegroundDischargeStopsAtTargetAndReassertsFirmwareReset() throws {

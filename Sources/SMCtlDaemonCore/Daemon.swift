@@ -767,6 +767,17 @@ public final class SmctlDaemon: @unchecked Sendable {
             lastError = "No readable battery charge/charging state was found on this Mac."
             return
         }
+        // Some Macs (e.g. M1 Pro on macOS 27) expose no charging-control keys.
+        // macOS then owns charging: there is nothing to evaluate or write, and an
+        // unknown "charging allowed" state must not turn into a failing re-enable
+        // write every period.
+        guard capabilities.chargingControl != nil else {
+            lastEvaluation = Date()
+            lastError = currentChargeLimitLocked().isLimiting
+                ? "Charge limit \(config.battery.limit) is set, but this Mac exposes no charging control keys; macOS manages charging."
+                : nil
+            return
+        }
         let now = Date()
         let limit = currentChargeLimitLocked()
         let evaluation = chargeMachine.evaluate(
