@@ -24,7 +24,9 @@ public enum CurveSummary {
         } else {
             source = spec.sensors.map { SensorGroupName.title(for: $0) }.joined(separator: ", ")
         }
-        return source + (spec.weights.isEmpty ? ", hottest" : ", weighted average")
+        if spec.weights.isEmpty { return source + ", hottest" }
+        // Equal weights (what the editor writes) are a plain average.
+        return source + (Set(spec.weights.values).count == 1 ? ", average" : ", weighted average")
     }
 
     public static func response(_ spec: FanCurveSpec) -> String {

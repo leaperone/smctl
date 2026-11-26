@@ -41,13 +41,17 @@ struct CurveNamingTests {
 struct CurveSummaryTests {
     @Test func presetsReadPlainly() {
         #expect(CurveSummary.shape(FanCurvePresets.balanced) == "S-curve, 70–100 °C, 0–100 %, steepness 8")
-        #expect(CurveSummary.shape(FanCurvePresets.performance) == "Logarithmic, 60–95 °C, 10–100 %, steepness 3")
+        #expect(CurveSummary.shape(FanCurvePresets.performance) == "Linear, 55–90 °C, 10–100 %")
+        #expect(CurveSummary.sensors(FanCurvePresets.performance) == "CPU, average")
         #expect(CurveSummary.response(FanCurvePresets.balanced) == "up 8 %/s, down 3 %/s")
         #expect(CurveSummary.smoothing(FanCurvePresets.balanced) == "6 s")
         #expect(CurveSummary.sensors(FanCurvePresets.balanced) == "All sensors, hottest")
         let points = FanCurveSpec(name: "p", sensors: ["Tp*", "Tg*"], weights: ["Tp*": 1], points: [.init(40, .percent(0)), .init(90, .maximum)])
         #expect(CurveSummary.shape(points) == "2 points")
-        #expect(CurveSummary.sensors(points) == "CPU, GPU, weighted average")
+        #expect(CurveSummary.sensors(points) == "CPU, GPU, average")
+        var weighted = points
+        weighted.weights = ["Tp*": 2, "Tg*": 1]
+        #expect(CurveSummary.sensors(weighted) == "CPU, GPU, weighted average")
         #expect(CurveSummary.hysteresis(points) == "None")
         #expect(CurveSummary.response(points) == "up immediately, down immediately")
     }

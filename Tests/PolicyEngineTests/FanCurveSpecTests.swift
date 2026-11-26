@@ -105,8 +105,11 @@ final class FanCurveSpecTests: XCTestCase {
             XCTAssertLessThanOrEqual(values[0], values[1], "silent ≤ balanced at \(celsius)C")
             XCTAssertLessThanOrEqual(values[1], values[2], "balanced ≤ performance at \(celsius)C")
         }
-        // Idle hot-spots (~60C) stay near the floor on every preset.
-        XCTAssertTrue(fractions(60).allSatisfy { $0 <= 0.1 + 1e-9 })
+        // Idle hot-spots (~60C) stay near the floor on the hottest-sensor
+        // presets; Performance reads the CPU average, which idles near 50C.
+        XCTAssertTrue(fractions(60).prefix(2).allSatisfy { $0 <= 0.1 + 1e-9 })
+        XCTAssertEqual(FanCurvePresets.performance.shape!.fraction(at: 50), 0.1, accuracy: 1e-9)
+        XCTAssertEqual(FanCurvePresets.performance.weights, ["Tp*": 1], "Performance averages the CPU sensors")
         // Every preset reaches full speed before the 110C hot-spot hard ceiling.
         XCTAssertTrue(fractions(105).allSatisfy { $0 == 1 })
     }

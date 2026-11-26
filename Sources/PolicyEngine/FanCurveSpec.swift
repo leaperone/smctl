@@ -373,9 +373,14 @@ public enum FanCurvePresets {
         hysteresis: 3, rise: 8, fall: 3, smoothing: 6
     )
 
+    /// Follows the CPU *average* rather than the hottest hot-spot: a single
+    /// busy core (70–80 °C under light load) no longer revs the fan, and a
+    /// straight ramp keeps the response predictable. The CPU average idles
+    /// around 45–55 °C.
     public static let performance = preset(
         name: "performance", label: "Performance",
-        shape: (.logarithmic, 60, 95, 0.1, 1, 3),
+        sensors: ["Tp*"], weights: ["Tp*": 1],
+        shape: (.linear, 55, 90, 0.1, 1, 1),
         hysteresis: 2, rise: 10, fall: 4, smoothing: 5
     )
 
@@ -387,6 +392,7 @@ public enum FanCurvePresets {
 
     private static func preset(
         name: String, label: String,
+        sensors: [String] = [], weights: [String: Double] = [:],
         shape: (FanCurveShapeKind, Double, Double, Double, Double, Double),
         hysteresis: Double, rise: Double, fall: Double, smoothing: Double
     ) -> FanCurveSpec {
@@ -396,7 +402,7 @@ public enum FanCurvePresets {
             minimumFraction: shape.3, maximumFraction: shape.4, steepness: shape.5
         )
         return FanCurveSpec(
-            name: name, label: label, shape: curveShape,
+            name: name, label: label, sensors: sensors, weights: weights, shape: curveShape,
             hysteresisCelsius: hysteresis,
             riseRate: .percentPerSecond(rise), fallRate: .percentPerSecond(fall),
             smoothingSeconds: smoothing
