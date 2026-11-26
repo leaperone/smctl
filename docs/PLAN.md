@@ -34,6 +34,8 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 
 ## Étape A : faire de `fstormacq/pulse` un vrai fork de `leaperone/smctl`
 
+> ✅ **Faite le 26/11/2026.** Il ne reste que l'étape 8 : supprimer `pulse-archive` après ta vérification.
+
 **Constat.** Le dépôt GitHub est privé et n'est pas un fork. L'historique git est pourtant correct : `main` contient tout `upstream/main`, avec 35 commits d'avance et 0 de retard. GitHub ne permet pas de transformer un dépôt existant en fork, et un fork d'un dépôt public est forcément public.
 
 **Pré-vérifications (déjà faites) :**
@@ -153,3 +155,10 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 - Dernier test de performance : une fuite trouvée et corrigée (`656b888`). Les vues fermées restaient rendues, jusqu'à 16 % de CPU au bout de quelques heures. Ajout de PulseBench.
 - Conséquences sur le plan : toute nouvelle fenêtre est libérée à la fermeture et chaque étape ajoute sa phase dans PulseBench (intégré en 3a et 3f).
 - Pour démarrer A, il faut ta décision sur l'adresse e-mail des commits.
+
+### 26/11/2026 : étape A terminée
+- Commits Pulse réécrits vers l'adresse noreply avec `git filter-branch` sur la plage `upstream/main..main` uniquement. 36 commits ; arborescence identique (diff vide) ; smctl toujours ancêtre. Sauvegarde locale : tag `backup/pre-fork`. `git config user.email` est passé à l'adresse noreply.
+- Ancien dépôt renommé `pulse-archive` (privé, intact). Le fork `fstormacq/pulse` est public et a pour parent `leaperone/smctl`. Push en avance rapide `3045c35..522b576`, sans force. Issues et Actions activées, description et sujets renseignés.
+- Problème rencontré : aucun (`git filter-repo` n'était pas installé, `filter-branch` suffisait pour une plage de commits).
+- À faire de ton côté : vérifier le fork, puis décider de supprimer ou non `pulse-archive`. Conseillé : activer « Block command line pushes that expose my email » dans GitHub, rubrique Settings → Emails.
+- Conséquence pour la suite : le CI du fork compile le package principal à chaque push ; on étudiera l'ajout d'`App/` en 4f. Phase 3 : en attente de ton feu vert (« on verra pour la partie 3 »).
