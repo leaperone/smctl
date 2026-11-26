@@ -53,3 +53,30 @@ jobs:
 
       - name: Release build
         run: swift build -c release
+
+  app:
+    name: App Build & Test (macOS 26)
+    # The menu bar app targets macOS 26 and needs Xcode 26 (SwiftUI macros);
+    # the macos-26 image has both.
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            App/.build
+            ~/Library/Caches/org.swift.swiftpm
+          key: spm-app-${{ runner.os }}-${{ hashFiles('Package.resolved', 'App/Package.resolved') }}
+          restore-keys: spm-app-${{ runner.os }}-
+
+      - name: Build
+        run: swift build --package-path App
+
+      - name: Test
+        # Tests run on SampleService fakes: no SMC, no daemon, no privileges.
+        run: swift test --package-path App
