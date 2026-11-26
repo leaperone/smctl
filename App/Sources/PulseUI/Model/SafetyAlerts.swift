@@ -104,7 +104,7 @@ public final class SafetyNotifier: NSObject {
         (self.sink as? SystemNotifications)?.onResume = { [weak store] profile in
             Task { await store?.activate(profile) }
         }
-        store.onSafetyEvent = { [weak self] event in self?.handle(event) }
+        store.observeSafety { [weak self] event in self?.handle(event) }
     }
 
     public static var isEnabled: Bool {

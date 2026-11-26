@@ -80,6 +80,18 @@ func main() async {
                          to: output.appendingPathComponent("settings-\(name)-\(scheme == .dark ? "dark" : "light").png"))
         }
     }
+    // Automation pane with example rules.
+    let automationDefaults = UserDefaults(suiteName: "pulse.snapshots.automation")!
+    automationDefaults.removePersistentDomain(forName: "pulse.snapshots.automation")
+    let automation = AutomationController(store: normal, defaults: automationDefaults, observeSystem: false)
+    automation.setRules([
+        AutomationRule(condition: .appsRunning(["com.apple.Chess"]), profile: "performance"),
+        AutomationRule(condition: .lowPowerMode, profile: "silent", enabled: false),
+    ])
+    for scheme in [ColorScheme.light, .dark] {
+        await render(SettingsView(store: normal, pane: .automation, automation: automation), scheme: scheme,
+                     to: output.appendingPathComponent("settings-automation-\(scheme == .dark ? "dark" : "light").png"))
+    }
     // The exact-position label shown on the selected (or dragged) point.
     var labelled = FanCurvePresets.balanced
     labelled.name = "labelled"

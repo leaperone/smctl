@@ -61,7 +61,17 @@ public final class PulseStore {
     public private(set) var menuBar = MenuBarState()
     public var actionError: String?
     /// Called on each change of the daemon's safety guard (see `SafetyNotifier`).
-    @ObservationIgnored public var onSafetyEvent: (@MainActor (SafetyEvent) -> Void)?
+    @ObservationIgnored private var safetyObservers: [@MainActor (SafetyEvent) -> Void] = []
+    /// Called after each poll (automatic profile switching).
+    @ObservationIgnored public var onRefresh: (@MainActor () -> Void)?
+
+    public func observeSafety(_ observer: @escaping @MainActor (SafetyEvent) -> Void) {
+        safetyObservers.append(observer)
+    }
+
+    func emitSafetyEvent(_ event: SafetyEvent) {
+        safetyObservers.forEach { $0(event) }
+    }
     @ObservationIgnored private var safetyTracker = SafetyAlertTracker()
 
     @ObservationIgnored private let service: any PulseService
@@ -123,7 +133,7 @@ public final class PulseStore {
         switch result {
         case .success(let telemetry):
             self.telemetry = telemetry
-            if let event = safetyTracker.update(telemetry) { onSafetyEvent?(event) }
+            if let event = safetyTracker.update(telemetry) { emitSafetyEvent(event) }
             assignIfChanged(\.daemonState, .connected(version: telemetry.daemonVersion))
         case .failure(let error):
             assignIfChanged(\.daemonState, .unavailable(message: Self.describe(error)))
@@ -135,6 +145,7 @@ public final class PulseStore {
         }
         appendHistory(now: now)
         updateMenuBar(now: now)
+        onRefresh?()
 
         if daemonState.isConnected, forceLists || isStale(lastCurvesRefresh, Self.curvesRefreshInterval, now: now) {
             await refreshCurves(now: now)

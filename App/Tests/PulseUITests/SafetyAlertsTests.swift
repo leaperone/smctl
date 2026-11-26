@@ -64,10 +64,10 @@ struct SafetyAlertsTests {
         defer { defaults.set(saved, forKey: SettingsKey.safetyNotifications) }
 
         defaults.set(false, forKey: SettingsKey.safetyNotifications)
-        store.onSafetyEvent?(.released(interruptedProfile: nil))
+        store.emitSafetyEvent(.released(interruptedProfile: nil))
         #expect(sink.messages.isEmpty)
         defaults.set(true, forKey: SettingsKey.safetyNotifications)
-        store.onSafetyEvent?(.released(interruptedProfile: nil))
+        store.emitSafetyEvent(.released(interruptedProfile: nil))
         #expect(sink.messages.count == 1)
         _ = notifier
     }

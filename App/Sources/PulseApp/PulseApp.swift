@@ -18,9 +18,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: StatusItemController?
     private var settings: SettingsWindowController?
     private var safetyNotifier: SafetyNotifier?
+    private var automation: AutomationController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let settings = SettingsWindowController(store: store)
+        let automation = AutomationController(store: store)
+        self.automation = automation
+        let settings = SettingsWindowController(store: store, automation: automation)
         self.settings = settings
         statusItem = StatusItemController(store: store) { settings.show($0) }
         safetyNotifier = SafetyNotifier(store: store)

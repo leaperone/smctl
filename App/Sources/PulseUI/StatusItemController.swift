@@ -231,8 +231,11 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     public let navigation = SettingsNavigation()
     public static let windowIdentifier = NSUserInterfaceItemIdentifier("PulseSettings")
 
-    public init(store: PulseStore) {
+    private let automation: AutomationController?
+
+    public init(store: PulseStore, automation: AutomationController? = nil) {
         self.store = store
+        self.automation = automation
     }
 
     /// Saves unsaved curve edits before quitting; `reply(true)` lets the app
@@ -317,7 +320,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
             tabs.transitionOptions = [.crossfade, .allowUserInteraction]
             tabs.canPropagateSelectedChildViewControllerTitle = false
             for pane in SettingsPane.allCases {
-                let controller = NSHostingController(rootView: SettingsView(store: store, pane: pane, navigation: navigation))
+                let controller = NSHostingController(rootView: SettingsView(store: store, pane: pane, navigation: navigation, automation: automation))
                 controller.sizingOptions = [.preferredContentSize]
                 controller.preferredContentSize = pane.size
                 controller.title = pane.title

@@ -6,12 +6,13 @@ import SwiftUI
 /// Settings panes, hosted by `SettingsWindowController` in a toolbar-style tab
 /// view, like the Settings windows of Apple's apps.
 public enum SettingsPane: String, CaseIterable, Sendable {
-    case general, curves, service, about
+    case general, curves, automation, service, about
 
     public var title: String {
         switch self {
         case .general: return "General"
         case .curves: return "Curves"
+        case .automation: return "Automation"
         case .service: return "Service"
         case .about: return "About"
         }
@@ -21,6 +22,7 @@ public enum SettingsPane: String, CaseIterable, Sendable {
         switch self {
         case .general: return "gearshape"
         case .curves: return "chart.xyaxis.line"
+        case .automation: return "wand.and.stars"
         case .service: return "lock.shield"
         case .about: return "info.circle"
         }
@@ -37,11 +39,13 @@ public struct SettingsView: View {
     let store: PulseStore
     let pane: SettingsPane
     let navigation: SettingsNavigation
+    let automation: AutomationController?
 
-    public init(store: PulseStore, pane: SettingsPane, navigation: SettingsNavigation = SettingsNavigation()) {
+    public init(store: PulseStore, pane: SettingsPane, navigation: SettingsNavigation = SettingsNavigation(), automation: AutomationController? = nil) {
         self.store = store
         self.pane = pane
         self.navigation = navigation
+        self.automation = automation
     }
 
     public var body: some View {
@@ -49,6 +53,12 @@ public struct SettingsView: View {
             switch pane {
             case .general: GeneralSettings(store: store)
             case .curves: CurvesSettings(store: store, navigation: navigation)
+            case .automation:
+                if let automation {
+                    AutomationSettings(store: store, automation: automation)
+                } else {
+                    ContentUnavailableView("Automation Unavailable", systemImage: "wand.and.stars")
+                }
             case .service: ServiceSettings(store: store)
             case .about: AboutView()
             }
