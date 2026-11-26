@@ -25,7 +25,7 @@ Pulse is a lightweight, native Swift app for Apple silicon Macs. It shows your M
   </picture>
 </p>
 
-> 🚧 **Work in progress.** Tested on a Mac mini M4 (macOS 27). The curve editor is next. See the [roadmap](docs/ROADMAP.md).
+> 🚧 **Work in progress.** Tested on a Mac mini M4 (macOS 27). Finishing touches (safety notifications, schedules, MacBook validation) are next. See the [roadmap](docs/ROADMAP.md).
 
 ## What works today
 
@@ -35,8 +35,9 @@ Pulse is a lightweight, native Swift app for Apple silicon Macs. It shows your M
 | **Popover** | Average and hottest sensor per group (CPU, GPU, board), fan speed and curve target, a 5-minute history, and one-click profiles. Warnings appear when the fan service is missing, the safety guard has engaged, or another fan app is running. |
 | **Profiles** | *Auto* (macOS), *Silent*, *Balanced*, *Performance*, and your own curves. |
 | **Custom curves** | Percent-based shapes (linear, sigmoid, exponential, logarithmic, steps) that you stretch with start/end temperatures, a floor, a ceiling and a steepness. You can also use explicit points. |
+| **Curve editor** | In Settings › Curves: drag the ramp's ends or free points on a chart, pick a shape and its steepness, choose sensors and how fast the fan may speed up or slow down. A live marker shows the current temperature and what the curve would ask for, with the presets drawn faintly for reference. Undo, % or RPM axis, and unsaved changes are never lost silently. |
 | **`pulse` CLI** | `pulse status` gives an overview for SSH. `pulse fan curve …` creates, previews, edits and deletes curves. Every command supports `--json`. |
-| **Footprint** | The app uses ~0.3% CPU and ~20 MB at idle. The daemon reads the SMC once per second, skips redundant fan writes and caches SMC key metadata. |
+| **Footprint** | The app uses ~0.1% CPU and ~18 MB at idle (closed windows release their views; the beating icon costs ~2% while it beats). The daemon reads the SMC once per second, skips redundant fan writes and caches SMC key metadata. |
 
 ### The heartbeat
 
@@ -77,6 +78,17 @@ Each curve runs through the same pipeline once per second:
 The presets are calibrated for Apple silicon hot-spot sensors. These idle around 55–65 °C and reach 95–105 °C under sustained load. Apple's own policy on the Mac mini M4 keeps the fan near its minimum until ~100 °C.
 
 ### Your own curves
+
+Duplicate a preset (or click **+**) in **Settings › Curves**, then shape it on the chart:
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/img/editor-dark.png">
+    <img src="assets/img/editor-light.png" alt="Curve editor: points on a temperature/RPM chart, live marker at 55 °C, sensors and response settings" width="568">
+  </picture>
+</p>
+
+Or from the command line, the same curves:
 
 ```console
 $ pulse fan curve set night --shape sigmoid --start 75 --end 100 --max 60% --activate
@@ -175,7 +187,8 @@ pulse CLI ───────────────────────�
 
 - `Sources/`: the core package (smctl plus Pulse additions in separate files).
 - `App/`: the menu bar app (separate SwiftPM package; open `App/Package.swift` in Xcode).
-- `swift test` in the root and in `App/` runs ~230 tests. `swift run --package-path App PulseSnapshots <dir>` renders the UI with sample data.
+- `swift test` in the root and in `App/` runs ~280 tests. `swift run --package-path App PulseSnapshots <dir>` renders the UI with sample data.
+- `swift run -c release --package-path App PulseBench` measures CPU and memory with the real status item, popover, settings and editor (and checks that closed windows release their views). `swift run --package-path App PulseLiveCheck <path to pulse>` runs the editor's save path against the installed daemon and cleans up after itself.
 
 ## Built on smctl
 

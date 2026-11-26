@@ -88,6 +88,12 @@ final class Bench: NSObject, NSApplicationDelegate {
         window.orderOut(nil)
     }
 
+    static func hostsSwiftUI(_ view: NSView?) -> Bool {
+        guard let view else { return false }
+        if String(describing: type(of: view)).contains("NSHostingView") { return true }
+        return view.subviews.contains { hostsSwiftUI($0) }
+    }
+
     func run() async {
         // A full history, as after a few minutes of running.
         if ProcessInfo.processInfo.environment["PULSE_BENCH_DRAG_ONLY"] != nil {
@@ -121,6 +127,12 @@ final class Bench: NSObject, NSApplicationDelegate {
         try? await Task.sleep(for: .seconds(1))
         settings.close()
         await measure("both opened and closed again")
+        // Closed windows must not keep a SwiftUI tree alive (it would keep
+        // observing the store and rendering).
+        let leftovers = NSApp.windows.filter { !$0.isVisible && Self.hostsSwiftUI($0.contentView) }
+        print(leftovers.isEmpty
+              ? "no SwiftUI view left in closed windows"
+              : "LEAK: \(leftovers.count) closed window(s) still host SwiftUI: \(leftovers.map { String(describing: type(of: $0)) })")
         await measureDrag()
         exit(0)
     }

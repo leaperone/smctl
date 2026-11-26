@@ -24,7 +24,8 @@ Chaque étape se clôt de la même façon (« porte de validation ») :
 | PulseBench, popover ouvert | 2,9 % (sondage chaque seconde, graphique) | acceptable quand visible |
 | PulseBench, réglages ouverts | 2,6 % (aperçu qui bat) | acceptable quand visible |
 | PulseBench, popover ou réglages refermés | **0,5–1 %** (avant correctifs : 3,5 % et **11 %**) | ≈ repos |
-| Mémoire après ouverture des vues | ~50 Mo (SwiftUI et Charts restent chargés) | à surveiller |
+| Mémoire après ouverture des vues | ~50–70 Mo (SwiftUI et Charts restent chargés) | à surveiller |
+| Glisser une poignée (60 Hz, rendu forcé) | 12 ms de CPU par image, ~38 % pendant le geste | fluide sur M4 ; à vérifier sur MacBook |
 
 Le correctif `656b888` a supprimé une fuite : les vues fermées continuaient d'être rendues. Après 7 h 30, l'app consommait 16 % de CPU et 150 Mo. **Leçon pour la suite** : toute nouvelle fenêtre (l'éditeur en particulier) est construite à l'ouverture et libérée à la fermeture. Chaque nouvelle vue ajoute sa phase dans PulseBench.
 
@@ -119,6 +120,8 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 - C'est l'occasion de traiter la raideur du preset Performance : en dupliquant le preset, on obtient une version plus douce entre 60 et 63 °C. On ne change pas le preset sans ton accord.
 
 ### 3f. Validation de la phase 3
+
+> ✅ **Faite le 26/11/2026** (voir le journal). **La phase 3 est terminée et attend ta revue.**
 - Captures de l'éditeur dans chaque mode (forme, paliers, points), en clair et en sombre.
 - PulseBench : éditeur ouvert, éditeur refermé, plus un glisser simulé.
 - Test réel : créer « night » dans l'app, l'activer, vérifier avec `pulse status` et `pulse fan curve show night` (en SSH), modifier en SSH et voir l'app se mettre à jour, puis supprimer.
@@ -284,3 +287,36 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 **Mesures :** app au repos à 0,07 % (17,3 Mo). PulseBench : éditeur refermé 0,6 %, glisser 12 ms par image (inchangé).
 
 **Pour 3f :** vérifier tout le parcours sur le vrai daemon (créer, activer, modifier en SSH, voir l'app suivre, supprimer), mettre le README à jour (capture de l'éditeur) et cocher la phase 3 dans la feuille de route.
+
+### 26/11/2026 : étape 3f terminée, phase 3 close
+**Validation :**
+- **Parcours réel contre le daemon installé** (`PulseLiveCheck`), 13 vérifications sur 13 :
+  - brouillon modifié comme dans l'app, puis enregistré et activé par XPC ;
+  - le daemon le rapporte comme profil actif, avec une cible dans la plage du ventilateur ;
+  - `pulse fan curve show` et `pulse status` le voient ;
+  - une modification en CLI (« SSH ») est rechargée en silence par un éditeur sans modification, et signalée en conflit par un éditeur qui en a ;
+  - retour sur Balanced, courbe supprimée.
+- **PulseBench** vérifie maintenant automatiquement qu'aucune vue SwiftUI ne survit dans une fenêtre fermée : OK.
+- README : ligne « Curve editor », capture de l'éditeur en clair et en sombre, consommation mise à jour, outils de mesure documentés. Feuille de route : phase 3 cochée.
+
+**Ce qui n'a pas marché, et ce qu'on en retient :**
+1. Le push vers GitHub échoue depuis 3a : le jeton `gh` est invalide et le trousseau n'est pas accessible depuis cette session. **6 commits attendent en local.** Après `gh auth login`, un simple `git push` suffit.
+2. Les captures ne peuvent montrer ni la sélection de la liste, ni les dialogues, ni le glisser réel. Ces points sont couverts par des tests et par PulseLiveCheck, mais **un passage à l'œil reste nécessaire**.
+
+**Bilan de la phase 3 :** 6 commits, environ 2 500 lignes. 63 tests côté app (dont un test aléatoire), 1 nouveau test daemon, 2 outils (`PulseBench` enrichi, `PulseLiveCheck`). Une fuite réelle corrigée en chemin (popover). App au repos à environ 0,1 % de CPU et 18 Mo.
+
+**À regarder pendant ta revue (ce que je n'ai pas pu voir moi-même) :**
+1. Le fond de sélection de la liste des courbes (barre noire dans les captures, normalement aux couleurs du système).
+2. Le glisser des poignées et des points : fluidité, aimantation, curseur « main », double-clic, touche Suppr.
+3. Les questions « Save changes…? » : en changeant de courbe, via « Edit Curves… » du popover, en fermant la fenêtre et en quittant.
+4. Le bandeau de conflit : modifier une courbe dans l'app sans enregistrer, puis lancer `pulse fan curve set <nom> --hysteresis 4` dans un terminal.
+5. ⌘Z / ⇧⌘Z dans l'éditeur.
+
+**Décisions qui t'attendent :**
+- **« Essayer 60 s »** (activation temporaire avec retour automatique, côté daemon) : à faire ou pas ?
+- **Preset Performance** : on le laisse, ou tu en fais une copie plus douce avec l'éditeur ?
+
+**Ajustements pour la phase 4 :**
+- 4b : le lancement au login est déjà là ; le test de redémarrage s'ajoutera à la campagne 4e.
+- 4d : sur MacBook, mesurer le glisser avec `PULSE_BENCH_DRAG_ONLY=1 PulseBench`. Au-delà de 16 ms par image, appliquer la parade prévue (30 Hz pendant le glisser).
+- 4e : réutiliser l'approche de `PulseLiveCheck` (étapes automatiques avec remise en état) pour les tests matériels qui ne demandent pas d'action physique.

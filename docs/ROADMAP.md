@@ -91,7 +91,7 @@ Le déroulé détaillé de chaque étape restante, réévalué entre deux étape
 - [x] **Phase 1b, daemon** : config TOML étendue, presets, zone morte d'écriture, XPC (`getTelemetry`, CRUD des courbes ; l’aperçu est calculé côté client avec PolicyEngine)
 - [x] **Phase 1c, CLI** : `pulse status`, `pulse fan curve …`, détection des conflits
 - [x] **Phase 2, app de barre des menus** : package `App/`, libellé, popover, sélecteur de profil, installation du service, réglages, option monochrome pour la barre des menus (au repos : environ 0,2 % de CPU, 19 Mo)
-- [ ] **Phase 3, éditeur** : graphique interactif, formes, poignées et raideur, conversion en points, aperçu live, bascule %/RPM
+- [x] **Phase 3, éditeur** : onglet Courbes, graphique interactif (formes, poignées, raideur, points), aperçu live, bascule %/RPM, réglages d'entrée et de réponse, annuler/rétablir, protection des modifications non enregistrées (au repos : environ 0,1 % de CPU, 18 Mo ; détail dans [PLAN.md](PLAN.md))
 - [ ] **Phase 4, finitions** : notification quand le garde-fou se déclenche, lancement au login, déclencheurs (horaire de nuit), validation sur MacBook
 
 ## 4. Tests

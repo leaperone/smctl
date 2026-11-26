@@ -46,6 +46,12 @@ let package = Package(
             name: "PulseBench",
             dependencies: ["PulseUI", .product(name: "PolicyEngine", package: "pulse")]
         ),
+        // Runs the curve editor's save/reconcile path against the real daemon:
+        // swift run PulseLiveCheck <path to pulse>
+        .executableTarget(
+            name: "PulseLiveCheck",
+            dependencies: ["PulseUI", .product(name: "PolicyEngine", package: "pulse"), .product(name: "SMCtlProtocol", package: "pulse")]
+        ),
         .testTarget(
             name: "PulseUITests",
             dependencies: ["PulseUI"]
