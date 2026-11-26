@@ -110,13 +110,25 @@ public final class PulseStore {
         pollTask = nil
     }
 
-    /// PULSE_POLL_INTERVAL (seconds) overrides the idle cadence, for profiling.
-    @ObservationIgnored private let idleInterval: Duration = {
-        let value = Double(ProcessInfo.processInfo.environment["PULSE_POLL_INTERVAL"] ?? "") ?? 2
+    /// PULSE_POLL_INTERVAL (seconds) overrides the cadence, for profiling.
+    @ObservationIgnored private let pollOverride: Duration? = {
+        guard let value = Double(ProcessInfo.processInfo.environment["PULSE_POLL_INTERVAL"] ?? "") else { return nil }
         return .milliseconds(Int(max(0.5, value) * 1000))
     }()
 
-    var pollInterval: Duration { isPopoverOpen ? .seconds(1) : idleInterval }
+    /// The daemon's sensor interval (1–5 s), nil without a daemon or from one
+    /// that predates the setting.
+    public var samplingInterval: Int? {
+        daemonState.isConnected ? telemetry?.samplingInterval : nil
+    }
+
+    /// Polls follow the daemon's interval: asking more often would only
+    /// return the same readings. Without one, 2 s (1 s with the popover open).
+    var pollInterval: Duration {
+        if let pollOverride { return pollOverride }
+        if let samplingInterval { return .seconds(samplingInterval) }
+        return isPopoverOpen ? .seconds(1) : .seconds(2)
+    }
 
     public func popoverDidOpen() {
         isPopoverOpen = true
@@ -218,6 +230,11 @@ public final class PulseStore {
     @discardableResult
     public func save(_ spec: FanCurveSpec, activate: Bool) async -> Bool {
         await perform { try $0.upsert(spec, activate: activate) }
+    }
+
+    @discardableResult
+    public func setSamplingInterval(_ seconds: Int) async -> Bool {
+        await perform { try $0.setSamplingInterval(seconds) }
     }
 
     @discardableResult

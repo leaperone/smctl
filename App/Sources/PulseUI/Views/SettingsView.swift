@@ -145,6 +145,7 @@ struct GeneralSettings: View {
                     }
                 }
             }
+            SamplingSettings(store: store)
             Section {
                 Toggle(isOn: $safetyNotifications) {
                     Text("Notify when the temperature limit is reached")

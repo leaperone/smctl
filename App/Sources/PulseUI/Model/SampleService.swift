@@ -15,6 +15,7 @@ public final class SampleService: PulseService, @unchecked Sendable {
     public var latched: Bool
     /// One speed range per fan: Mac mini M4 by default, `macBookProFans` or `[]` (fanless MacBook Air).
     public var fanRanges: [FanSpeedRange]
+    public var samplingInterval = 2
 
     public static let macMiniFans = [FanSpeedRange(minimumRPM: 1000, maximumRPM: 4900)]
     /// MacBook Pro M1 Pro (14"/16"): two fans with different maxima.
@@ -67,9 +68,14 @@ public final class SampleService: PulseService, @unchecked Sendable {
                 } : [],
                 power: [PowerReadingDTO(key: "PSTR", name: "System Power", value: 6.2, unit: "W")],
                 safety: SafetyStateDTO(latched: latched, ceilingCelsius: 100, lastTripReason: latched ? "Tp3P held at 111 °C" : nil),
-                lastError: nil
+                lastError: nil,
+                samplingInterval: samplingInterval
             )
         }
+    }
+
+    public func setSamplingInterval(_ seconds: Int) throws {
+        lock.withLock { samplingInterval = seconds }
     }
 
     public func curves() throws -> FanCurveListDTO {
