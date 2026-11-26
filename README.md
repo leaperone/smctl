@@ -159,6 +159,7 @@ Safety  ok · ceiling 100.0 °C (hot-spots 110.0 °C)
 | Command | What it does |
 |---|---|
 | `pulse status [--watch] [--json]` | Overview: temperatures, fans, profile, curve, power, safety, other fan controllers |
+| `pulse doctor [--test-fans] [--json]` | Diagnostic report for bug reports: model, chip, fans and their unlock path (direct or Ftst), charging control, sensors, daemon, conflicts. `--test-fans` drives each fan to 40 % for a few seconds and restores the profile |
 | `pulse fan profile auto\|silent\|balanced\|performance\|<curve>` | Switch profile |
 | `pulse fan curve list\|show\|set\|delete` | Manage curves |
 | `pulse fan set <rpm>` / `pulse fan auto` | Manual target / back to macOS |

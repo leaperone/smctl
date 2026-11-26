@@ -58,7 +58,7 @@ struct SMCtl: ParsableCommand {
         commandName: ProductIdentity.cliName,
         abstract: "Mac hardware control utility.",
         version: SMCtlProtocolInfo.version,
-        subcommands: [Status.self, Sensors.self, Fan.self, Battery.self, Power.self, Display.self, Alert.self, Daemon.self, Debug.self]
+        subcommands: [Status.self, Doctor.self, Sensors.self, Fan.self, Battery.self, Power.self, Display.self, Alert.self, Daemon.self, Debug.self]
     )
 }
 
