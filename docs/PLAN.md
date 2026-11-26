@@ -189,7 +189,7 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 
 ### 4e. Campagne de tests matériels (§4 de la feuille de route)
 
-> ⬜ **À faire**, sur le MacBook Pro M1 Pro **et** sur le Mac mini M4.
+> 🟡 **Script prêt** (`scripts/hardware-campaign.sh`). À lancer ensemble sur le MacBook Pro M1 Pro, puis sur le Mac mini M4. Résultats dans `docs/campaign/`.
 - Installation et désinstallation, changement de profil (app et SSH), veille et réveil, `kill -9 pulsed`, fermeture de l'app, charge soutenue, garde-fou provoqué, outil concurrent, redémarrage.
 - Je prépare un script qui guide chaque test et enregistre les résultats. Les étapes avec `sudo` ou une action physique sont faites par toi.
 
@@ -601,3 +601,9 @@ macOS n'offre donc **aucun signal fiable**, et sa propre heuristique ne reconna�
 - Pulse est une app de barre des menus, sans menu Help macOS : le lien « Help » est dans le pied du popover, entre Settings… et Quit (raccourci ⌘?). Il ouvre la page GitHub du document.
 - L'onglet est retiré. Le document est écrit à la main, mais 2 tests (`HelpDocumentTests`) vérifient que ses chiffres suivent le code : plages des presets, capteur suivi, plancher de Performance, plafonds du garde-fou, plage du rythme.
 - **Ensuite** : le script de la campagne 4e, qu'on lance ensemble, puis la réflexion sur la publication.
+
+### 26/11/2026 : script de la campagne 4e
+- `scripts/hardware-campaign.sh` : 13 tests, lancés tous ou par numéro (`--list`). Les vérifications automatiques tournent seules ; le script demande quand il faut un clic, débrancher le chargeur, ou le mot de passe pour sudo. Résultats dans `docs/campaign/<modèle>-<date>.md`, une ligne par test avec les mesures. Profil et intervalles restaurés à la sortie, même après Ctrl-C.
+- Tests : 1 `doctor --test-fans` · 2 profil par la CLI · 3 profil depuis l'app (et SSH si la session à distance est active) · 4 intervalle, et bascule au débranchement sur MacBook · 5 fermeture de l'app · 6 `kill -9` du daemon · 7 veille et réveil · 8 charge soutenue (`yes` sur tous les cœurs, 120 s, puis 60 s de retour au calme) · 9 outil concurrent (faux processus « Macs Fan Control ») · 10 garde-fou provoqué et notifications · 11 désinstallation et réinstallation · 12 ventilateurs arrêtés 30 min (Mac mini) · 13 redémarrage (`--after-reboot` à la reconnexion).
+- Essayés sur le MacBook sans action de ta part : 1, 2, 4 (sans débranchement), 5 et 9, tous réussis.
+- **Pièges** : une copie de `/bin/sleep` est tuée par macOS (binaire système hors de `/bin`), et un lien symbolique garde le nom « sleep ». Le faux concurrent est donc un petit programme C compilé à la volée.
