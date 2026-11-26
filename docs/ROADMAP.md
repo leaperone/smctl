@@ -69,6 +69,7 @@ On accepte des motifs (`"Tp*"` pour les hotspots CPU, `"Tg*"` pour le GPU, `"Ts*
 - Tout l'existant de smctl est conservé.
 - `pulse status` : vue d'ensemble pour le SSH.
 - `pulse fan curve list|show|set|delete|preview` : gestion des courbes.
+- `pulse fan stress <profil>…` : stress test pour régler une courbe (charge CPU + GPU, relevés, comparaison entre profils). Le même moteur sert à l'app.
 - `--json` est disponible partout.
 
 ### 2.9 App
@@ -98,6 +99,7 @@ Le déroulé détaillé de chaque étape restante, réévalué entre deux étape
   - [x] 4c : déclencheurs selon l'état du système (app ou jeu ouvert, mode économie d'énergie, batterie ou secteur)
   - [x] 4d : validation sur MacBook Pro M1 Pro, `pulse doctor`, interface pour les Mac sans ventilateur et à deux ventilateurs
   - [ ] 4e : campagne de tests matériels, sur le MacBook et le Mac mini
+  - [x] 4g : stress test pour régler les courbes, dans l'app (bouton « Stress Test… », graphiques en direct, comparaison avec l'essai précédent) et en CLI (`pulse fan stress`)
   - [ ] 4f : 1.0 — fait : profilage, intervalle de collecte de 1 à 5 s (avec un rythme sur batterie), fenêtre gardée au premier plan après le mot de passe, CI pour `App/`, aide utilisateur (`docs/HELP.md`, ouverte depuis le popover) ; reste : publication (après la 4e)
 
 ## 4. Tests
