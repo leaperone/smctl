@@ -132,6 +132,8 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 ## Phase 4 : finitions
 
 ### 4a. Notification du garde-fou
+
+> ✅ **Faite le 26/11/2026** (`03ac2d5`, voir le journal). Il reste à la vérifier sur le vrai matériel avec `sudo scripts/test-safety-notification.sh`.
 - Dans l'app : une notification (`UserNotifications`) quand `safety.latched` passe de faux à vrai (« Ventilateur au maximum : X °C sur Tp0E »), puis une autre au retour à la normale. Un réglage permet de les couper.
 - Risque : les notifications avec une signature ad hoc. À tester dès le début de l'étape. Plan B : une alerte dans le popover et l'icône d'avertissement, qui existent déjà.
 - Tests : transitions (une seule notification par événement, aucune au lancement si le garde-fou est déjà engagé).
@@ -369,3 +371,30 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 **Ajustements pour la phase 4 :**
 - **4a** : commencer par une mesure de l'app au repos sans interaction, pour fermer le point ouvert ci-dessus.
 - **4e** : ajouter l'essai prolongé ventilateur arrêté (`idle = off`) à la campagne de tests.
+
+### 26/11/2026 : étape 4a terminée (`03ac2d5`)
+**Livré :**
+- **Notifications** :
+  - « Temperature limit reached » : nomme le capteur (« Tp0E reached 112 °C (limit 110 °C) ») et le profil mis en pause ;
+  - « Temperatures back to normal », au refroidissement, avec un bouton **« Resume Profile »** qui réactive le profil interrompu.
+- **Logique** (`SafetyAlertTracker`) :
+  - une seule notification par transition ;
+  - aucune pour un verrouillage déjà présent au lancement ;
+  - « auto » et « manual » ne sont jamais proposés à la reprise ;
+  - la télémétrie de secours (lecture directe des capteurs, sans daemon) est ignorée : elle ne connaît pas le garde-fou et produirait un faux « retour à la normale ».
+- **Réglages > General** : interrupteur, activé par défaut, regroupé avec « Open Pulse at login ». Fenêtre passée à 780 × 760 pour que General tienne sans défiler.
+- `scripts/test-safety-notification.sh` (avec `sudo`) : abaisse le plafond à 45 °C pour déclencher le garde-fou, attend, puis restaure la config, même après Ctrl-C.
+- 5 tests : transitions, lancement, messages, respect du réglage. 74 tests côté app au total.
+
+**Ce qui n'a pas marché, et ce qu'on en retient :**
+1. **Le plan se trompait sur le garde-fou.** Il ne met pas les ventilateurs au maximum : il les **rend à macOS** et **écrit `profile = "auto"` dans la config**. Le profil de l'utilisateur n'est donc pas rétabli après refroidissement. D'où le bouton « Resume Profile ». **Question pour plus tard** : faut-il que le daemon rétablisse le profil tout seul une fois le verrou relâché ? C'est plus pratique, mais une machine qui chauffe en boucle pourrait alors osciller. À trancher pendant la campagne 4e.
+2. Le risque des notifications avec une signature ad hoc ne s'est pas concrétisé : une version sonde a obtenu `granted=true` et posté sans erreur. Point à surveiller : macOS pourrait redemander l'autorisation quand la signature ad hoc change à chaque build.
+3. Ajouter un réglage a fait déborder General de la fenêtre (taille fixe depuis la revue). **Règle** : à chaque nouveau réglage, relire la capture de l'onglet concerné à la taille réelle.
+
+**Mesures :** PulseBench : popover refermé 0,35 %, réglages refermés 0,41 %, éditeur refermé 0,40 %, aucune vue SwiftUI ne survit à la fermeture.
+- **App réelle au repos**, sans battement, rien d'ouvert d'après l'échantillonnage : **0,33 % de CPU, 80 Mo**. La référence était de 0,07 % et 17 Mo.
+  - L'échantillon ne montre que le sondage et le **redessin de l'icône** (`MenuBarRenderer.layoutReadings`), soit environ 15 ms par changement de valeur affichée.
+  - Ce n'est pas lié à cette session : le Mac est plus chaud qu'au moment de la référence (points chauds entre 55 et 78 °C), donc les valeurs affichées changent plus souvent.
+  - **À traiter en 4f** : arrondir ou retarder les valeurs de la barre des menus pour réduire les redessins, et chercher d'où viennent les 80 Mo au repos.
+
+**Pour 4c (déclencheurs)** : c'est le prochain point qui demande une décision de ta part (où vivent les horaires : daemon, recommandé, ou app). La 4b se limite à un test de redémarrage, déjà rattaché à la campagne 4e.
