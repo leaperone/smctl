@@ -24,7 +24,7 @@ pmset -g batt | grep -q InternalBattery && HAS_BATTERY=true
 RESULTS_DIR="$ROOT/docs/campaign"
 RESULTS="${RESULTS:-$RESULTS_DIR/$MODEL-$(date +%Y-%m-%d).md}"
 STATE="$HOME/Library/Caches/pulse-campaign-state"
-LOAD_SECONDS="${LOAD_SECONDS:-300}"
+LOAD_SECONDS="${LOAD_SECONDS:-90}"
 COOL_SECONDS="${COOL_SECONDS:-90}"
 IDLE_OFF_MINUTES="${IDLE_OFF_MINUTES:-30}"
 CURVE="${CURVE:-balanced}"
@@ -323,13 +323,18 @@ t_install() {
     sleep 2
     local modes; modes="$(fan_modes)"
     local stopped=yes; [[ -n "$(daemon_pid)" ]] && stopped=no
-    sudo "$PULSE" daemon install >/dev/null
+    local install_error
+    install_error="$(sudo "$PULSE" daemon install 2>&1 >/dev/null)"
     local back=no; wait_for 15 daemon_running && back=yes
+    if [[ $back == no ]]; then
+        # Never leave the Mac without its service: retry with the app's own CLI.
+        sudo "$APP/Contents/Helpers/pulse" daemon install >/dev/null 2>&1 && wait_for 15 daemon_running && install_error+=" (réinstallé via l'app)"
+    fi
     local p; p="$(profile)"
     if [[ $stopped == yes && $modes != *manual* && $back == yes && $p == "$CURVE" ]]; then
         record 11 "${TITLES[10]}" pass "après désinstallation : ventilateurs $modes ; réinstallé, profil $p conservé"
     else
-        record 11 "${TITLES[10]}" fail "arrêté : $stopped, ventilateurs $modes, relancé : $back, profil $p"
+        record 11 "${TITLES[10]}" fail "arrêté : $stopped, ventilateurs $modes, relancé : $back, profil $p ; erreur : ${install_error:-aucune}"
     fi
 }
 

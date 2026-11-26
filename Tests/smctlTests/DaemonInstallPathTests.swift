@@ -109,4 +109,21 @@ final class DaemonInstallPathTests: XCTestCase {
         )
         XCTAssertEqual(path, "/opt/homebrew/bin/\(ProductIdentity.daemonName)")
     }
+
+    func testDaemonFoundThroughTheCLILinkIntoTheApp() {
+        let app = "/Applications/Pulse.app/Contents/Helpers"
+        let exists: (String) -> Bool = { $0 == "\(app)/\(ProductIdentity.daemonName)" }
+        XCTAssertEqual(
+            smctldPath(besideExecutable: "/usr/local/bin/pulse", resolve: { _ in "\(app)/pulse" }, fileExists: exists),
+            "\(app)/\(ProductIdentity.daemonName)",
+            "pulse run through /usr/local/bin finds the daemon inside the app"
+        )
+        let brew: (String) -> Bool = { $0 == "/opt/homebrew/bin/\(ProductIdentity.daemonName)" }
+        XCTAssertEqual(
+            smctldPath(besideExecutable: "/opt/homebrew/bin/pulse", resolve: { _ in "/opt/homebrew/Cellar/pulse/1/bin/pulse" }, fileExists: brew),
+            "/opt/homebrew/bin/\(ProductIdentity.daemonName)",
+            "the unresolved path still wins, so Homebrew upgrades keep a valid LaunchDaemon"
+        )
+        XCTAssertNil(smctldPath(besideExecutable: "/usr/local/bin/pulse", resolve: { $0 }, fileExists: { _ in false }))
+    }
 }

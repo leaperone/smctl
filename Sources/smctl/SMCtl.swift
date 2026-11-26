@@ -46,10 +46,21 @@ func currentExecutablePath() -> String? {
 /// smctld sits next to smctl. Pure and testable. The path is deliberately left
 /// un-resolved — the stable /opt/homebrew/bin symlink, not the versioned Cellar
 /// target — so the LaunchDaemon keeps pointing at a valid binary across `brew upgrade`.
-func smctldPath(besideExecutable executablePath: String, fileExists: (String) -> Bool) -> String? {
-    let directory = URL(fileURLWithPath: executablePath).deletingLastPathComponent()
-    let candidate = directory.appendingPathComponent(ProductIdentity.daemonName).standardizedFileURL.path
-    return fileExists(candidate) ? candidate : nil
+///
+/// Pulse: when the CLI is run through a symlink whose directory has no daemon
+/// (Settings › Service links /usr/local/bin/pulse into Pulse.app), fall back to
+/// the daemon next to the link's target, inside the app bundle.
+func smctldPath(
+    besideExecutable executablePath: String,
+    resolve: (String) -> String = { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path },
+    fileExists: (String) -> Bool
+) -> String? {
+    for executable in [executablePath, resolve(executablePath)] {
+        let directory = URL(fileURLWithPath: executable).deletingLastPathComponent()
+        let candidate = directory.appendingPathComponent(ProductIdentity.daemonName).standardizedFileURL.path
+        if fileExists(candidate) { return candidate }
+    }
+    return nil
 }
 
 @main
