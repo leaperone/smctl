@@ -84,6 +84,8 @@ On détecte les autres contrôleurs de ventilateurs (daemon smctl, TG Pro, Macs 
 
 ## 3. Phases
 
+Le déroulé détaillé de chaque étape restante, réévalué entre deux étapes, est dans [PLAN.md](PLAN.md).
+
 - [x] **Phase 0, fondations** : fork, build, tests, daemon ad hoc sous macOS 27.2, écriture sur le ventilateur vérifiée, licence MIT, centralisation des identifiants
 - [x] **Phase 1a, moteur** : conversion % → RPM (`FanSpeedRange`), `FanCurveShape` (compilation adaptative), motifs de capteurs, EMA
 - [x] **Phase 1b, daemon** : config TOML étendue, presets, zone morte d'écriture, XPC (`getTelemetry`, CRUD des courbes ; l’aperçu est calculé côté client avec PolicyEngine)
