@@ -150,6 +150,18 @@ extension FanRateValue: Codable {
 
 // MARK: - Curve specification
 
+/// What a fan does while its curve is at 0% (below the ramp, with a 0% floor).
+public enum FanCurveIdle: String, Codable, CaseIterable, Sendable {
+    /// macOS runs the fan (it may stop it, or spin it faster than the floor).
+    case system
+    /// The fan holds its minimum RPM: never faster than the curve, never stopped.
+    case minimum
+    /// Pulse stops the fan. Needs `[safety] allow_below_minimum = true`; guarded
+    /// by `FanCurveHandoff.allowsStopping`. Possibly harmful: Apple's firmware
+    /// never stops some fans (Mac mini).
+    case off
+}
+
 public struct FanCurveSpecPoint: Codable, Equatable, Sendable {
     public var celsius: Double
     public var speed: FanSpeedValue
@@ -180,6 +192,8 @@ public struct FanCurveSpec: Codable, Equatable, Sendable {
     public var riseRate: FanRateValue?
     public var fallRate: FanRateValue?
     public var smoothingSeconds: Double?
+    /// Behaviour at 0%; only matters when the curve's floor is 0%.
+    public var idle: FanCurveIdle
 
     public init(
         name: String,
@@ -191,7 +205,8 @@ public struct FanCurveSpec: Codable, Equatable, Sendable {
         hysteresisCelsius: Double = 0,
         riseRate: FanRateValue? = nil,
         fallRate: FanRateValue? = nil,
-        smoothingSeconds: Double? = nil
+        smoothingSeconds: Double? = nil,
+        idle: FanCurveIdle = .system
     ) {
         self.name = name
         self.label = label
@@ -203,6 +218,39 @@ public struct FanCurveSpec: Codable, Equatable, Sendable {
         self.riseRate = riseRate
         self.fallRate = fallRate
         self.smoothingSeconds = smoothingSeconds
+        self.idle = idle
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, label, sensors, weights, shape, points, hysteresisCelsius, riseRate, fallRate, smoothingSeconds, idle
+    }
+
+    /// `idle` is absent from older clients and daemons: it defaults to `.system`.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        label = try container.decodeIfPresent(String.self, forKey: .label)
+        sensors = try container.decode([String].self, forKey: .sensors)
+        weights = try container.decode([String: Double].self, forKey: .weights)
+        shape = try container.decodeIfPresent(FanCurveShape.self, forKey: .shape)
+        points = try container.decode([FanCurveSpecPoint].self, forKey: .points)
+        hysteresisCelsius = try container.decode(Double.self, forKey: .hysteresisCelsius)
+        riseRate = try container.decodeIfPresent(FanRateValue.self, forKey: .riseRate)
+        fallRate = try container.decodeIfPresent(FanRateValue.self, forKey: .fallRate)
+        smoothingSeconds = try container.decodeIfPresent(Double.self, forKey: .smoothingSeconds)
+        idle = try container.decodeIfPresent(FanCurveIdle.self, forKey: .idle) ?? .system
+    }
+
+    /// Whether the curve ever asks for 0% (its floor), where `idle` applies.
+    public var reachesZero: Bool {
+        if let shape { return shape.minimumFraction <= FanCurveHandoff.idleFraction }
+        return points.contains { point in
+            switch point.speed {
+            case .percent(let value): return value <= FanCurveHandoff.idleFraction * 100
+            case .rpm(let value): return value <= 0
+            case .maximum: return false
+            }
+        }
     }
 
     public static func isValidName(_ name: String) -> Bool {

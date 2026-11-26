@@ -114,7 +114,8 @@ extension FanCurveConfig {
             weights: spec.weights.isEmpty ? nil : spec.weights,
             label: spec.label,
             shape: spec.shape.map(FanShapeConfig.init(shape:)),
-            smoothing: spec.smoothingSeconds
+            smoothing: spec.smoothingSeconds,
+            idle: spec.idle == .system ? nil : spec.idle.rawValue
         )
     }
 
@@ -142,7 +143,13 @@ extension FanCurveConfig {
             hysteresisCelsius: hysteresis,
             riseRate: slew_rate,
             fallRate: fall_slew_rate,
-            smoothingSeconds: smoothing
+            smoothingSeconds: smoothing,
+            idle: try idle.map { value in
+                guard let idle = FanCurveIdle(rawValue: value) else {
+                    throw DaemonError.unsupported("Fan curve '\(name)' idle must be \"system\", \"minimum\" or \"off\".")
+                }
+                return idle
+            } ?? .system
         )
     }
 }
@@ -193,6 +200,7 @@ extension SmctlDaemon {
         if let rate = curve.slew_rate { lines.append("slew_rate = \(rateLiteral(rate))") }
         if let rate = curve.fall_slew_rate { lines.append("fall_slew_rate = \(rateLiteral(rate))") }
         if let smoothing = curve.smoothing { lines.append("smoothing = \(smoothing)") }
+        if let idle = curve.idle { lines.append("idle = \(tomlString(idle))") }
         if let weights = curve.weights, !weights.isEmpty {
             let pairs = weights.sorted { $0.key < $1.key }.map { "\(tomlString($0.key)) = \($0.value)" }.joined(separator: ", ")
             lines.append("weights = { \(pairs) }")
@@ -221,37 +229,90 @@ extension SmctlDaemon {
     /// True unless the fan is verifiably already in manual mode with a target close
     /// enough. Any unreadable state means "write", so the deadband can only skip
     /// redundant writes, never hide a lost manual mode (e.g. after sleep).
-    // MARK: Idle handoff
+    // MARK: Idle (curve at 0%)
 
-    /// Whether macOS runs `fan` this tick. At the curve's 0% floor the fan is
-    /// handed back to macOS, but only after `FanCurveHandoff.releaseDelaySeconds`
-    /// spent continuously at 0%: until then the floor is held, so a temperature
-    /// hovering at the ramp start (no hysteresis, no smoothing) cannot toggle the
-    /// mode — and, on Ftst Macs, the blocking unlock — every second. Taking the
-    /// fan back when the curve rises is immediate.
-    func handOffIdleFanLocked(_ fan: FanCapability, evaluation: FanCurveEvaluation, range: FanSpeedRange) throws -> Bool {
+    enum IdleAction: Equatable {
+        /// Write the curve's target (its floor while waiting to hand off or stop).
+        case followCurve
+        /// macOS runs the fan.
+        case handedToSystem
+        /// Pulse holds the fan stopped.
+        case stopped
+    }
+
+    /// What `fan` does this tick. At 0% the curve's `idle` decides:
+    /// - `.minimum` holds the floor;
+    /// - `.system` hands the fan to macOS, `.off` stops it, both only after
+    ///   `FanCurveHandoff.releaseDelaySeconds` spent continuously at 0%, so a
+    ///   temperature hovering at the ramp start cannot toggle the fan's mode
+    ///   (and, on Ftst Macs, the blocking unlock) every second.
+    /// `.off` needs `[safety] allow_below_minimum = true` (else it acts as
+    /// `.system`) and restarts the fan at its minimum when any sensor nears a
+    /// limit (`FanCurveHandoff.allowsStopping`). Taking control back when the
+    /// curve rises is immediate.
+    func idleActionLocked(
+        _ fan: FanCapability, profile: String, evaluation: FanCurveEvaluation,
+        range: FanSpeedRange, samples: [FanTemperatureSample]
+    ) throws -> IdleAction {
+        let index = fan.index
         guard FanCurveHandoff.releasesToSystem(targetRPM: evaluation.targetRPM, range: range) else {
-            curveIdleSince[fan.index] = nil
-            handedOffFans.remove(fan.index)
-            return false
+            resetIdleLocked(index)
+            return .followCurve
         }
-        guard fanIsManualLocked(fan) else {
-            // Already macOS's (e.g. a cool Mac when the curve was activated).
-            curveIdleSince[fan.index] = nil
-            handedOffFans.insert(fan.index)
-            return true
+        var idle = (try? fanCurveSpecLocked(named: profile).idle) ?? .system
+        if idle == .off, !config.safety.allow_below_minimum { idle = .system }
+
+        switch idle {
+        case .minimum:
+            resetIdleLocked(index)
+            return .followCurve
+        case .system:
+            stoppedFans.remove(index)
+            guard fanIsManualLocked(fan) else {
+                // Already macOS's (e.g. a cool Mac when the curve was activated).
+                curveIdleSince[index] = nil
+                handedOffFans.insert(index)
+                return .handedToSystem
+            }
+            guard idleDelayElapsedLocked(index) else {
+                handedOffFans.remove(index)
+                return .followCurve
+            }
+            try restoreFansAutoLocked(indices: [index])
+            curveIdleSince[index] = nil
+            handedOffFans.insert(index)
+            return .handedToSystem
+        case .off:
+            handedOffFans.remove(index)
+            let stopped = stoppedFans.contains(index)
+            guard FanCurveHandoff.allowsStopping(samples: samples, stopped: stopped) else {
+                // Too warm somewhere to keep the fan off: hold the minimum.
+                if stopped { pulseLogger.notice("Fan \(index, privacy: .public) restarted: a sensor is near its stop limit") }
+                resetIdleLocked(index)
+                return .followCurve
+            }
+            guard stopped || idleDelayElapsedLocked(index) else { return .followCurve }
+            if !stopped || fanTargetNeedsWriteLocked(fan: fan, target: 0, range: range) {
+                _ = try setManualFanTargetLocked(index: index, rpm: 0)
+            }
+            curveIdleSince[index] = nil
+            stoppedFans.insert(index)
+            return .stopped
         }
+    }
+
+    /// Starts the 0% timer if needed; true once it has run for the delay.
+    private func idleDelayElapsedLocked(_ index: Int) -> Bool {
         let now = now()
-        let since = curveIdleSince[fan.index] ?? now
-        curveIdleSince[fan.index] = since
-        guard now.timeIntervalSince(since) >= FanCurveHandoff.releaseDelaySeconds else {
-            handedOffFans.remove(fan.index)
-            return false
-        }
-        try restoreFansAutoLocked(indices: [fan.index])
-        curveIdleSince[fan.index] = nil
-        handedOffFans.insert(fan.index)
-        return true
+        let since = curveIdleSince[index] ?? now
+        curveIdleSince[index] = since
+        return now.timeIntervalSince(since) >= FanCurveHandoff.releaseDelaySeconds
+    }
+
+    private func resetIdleLocked(_ index: Int) {
+        curveIdleSince[index] = nil
+        handedOffFans.remove(index)
+        stoppedFans.remove(index)
     }
 
     /// Whether Pulse holds `fan` in manual mode. An unreadable mode counts as
@@ -348,6 +409,7 @@ extension SmctlDaemon {
                 lastCurveEvaluations.removeAll()
                 curveIdleSince.removeAll()
                 handedOffFans.removeAll()
+                stoppedFans.removeAll()
                 runtimeFanProfile = nil
                 config.fan.profile = "auto"
             }
@@ -385,7 +447,8 @@ extension SmctlDaemon {
                         aggregatedCelsius: evaluation.aggregatedTemperature,
                         effectiveCelsius: evaluation.effectiveTemperature,
                         targetRPM: evaluation.targetRPM,
-                        handedToSystem: handedOffFans.contains(index)
+                        handedToSystem: handedOffFans.contains(index),
+                        stopped: stoppedFans.contains(index)
                     )
                 } : [],
                 power: (snapshot?.power ?? []).compactMap { reading in
@@ -394,7 +457,8 @@ extension SmctlDaemon {
                 safety: SafetyStateDTO(
                     latched: safetyGuard.isLatched,
                     ceilingCelsius: safetyGuard.configuredCeilingCelsius,
-                    lastTripReason: lastSafetyTripReason
+                    lastTripReason: lastSafetyTripReason,
+                    allowsStoppingFans: config.safety.allow_below_minimum
                 ),
                 lastError: lastError
             )

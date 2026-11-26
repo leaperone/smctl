@@ -4,6 +4,8 @@ import SwiftUI
 /// Sensors and response settings of a user curve, each change undoable.
 struct CurveSettingsForm: View {
     @Bindable var model: CurveEditorModel
+    /// The daemon allows stopping fans (`[safety] allow_below_minimum = true`).
+    var allowsStopping = false
 
     private var draft: CurveDraft { model.draft }
 
@@ -41,6 +43,21 @@ struct CurveSettingsForm: View {
                         model.edit("Change Slow-Down Rate") { $0.setFallRate(percentPerSecond: value > 0 ? value : nil) }
                     }
                 }
+                if draft.spec.reachesZero {
+                    GridRow {
+                        label("At 0 %")
+                        Picker("At 0 %", selection: Binding(get: { draft.spec.idle }, set: { idle in
+                            model.edit("Change Behaviour at 0 %") { $0.setIdle(idle) }
+                        })) {
+                            Text("macOS decides").tag(FanCurveIdle.system)
+                            Text("Minimum speed").tag(FanCurveIdle.minimum)
+                            Text("Stopped (experimental)").tag(FanCurveIdle.off)
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                        .gridCellColumns(3)
+                    }
+                }
                 GridRow {
                     label("Hysteresis")
                     valueStepper(draft.spec.hysteresisCelsius > 0 ? "\(CurveSummary.number(draft.spec.hysteresisCelsius)) °C" : "None",
@@ -54,6 +71,16 @@ struct CurveSettingsForm: View {
                     }
                 }
             }
+            if draft.spec.reachesZero && draft.spec.idle == .off {
+                Label {
+                    Text(stopWarning)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            }
             Text(ResponseSummary.text(draft.spec, range: draft.range)
                  + (draft.sensorGroups.isEmpty && draft.customSensors.isEmpty ? " No sensor checked: every sensor counts." : ""))
                 .font(.caption)
@@ -61,6 +88,15 @@ struct CurveSettingsForm: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .font(.callout)
+    }
+
+    private var stopWarning: String {
+        var text = "Forcing the fan to stop may harm your Mac, especially a Mac mini, whose fan macOS never stops. "
+            + "Pulse restarts it above \(Int(FanCurveHandoff.stopChipLimitCelsius)) °C (CPU, GPU) or \(Int(FanCurveHandoff.stopOtherLimitCelsius)) °C (other sensors)."
+        if !allowsStopping {
+            text += " Not enabled yet: add allow_below_minimum = true under [safety] in /etc/pulse/config.toml, then run pulse daemon restart. Until then, macOS runs the fan at 0 %."
+        }
+        return text
     }
 
     private func label(_ text: String) -> some View {

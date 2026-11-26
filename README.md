@@ -54,7 +54,25 @@ By default the icon beats **only when the Mac is warm** (CPU above 65 °C). At r
 
 Every curve maps a **smoothed** temperature to a fan speed in **percent of the fan's own range**. 0% is the fan's minimum RPM and 100% its maximum. The same curve therefore behaves the same on a Mac mini and on a MacBook with two fans.
 
-When a curve has asked for 0% for 15 s, Pulse hands the fan back to macOS instead of holding the minimum (the delay keeps a temperature hovering at the ramp start from toggling the fan). A MacBook's fans then stop while it is cool, as they do without Pulse; its reported minimum (1200 RPM on a 14" MacBook Pro) is only the slowest *spinning* speed. A Mac mini keeps idling at its minimum either way. As soon as the curve rises above 0%, it takes the fan again. A curve with a floor above 0%, like *Performance* (10%), keeps the fans spinning.
+What happens **at 0%** (below the ramp, when the curve's floor is 0%) is chosen per curve, in the editor (*At 0 %*) or with `--at-zero`:
+
+| | |
+|---|---|
+| **macOS decides** (default) | After 15 s at 0%, Pulse hands the fan back to macOS. A cool MacBook stops its fans, as it does without Pulse; its reported minimum (1200 RPM on a 14" MacBook Pro) is only the slowest *spinning* speed. A Mac mini idles at its minimum. macOS may also spin the fan faster than the curve's floor. |
+| **Minimum speed** | The fan holds its minimum RPM: predictable, never faster than the curve, never stopped. |
+| **Stopped** (experimental) | After 15 s at 0%, Pulse stops the fan, even on a Mac mini. It restarts it at its minimum as soon as a CPU or GPU sensor passes 75 °C or any other sensor 50 °C, whatever the curve watches, and stops it again only 5 °C below. |
+
+> [!WARNING]
+> **Stopping a fan may harm your Mac.** You force the hardware into a state its firmware does not choose on its own: macOS never stops a Mac mini's fan, and parts without a temperature sensor may heat up without airflow. It is off unless you also opt in as root, under `[safety]` in `/etc/pulse/config.toml`:
+>
+> ```toml
+> [safety]
+> allow_below_minimum = true
+> ```
+>
+> then `sudo pulse daemon restart`. Without it, *Stopped* behaves like *macOS decides*. The thermal safety guard (100 °C) stays active in every mode.
+
+The 15 s delay keeps a temperature hovering at the ramp start from toggling the fan. As soon as the curve rises above 0%, Pulse takes the fan again. A curve with a floor above 0%, like *Performance* (10%), keeps the fans spinning.
 
 <p align="center">
   <picture>
@@ -115,6 +133,7 @@ hysteresis = 3.0
 slew_rate = "6%"
 fall_slew_rate = "2%"
 smoothing = 10.0
+idle = "minimum"        # at 0%: "system" (default), "minimum" or "off"
 ```
 
 ## Command line

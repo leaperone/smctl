@@ -290,6 +290,128 @@ final class PulseFanCurveTests: XCTestCase {
         XCTAssertEqual(daemon.telemetry().curve.first?.handedToSystem, true)
     }
 
+    // MARK: Idle modes
+
+    private func zeroFloorCurve(_ idle: FanCurveIdle, hysteresis: Double = 0) -> FanCurveSpec {
+        FanCurveSpec(name: "edge", points: [FanCurveSpecPoint(50, .percent(0)), FanCurveSpecPoint(90, .percent(100))],
+                     hysteresisCelsius: hysteresis, idle: idle)
+    }
+
+    /// Activates `spec` at 70 °C (fan under the curve), then cools to 40 °C and
+    /// runs `seconds` one-second ticks.
+    private func coolDown(_ spec: FanCurveSpec, allowStopping: Bool = false, sensors: [String: Double] = [:],
+                          seconds: Int) throws -> (PulseFakeSMC, SmctlDaemon, TestClock) {
+        let (backend, daemon) = makeDaemon(celsius: 70, sensors: sensors)
+        daemon.config.safety.allow_below_minimum = allowStopping
+        let clock = TestClock()
+        daemon.now = { clock.date }
+        try daemon.upsertFanCurve(spec, activate: true)
+        backend.setTemperature(40)
+        for _ in 0...seconds {
+            daemon.evaluateFanSubsystemLocked()
+            clock.advance(1)
+        }
+        return (backend, daemon, clock)
+    }
+
+    func testIdleMinimumHoldsTheFloorAndNeverHandsOff() throws {
+        let (backend, daemon, _) = try coolDown(zeroFloorCurve(.minimum), seconds: 60)
+        XCTAssertEqual(backend.values["F0Md"], [1])
+        XCTAssertEqual(try XCTUnwrap(backend.float("F0Tg")), 1000, accuracy: 0.5)
+        let state = try XCTUnwrap(daemon.telemetry().curve.first)
+        XCTAssertFalse(state.handedToSystem)
+        XCTAssertFalse(state.stopped)
+    }
+
+    func testIdleOffWithoutTheSafetyOptInActsLikeSystem() throws {
+        let (backend, daemon, _) = try coolDown(zeroFloorCurve(.off), allowStopping: false, seconds: 20)
+        XCTAssertEqual(backend.values["F0Md"], [0], "handed to macOS, not stopped")
+        XCTAssertFalse(backend.writes.contains { $0.key == "F0Tg" && $0.bytes == FanController.float32LittleEndianBytes(0) })
+        XCTAssertEqual(daemon.telemetry().curve.first?.handedToSystem, true)
+        XCTAssertFalse(daemon.telemetry().safety.allowsStoppingFans)
+    }
+
+    func testIdleOffStopsTheFanAfterTheDelayAndRestartsWhenTheCurveRises() throws {
+        let (backend, daemon, clock) = try coolDown(zeroFloorCurve(.off), allowStopping: true, seconds: 5)
+        XCTAssertEqual(try XCTUnwrap(backend.float("F0Tg")), 1000, accuracy: 0.5, "floor held during the delay")
+        for _ in 0..<15 {
+            daemon.evaluateFanSubsystemLocked()
+            clock.advance(1)
+        }
+        XCTAssertEqual(backend.values["F0Md"], [1], "Pulse keeps the fan, stopped")
+        XCTAssertEqual(try XCTUnwrap(backend.float("F0Tg")), 0, accuracy: 0.5)
+        let state = try XCTUnwrap(daemon.telemetry().curve.first)
+        XCTAssertTrue(state.stopped)
+        XCTAssertEqual(state.targetRPM, 0)
+        XCTAssertTrue(daemon.telemetry().safety.allowsStoppingFans)
+
+        backend.writes.removeAll()
+        daemon.evaluateFanSubsystemLocked()
+        XCTAssertTrue(backend.writes.isEmpty, "no rewrite while stopped: \(backend.writes)")
+
+        backend.setTemperature(70)
+        daemon.evaluateFanSubsystemLocked()
+        XCTAssertEqual(try XCTUnwrap(backend.float("F0Tg")), 2950, accuracy: 0.5, "the curve takes over immediately")
+        XCTAssertEqual(daemon.telemetry().curve.first?.stopped, false)
+    }
+
+    func testAStoppedFanRestartsWhenAnySensorNearsItsLimit() throws {
+        // The curve watches the CPU only; the enclosure heats up without airflow.
+        var spec = zeroFloorCurve(.off)
+        spec.sensors = ["Tp*"]
+        let (backend, daemon, clock) = try coolDown(spec, allowStopping: true, sensors: ["Ts00": 30], seconds: 20)
+        XCTAssertEqual(daemon.telemetry().curve.first?.stopped, true)
+
+        backend.values["Ts00"] = FanController.float32LittleEndianBytes(Float(FanCurveHandoff.stopOtherLimitCelsius + 1))
+        daemon.evaluateFanSubsystemLocked()
+        XCTAssertEqual(try XCTUnwrap(backend.float("F0Tg")), 1000, accuracy: 0.5, "restarted at its minimum")
+        XCTAssertEqual(daemon.telemetry().curve.first?.stopped, false)
+
+        // Just under the limit is not enough to stop again: 5 °C of headroom, then the delay.
+        backend.values["Ts00"] = FanController.float32LittleEndianBytes(Float(FanCurveHandoff.stopOtherLimitCelsius - 2))
+        for _ in 0..<30 { clock.advance(1); daemon.evaluateFanSubsystemLocked() }
+        XCTAssertEqual(try XCTUnwrap(backend.float("F0Tg")), 1000, accuracy: 0.5)
+
+        backend.values["Ts00"] = FanController.float32LittleEndianBytes(30)
+        for _ in 0..<16 { clock.advance(1); daemon.evaluateFanSubsystemLocked() }
+        XCTAssertEqual(try XCTUnwrap(backend.float("F0Tg")), 0, accuracy: 0.5, "stopped again once cool")
+    }
+
+    func testIdleIsSavedOnlyWhenNotTheDefault() throws {
+        let daemon = makeDaemon().daemon
+        try daemon.upsertFanCurve(zeroFloorCurve(.off), activate: false)
+        var other = zeroFloorCurve(.system)
+        other.name = "plain"
+        try daemon.upsertFanCurve(other, activate: false)
+        let text = try String(contentsOfFile: configPath, encoding: .utf8)
+        XCTAssertTrue(text.contains("idle = \"off\""), text)
+        XCTAssertEqual(text.components(separatedBy: "idle =").count, 2, "system is not written")
+        let reloaded = makeDaemon().daemon
+        XCTAssertEqual(try reloaded.fanCurveSpecLocked(named: "edge").idle, .off)
+        XCTAssertEqual(try reloaded.fanCurveSpecLocked(named: "plain").idle, .system)
+    }
+
+    func testAnUnknownIdleValueMakesTheCurveInvalid() throws {
+        try """
+        [[fan.curves]]
+        name = "odd"
+        sensors = []
+        points = [[50, "0%"], [90, "100%"]]
+        hysteresis = 0
+        idle = "sometimes"
+        """.write(toFile: configPath, atomically: true, encoding: .utf8)
+        let daemon = makeDaemon().daemon
+        XCTAssertNotNil(daemon.listFanCurves().invalid["odd"])
+    }
+
+    func testSpecsFromOlderClientsDecodeWithTheSystemIdle() throws {
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(FanCurvePresets.balanced)) as! [String: Any]
+        json.removeValue(forKey: "idle")
+        let decoded = try JSONDecoder().decode(FanCurveSpec.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(decoded.idle, .system)
+        XCTAssertEqual(decoded, FanCurvePresets.balanced)
+    }
+
     func testCurveStateFromAnOlderDaemonDecodesAsNotHandedOff() throws {
         let json = #"{"index":0,"aggregatedCelsius":60,"effectiveCelsius":60,"targetRPM":1500}"#
         let state = try JSONDecoder().decode(FanCurveStateDTO.self, from: Data(json.utf8))
@@ -433,13 +555,14 @@ final class PulseFanCurveTests: XCTestCase {
     /// A daemon over a fake SMC with one fan (1000–4900 RPM) and, when `celsius`
     /// is given, one readable `Tp01` sensor so curves can run without tripping
     /// the blind-sensor guard.
-    private func makeDaemon(celsius: Double? = nil) -> (backend: PulseFakeSMC, daemon: SmctlDaemon) {
+    private func makeDaemon(celsius: Double? = nil, sensors: [String: Double] = [:]) -> (backend: PulseFakeSMC, daemon: SmctlDaemon) {
         let backend = PulseFakeSMC()
         backend.values["F0Md"] = [0]
         backend.values["F0Tg"] = FanController.float32LittleEndianBytes(0)
         backend.values["F0Mn"] = FanController.float32LittleEndianBytes(1000)
         backend.values["F0Mx"] = FanController.float32LittleEndianBytes(4900)
         if let celsius { backend.setTemperature(celsius) }
+        for (key, value) in sensors { backend.values[key] = FanController.float32LittleEndianBytes(Float(value)) }
         let daemon = SmctlDaemon(
             backend: backend,
             reader: celsius == nil ? nil : SensorReader(backend: backend),

@@ -156,6 +156,24 @@ final class PulseCommandsTests: XCTestCase {
         XCTAssertTrue(lines.contains { $0.hasPrefix("  GPU") && $0.contains("sensors off") }, report.humanDescription)
     }
 
+    func testAtZeroOptionAndPreview() throws {
+        let spec = try build(["night", "--shape", "linear", "--start", "60", "--end", "90", "--at-zero", "off"])
+        XCTAssertEqual(spec.idle, .off)
+        XCTAssertThrowsError(try build(["night", "--shape", "linear", "--start", "60", "--end", "90", "--at-zero", "never"]))
+
+        let range = FanSpeedRange(minimumRPM: 1000, maximumRPM: 4900)
+        let off = curvePreview(spec, builtin: false, active: false, range: range)
+        XCTAssertTrue(off.contains("at 0%: fan stopped (experimental)"), off)
+        XCTAssertTrue(off.contains("    off\n"), off)
+        XCTAssertTrue(off.contains("may harm your Mac"), off)
+
+        var minimum = spec
+        minimum.idle = .minimum
+        let held = curvePreview(minimum, builtin: false, active: false, range: range)
+        XCTAssertFalse(held.contains("macOS") || held.contains("    off"), held)
+        XCTAssertTrue(held.contains("at 0%: minimum speed"), held)
+    }
+
     func testStatusSaysWhenMacOSRunsTheFan() {
         let report = StatusReport(
             timestamp: Date(), daemon: .init(running: true, version: "0.2.5", message: nil), profile: "balanced",
@@ -166,6 +184,18 @@ final class PulseCommandsTests: XCTestCase {
             conflicts: []
         )
         XCTAssertTrue(report.humanDescription.contains("0% · macOS runs the fan"), report.humanDescription)
+    }
+
+    func testStatusSaysWhenPulseStoppedTheFan() {
+        let report = StatusReport(
+            timestamp: Date(), daemon: .init(running: true, version: "0.2.5", message: nil), profile: "night",
+            temperatures: [TemperatureDTO(key: "Tp01", group: "Tp", celsius: 40)],
+            fans: [FanStatusDTO(index: 0, actualRPM: 0, targetRPM: 0, minimumRPM: 1000, maximumRPM: 4900, mode: "manual")],
+            curve: [FanCurveStateDTO(index: 0, aggregatedCelsius: 40, effectiveCelsius: 40, targetRPM: 0, stopped: true)],
+            power: [], safety: SafetyStateDTO(latched: false, ceilingCelsius: 100, lastTripReason: nil, allowsStoppingFans: true),
+            conflicts: []
+        )
+        XCTAssertTrue(report.humanDescription.contains("0% · fan stopped by Pulse"), report.humanDescription)
     }
 
     func testStatusTextFlagsLatchedSafetyAndRunningConflicts() {

@@ -310,6 +310,10 @@ public struct CurveDraft: Equatable, Sendable {
         }
     }
 
+    public mutating func setIdle(_ idle: FanCurveIdle) {
+        spec.idle = idle
+    }
+
     public mutating func setHysteresis(_ celsius: Double) {
         guard celsius.isFinite else { return }
         spec.hysteresisCelsius = Self.round(min(20, max(0, celsius)))

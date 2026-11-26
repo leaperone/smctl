@@ -156,6 +156,8 @@ struct FanCurveConfig: Codable, Equatable, Sendable {
     var label: String?
     var shape: FanShapeConfig?
     var smoothing: Double?
+    /// "system" (default), "minimum" or "off"; see FanCurveIdle.
+    var idle: String?
 
     init(
         name: String,
@@ -167,7 +169,8 @@ struct FanCurveConfig: Codable, Equatable, Sendable {
         weights: [String: Double]? = nil,
         label: String? = nil,
         shape: FanShapeConfig? = nil,
-        smoothing: Double? = nil
+        smoothing: Double? = nil,
+        idle: String? = nil
     ) {
         self.name = name
         self.sensors = sensors
@@ -179,11 +182,12 @@ struct FanCurveConfig: Codable, Equatable, Sendable {
         self.label = label
         self.shape = shape
         self.smoothing = smoothing
+        self.idle = idle
     }
 
     enum CodingKeys: String, CodingKey {
         case name, sensors, points, hysteresis, slew_rate, fall_slew_rate, weights
-        case label, shape, smoothing
+        case label, shape, smoothing, idle
     }
 
     // Custom decoding so optional numeric tuning fields default rather than throwing
@@ -201,6 +205,7 @@ struct FanCurveConfig: Codable, Equatable, Sendable {
         label = try container.decodeIfPresent(String.self, forKey: .label)
         shape = try container.decodeIfPresent(FanShapeConfig.self, forKey: .shape)
         smoothing = try container.decodeLenientDoubleIfPresent(forKey: .smoothing)
+        idle = try container.decodeIfPresent(String.self, forKey: .idle)
     }
 }
 
@@ -349,6 +354,7 @@ public final class SmctlDaemon: @unchecked Sendable {
     // Pulse: idle handoff state (PulseFanCurves.swift).
     var curveIdleSince: [Int: Date] = [:]
     var handedOffFans: Set<Int> = []
+    var stoppedFans: Set<Int> = []
     var now: @Sendable () -> Date = { Date() }
     var lastSafetyTripReason: String?
     // Stateful: carries per-rule debounce/cooldown across ticks.
@@ -1107,7 +1113,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         }
     }
 
-    private func setManualFanTargetLocked(index: Int, rpm: Double) throws -> FanManualResult {
+    func setManualFanTargetLocked(index: Int, rpm: Double) throws -> FanManualResult {
         do {
             let result = try writeSMCOperationLocked {
                 try fanControllerLocked().setManual(
@@ -1144,9 +1150,16 @@ public final class SmctlDaemon: @unchecked Sendable {
             var evaluation = try engine.evaluate(curve: curve, samples: samples, now: now())
             fanCurveEngines[fan.index] = engine
             if freshEngine { curveIdleSince[fan.index] = nil }
-            if try handOffIdleFanLocked(fan, evaluation: evaluation, range: range) {
+            switch try idleActionLocked(fan, profile: profile, evaluation: evaluation, range: range, samples: samples) {
+            case .followCurve:
+                break
+            case .handedToSystem:
                 // macOS runs the fan: report what it asks for, not the curve's floor.
                 evaluation.targetRPM = readNumericLocked(fan.targetKey) ?? 0
+                lastCurveEvaluations[fan.index] = evaluation
+                continue
+            case .stopped:
+                evaluation.targetRPM = 0
                 lastCurveEvaluations[fan.index] = evaluation
                 continue
             }

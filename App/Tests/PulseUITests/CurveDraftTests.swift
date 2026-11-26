@@ -243,4 +243,18 @@ struct CurveDraftTests {
             #expect(worst < 1, "\(preset.name): drawn line is \(worst)% off")
         }
     }
+
+    @Test func idleBehaviourAppliesToCurvesThatReachZero() {
+        var draft = userCurve()
+        #expect(draft.spec.reachesZero)
+        #expect(draft.spec.idle == .system)
+        draft.setIdle(.off)
+        #expect(draft.spec.idle == .off)
+        #expect(draft.isDirty)
+        expectValid(draft)
+        #expect(!CurveDraft(FanCurvePresets.performance).spec.reachesZero, "10% floor")
+        draft.convertToPoints()
+        #expect(draft.spec.reachesZero, "points starting at 0%")
+        #expect(draft.spec.idle == .off, "kept across conversions")
+    }
 }

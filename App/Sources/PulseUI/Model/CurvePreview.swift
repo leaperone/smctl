@@ -12,8 +12,11 @@ public struct CurvePreview: Equatable, Sendable {
     /// The fan's actual speed, when known.
     public var fanPercent: Double?
 
+    /// The curve is at 0%, where its `idle` setting applies.
+    public var atZero: Bool { percent < FanCurveHandoff.idleFraction * 100 }
+
     /// At 0% the daemon hands the fan to macOS (after a short delay).
-    public var handsOffToSystem: Bool { percent < FanCurveHandoff.idleFraction * 100 }
+    public var handsOffToSystem: Bool { atZero }
 
     public static func make(draft: CurveDraft, temperatures: [TemperatureDTO], fan: FanStatusDTO?) -> CurvePreview? {
         guard let celsius = input(spec: draft.spec, temperatures: temperatures) else { return nil }

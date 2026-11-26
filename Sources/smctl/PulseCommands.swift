@@ -200,7 +200,8 @@ struct StatusReport: Codable, Equatable {
             for state in curve {
                 out += "  " + pad("Fan \(state.index)", 8)
                     + "\(celsius(state.aggregatedCelsius)) in → \(celsius(state.effectiveCelsius)) effective → "
-                    + (state.handedToSystem ? "0% · macOS runs the fan (target \(rpm(state.targetRPM)))" : rpm(state.targetRPM)) + "\n"
+                    + (state.stopped ? "0% · fan stopped by Pulse"
+                        : state.handedToSystem ? "0% · macOS runs the fan (target \(rpm(state.targetRPM)))" : rpm(state.targetRPM)) + "\n"
             }
         }
 
@@ -367,6 +368,11 @@ struct FanCurveSet: ParsableCommand {
     @Option(name: .long, help: "Temperature smoothing time constant in seconds (0 disables).")
     var smoothing: Double?
 
+    @Option(name: .customLong("at-zero"), help: """
+        What the fan does while the curve is at 0%: system (macOS runs it, default), minimum (hold the minimum RPM)         or off (stop it — possibly harmful; needs allow_below_minimum = true under [safety]).
+        """)
+    var atZero: String?
+
     @Flag(name: .long, help: "Make it the active profile.")
     var activate = false
 
@@ -447,6 +453,12 @@ struct FanCurveSet: ParsableCommand {
         if let rise { spec.riseRate = try FanRateValue(parsing: rise) }
         if let fall { spec.fallRate = try FanRateValue(parsing: fall) }
         if let smoothing { spec.smoothingSeconds = smoothing > 0 ? smoothing : nil }
+        if let atZero {
+            guard let idle = FanCurveIdle(rawValue: atZero.lowercased()) else {
+                throw ValidationError("--at-zero must be system, minimum or off.")
+            }
+            spec.idle = idle
+        }
         return spec
     }
 }
@@ -585,6 +597,7 @@ func curvePreview(_ spec: FanCurveSpec, builtin: Bool, active: Bool, range: FanS
     if let rise = spec.riseRate { tuning.append("rise \(rise.configString)/s") }
     if let fall = spec.fallRate { tuning.append("fall \(fall.configString)/s") }
     tuning.append(spec.smoothingSeconds.map { "smoothing \(number($0)) s" } ?? "no smoothing")
+    if spec.reachesZero { tuning.append("at 0%: \(idleText(spec.idle))") }
     out += "  \(tuning.joined(separator: " · "))\n\n"
 
     guard let curve = try? spec.resolve(for: range) else {
@@ -602,17 +615,35 @@ func curvePreview(_ spec: FanCurveSpec, builtin: Bool, active: Bool, range: FanS
         let clamped = Swift.min(range.maximumRPM, Swift.max(range.minimumRPM, target))
         let fraction = range.fraction(forRPM: clamped)
         let bar = String(repeating: "█", count: Int((fraction * 24).rounded()))
-        if FanCurveHandoff.releasesToSystem(targetRPM: clamped, range: range) {
+        if spec.idle != .minimum, FanCurveHandoff.releasesToSystem(targetRPM: clamped, range: range) {
             handsOff = true
-            out += String(format: "  %5.0f  %4.0f%%  ", celsius, fraction * 100) + "  macOS" + "\n"
+            out += String(format: "  %5.0f  %4.0f%%  ", celsius, fraction * 100) + (spec.idle == .off ? "    off" : "  macOS") + "\n"
         } else {
             out += String(format: "  %5.0f  %4.0f%%  %7.0f  ", celsius, fraction * 100, clamped) + bar + "\n"
         }
     }
     if handsOff {
-        out += "\n  At 0% the fan goes back to macOS after \(Int(FanCurveHandoff.releaseDelaySeconds)) s: it may stop it, or spin it faster.\n"
+        let delay = Int(FanCurveHandoff.releaseDelaySeconds)
+        switch spec.idle {
+        case .system:
+            out += "\n  At 0% the fan goes back to macOS after \(delay) s: it may stop it, or spin it faster.\n"
+        case .off:
+            out += "\n  At 0% Pulse stops the fan after \(delay) s, and restarts it above \(Int(FanCurveHandoff.stopChipLimitCelsius)) °C (CPU/GPU) "
+                + "or \(Int(FanCurveHandoff.stopOtherLimitCelsius)) °C (other sensors).\n"
+                + "  Warning: forcing a fan to stop may harm your Mac; needs allow_below_minimum = true under [safety].\n"
+        case .minimum:
+            break
+        }
     }
     return out
+}
+
+func idleText(_ idle: FanCurveIdle) -> String {
+    switch idle {
+    case .system: return "macOS runs the fan"
+    case .minimum: return "minimum speed"
+    case .off: return "fan stopped (experimental)"
+    }
 }
 
 private func percentText(_ fraction: Double) -> String {

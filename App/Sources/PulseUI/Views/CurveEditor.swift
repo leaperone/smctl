@@ -10,13 +10,16 @@ public struct CurveEditor: View {
     let preview: CurvePreview?
     /// False for presets: same chart and live readout, no handles or controls.
     let editable: Bool
+    /// The daemon allows `idle = off` (`allow_below_minimum`).
+    let allowsStopping: Bool
 
-    public init(model: CurveEditorModel, unit: Binding<FanSpeedUnit>, hasFanRange: Bool, preview: CurvePreview? = nil, editable: Bool = true) {
+    public init(model: CurveEditorModel, unit: Binding<FanSpeedUnit>, hasFanRange: Bool, preview: CurvePreview? = nil, editable: Bool = true, allowsStopping: Bool = false) {
         self.model = model
         self._unit = unit
         self.hasFanRange = hasFanRange
         self.preview = preview
         self.editable = editable
+        self.allowsStopping = allowsStopping
     }
 
     private var draft: CurveDraft { model.draft }
@@ -114,9 +117,16 @@ public struct CurveEditor: View {
     }
 
     private func readout(_ preview: CurvePreview) -> String {
-        var text = preview.handsOffToSystem
-            ? "Now \(Int(preview.celsius.rounded())) °C → 0 %, macOS runs the fan"
-            : "Now \(Int(preview.celsius.rounded())) °C → this curve asks \(speed(preview.percent))"
+        let now = "Now \(Int(preview.celsius.rounded())) °C → "
+        var text: String
+        let idle = model.draft.spec.idle == .off && !allowsStopping ? .system : model.draft.spec.idle
+        if preview.atZero && idle == .system {
+            text = now + "0 %, macOS runs the fan"
+        } else if preview.atZero && idle == .off {
+            text = now + "0 %, Pulse stops the fan"
+        } else {
+            text = now + "this curve asks \(speed(preview.percent))"
+        }
         if let fan = preview.fanPercent {
             text += " · fan at \(speed(fan))"
         }

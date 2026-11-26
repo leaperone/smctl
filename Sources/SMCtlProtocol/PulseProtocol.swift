@@ -49,17 +49,21 @@ public struct FanCurveStateDTO: Codable, Equatable, Sendable {
     /// The curve is at 0% and macOS runs this fan (it may stop it, or spin it
     /// faster than the curve's floor). False from daemons that predate it.
     public var handedToSystem: Bool
+    /// The curve is at 0% with `idle = "off"`: Pulse holds this fan stopped.
+    public var stopped: Bool
 
-    public init(index: Int, aggregatedCelsius: Double, effectiveCelsius: Double, targetRPM: Double, handedToSystem: Bool = false) {
+    public init(index: Int, aggregatedCelsius: Double, effectiveCelsius: Double, targetRPM: Double,
+                handedToSystem: Bool = false, stopped: Bool = false) {
         self.index = index
         self.aggregatedCelsius = aggregatedCelsius
         self.effectiveCelsius = effectiveCelsius
         self.targetRPM = targetRPM
         self.handedToSystem = handedToSystem
+        self.stopped = stopped
     }
 
     private enum CodingKeys: String, CodingKey {
-        case index, aggregatedCelsius, effectiveCelsius, targetRPM, handedToSystem
+        case index, aggregatedCelsius, effectiveCelsius, targetRPM, handedToSystem, stopped
     }
 
     public init(from decoder: Decoder) throws {
@@ -69,6 +73,7 @@ public struct FanCurveStateDTO: Codable, Equatable, Sendable {
         effectiveCelsius = try container.decode(Double.self, forKey: .effectiveCelsius)
         targetRPM = try container.decode(Double.self, forKey: .targetRPM)
         handedToSystem = try container.decodeIfPresent(Bool.self, forKey: .handedToSystem) ?? false
+        stopped = try container.decodeIfPresent(Bool.self, forKey: .stopped) ?? false
     }
 }
 
@@ -76,11 +81,27 @@ public struct SafetyStateDTO: Codable, Equatable, Sendable {
     public var latched: Bool
     public var ceilingCelsius: Double
     public var lastTripReason: String?
+    /// `[safety] allow_below_minimum` is set, so curves with `idle = "off"` may
+    /// stop fans. False from daemons that predate it.
+    public var allowsStoppingFans: Bool
 
-    public init(latched: Bool, ceilingCelsius: Double, lastTripReason: String?) {
+    public init(latched: Bool, ceilingCelsius: Double, lastTripReason: String?, allowsStoppingFans: Bool = false) {
         self.latched = latched
         self.ceilingCelsius = ceilingCelsius
         self.lastTripReason = lastTripReason
+        self.allowsStoppingFans = allowsStoppingFans
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case latched, ceilingCelsius, lastTripReason, allowsStoppingFans
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        latched = try container.decode(Bool.self, forKey: .latched)
+        ceilingCelsius = try container.decode(Double.self, forKey: .ceilingCelsius)
+        lastTripReason = try container.decodeIfPresent(String.self, forKey: .lastTripReason)
+        allowsStoppingFans = try container.decodeIfPresent(Bool.self, forKey: .allowsStoppingFans) ?? false
     }
 }
 

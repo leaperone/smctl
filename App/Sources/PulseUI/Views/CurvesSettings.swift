@@ -373,13 +373,16 @@ struct CurveDetail: View {
 
     private var hasFanRange: Bool { fanRange != nil }
 
+    private var allowsStopping: Bool { store.telemetry?.safety.allowsStoppingFans ?? false }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
             if let editor {
                 CurveEditor(model: editor, unit: $unit, hasFanRange: hasFanRange,
-                            preview: CurvePreview.make(draft: editor.draft, temperatures: store.telemetry?.temperatures ?? [], fan: store.fans.first))
-                CurveSettingsForm(model: editor)
+                            preview: CurvePreview.make(draft: editor.draft, temperatures: store.telemetry?.temperatures ?? [], fan: store.fans.first),
+                            allowsStopping: allowsStopping)
+                CurveSettingsForm(model: editor, allowsStopping: allowsStopping)
                 Spacer(minLength: 0)
                 saveBar(editor)
             } else {

@@ -210,6 +210,33 @@ public enum FanCurveHandoff {
     public static func releasesToSystem(targetRPM: Double, range: FanSpeedRange) -> Bool {
         targetRPM <= range.minimumRPM || range.fraction(forRPM: targetRPM) < idleFraction
     }
+
+    // MARK: Stopping (idle = .off)
+
+    /// A stopped fan restarts (at its minimum) when a chip sensor (CPU or GPU)
+    /// exceeds this, whatever sensors the curve itself watches.
+    public static let stopChipLimitCelsius = 75.0
+    /// Same for every other sensor (board, enclosure, storage…), which heat up
+    /// without airflow while the chips may still look cool.
+    public static let stopOtherLimitCelsius = 50.0
+    /// A fan restarted by those limits stops again only this far below them.
+    public static let stopResumeMarginCelsius = 5.0
+
+    public static func isChipSensor(_ key: String) -> Bool {
+        ["Tp", "Tg", "TC", "TG"].contains { key.hasPrefix($0) }
+    }
+
+    /// Whether a fan may be (or stay) stopped with these readings. Powered-down
+    /// sensors are ignored. `stopped` is true while the fan is already stopped:
+    /// stopping it again needs `stopResumeMarginCelsius` of headroom.
+    public static func allowsStopping(samples: [FanTemperatureSample], stopped: Bool) -> Bool {
+        let margin = stopped ? 0 : stopResumeMarginCelsius
+        return samples.allSatisfy { sample in
+            guard sample.isPlausible else { return true }
+            let limit = isChipSensor(sample.sensor) ? stopChipLimitCelsius : stopOtherLimitCelsius
+            return sample.celsius < limit - margin
+        }
+    }
 }
 
 // MARK: - Sensor selection
