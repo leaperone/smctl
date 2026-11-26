@@ -86,7 +86,8 @@ public final class StatusItemController: NSObject, NSPopoverDelegate {
             entries: entries,
             heatCelsius: state.heatCelsius,
             latched: state.latched,
-            fanSymbol: state.symbol
+            fanSymbol: state.symbol,
+            monochrome: configuration.monochrome
         )
         return (drawing, configuration)
     }
@@ -113,7 +114,7 @@ public final class StatusItemController: NSObject, NSPopoverDelegate {
     /// Sets the button image for `beat`, touching AppKit only when it changes.
     private func show(beat: Double) {
         let (base, _) = drawing()
-        let stateKey = "\(base.icon)|\(base.layout)|\(base.latched)|\(base.fanSymbol)|\(MenuBarRenderer.heatColor(base.heatCelsius))|"
+        let stateKey = "\(base.icon)|\(base.layout)|\(base.latched)|\(base.fanSymbol)|\(base.dotColor.map { "\($0)" } ?? "ink")|"
             + base.entries.map { "\($0.label)=\($0.value)" }.joined(separator: ",")
         if stateKey != frameCacheKey {
             frameCache.removeAll()

@@ -165,9 +165,16 @@ struct MenuBarConfigurationTests {
         let configuration = MenuBarConfiguration.load(from: UserDefaults(suiteName: "pulse-tests-\(UUID())")!)
         #expect(configuration.icon == .pulse)
         #expect(configuration.heartbeat == .whenWarm)
+        #expect(!configuration.monochrome)
         #expect(configuration.showsReadings)
         #expect(configuration.layout == .stacked)
         #expect(configuration.items == [.cpu, .fan])
+    }
+
+    @Test func monochromeIsReadFromDefaults() {
+        let defaults = UserDefaults(suiteName: "pulse-tests-\(UUID())")!
+        defaults.set(true, forKey: SettingsKey.menuBarMonochrome)
+        #expect(MenuBarConfiguration.load(from: defaults).monochrome)
     }
 
     @Test func readingsCanBeHiddenAndTheItemIsNeverEmpty() {
@@ -218,6 +225,11 @@ struct MenuBarRendererTests {
         #expect(MenuBarRenderer.image(drawing(.heartbeat)).isTemplate)
         #expect(MenuBarRenderer.image(drawing(.fan)).isTemplate)
         #expect(MenuBarRenderer.image(drawing(.none)).isTemplate)
+        var mono = drawing(.pulse)
+        mono.monochrome = true
+        #expect(MenuBarRenderer.image(mono).isTemplate, "monochrome draws the dot in the menu bar ink")
+        #expect(mono.dotColor == nil)
+        #expect(drawing(.pulse).dotColor == MenuBarRenderer.heatColor(55))
         var latched = drawing(.pulse)
         latched.latched = true
         #expect(MenuBarRenderer.image(latched).isTemplate, "the warning replaces the dot")

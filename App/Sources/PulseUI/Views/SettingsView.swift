@@ -60,6 +60,7 @@ struct GeneralSettings: View {
     let store: PulseStore
     @AppStorage(SettingsKey.menuBarIcon) private var icon: MenuBarIcon = .pulse
     @AppStorage(SettingsKey.menuBarHeartbeat) private var heartbeat: HeartbeatMode = .whenWarm
+    @AppStorage(SettingsKey.menuBarMonochrome) private var monochrome = false
     @AppStorage(SettingsKey.menuBarShowsReadings) private var showsReadings = true
     @AppStorage(SettingsKey.menuBarLayout) private var layout: MenuBarLayout = .stacked
     @AppStorage(SettingsKey.menuBarItems) private var itemsText = MenuBarConfiguration.encodeItems(MenuBarConfiguration.defaultItems)
@@ -69,12 +70,12 @@ struct GeneralSettings: View {
     @State private var loginError: String?
 
     private var configuration: MenuBarConfiguration {
-        MenuBarConfiguration(icon: icon, heartbeat: heartbeat, showsReadings: showsReadings, layout: layout,
+        MenuBarConfiguration(icon: icon, heartbeat: heartbeat, monochrome: monochrome, showsReadings: showsReadings, layout: layout,
                              items: MenuBarConfiguration.decodeItems(itemsText), metric: metric, unit: unit)
     }
 
     private var heartbeatHelp: String {
-        var text = icon == .pulse ? "The dot turns from green to yellow, orange and red as the CPU warms up. " : ""
+        var text = icon == .pulse && !monochrome ? "The dot turns from green to yellow, orange and red as the CPU warms up. " : ""
         switch heartbeat {
         case .off: text += "The icon stays still."
         case .whenWarm: text += "It starts beating above \(Int(HeartbeatMode.warmThresholdCelsius)) °C, faster as the Mac heats up (40 to 120 beats per minute). Still at rest, so it costs nothing."
@@ -101,6 +102,9 @@ struct GeneralSettings: View {
             Section("Icon") {
                 Picker("Icon", selection: $icon) {
                     ForEach(MenuBarIcon.allCases) { Text($0.title).tag($0) }
+                }
+                if icon == .pulse {
+                    Toggle("Monochrome", isOn: $monochrome)
                 }
                 if icon.canAnimate {
                     Picker("Heartbeat", selection: $heartbeat) {
@@ -170,7 +174,8 @@ public struct MenuBarPreview: View {
             entries: entries,
             heatCelsius: state.heatCelsius,
             latched: state.latched,
-            fanSymbol: state.symbol
+            fanSymbol: state.symbol,
+            monochrome: configuration.monochrome
         )
         // The preview beats whenever the mode is not off, so the effect is visible.
         let beats = animated && configuration.heartbeat != .off && base.icon.canAnimate

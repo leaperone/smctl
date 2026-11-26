@@ -135,6 +135,7 @@ public enum HeartbeatMode: String, CaseIterable, Identifiable, Sendable {
 public enum SettingsKey {
     public static let menuBarIcon = "menuBarIcon"
     public static let menuBarHeartbeat = "menuBarHeartbeat"
+    public static let menuBarMonochrome = "menuBarMonochrome"
     public static let menuBarShowsReadings = "menuBarShowsReadings"
     public static let menuBarLayout = "menuBarLayout"
     public static let menuBarItems = "menuBarItems"
@@ -148,6 +149,8 @@ public struct MenuBarConfiguration: Equatable, Sendable {
 
     public var icon: MenuBarIcon
     public var heartbeat: HeartbeatMode
+    /// No colour in the menu bar: the pulse dot follows the menu bar's ink.
+    public var monochrome: Bool
     public var showsReadings: Bool
     public var layout: MenuBarLayout
     public var items: [MenuBarItem]
@@ -157,6 +160,7 @@ public struct MenuBarConfiguration: Equatable, Sendable {
     public init(
         icon: MenuBarIcon = .pulse,
         heartbeat: HeartbeatMode = .whenWarm,
+        monochrome: Bool = false,
         showsReadings: Bool = true,
         layout: MenuBarLayout = .stacked,
         items: [MenuBarItem] = defaultItems,
@@ -165,6 +169,7 @@ public struct MenuBarConfiguration: Equatable, Sendable {
     ) {
         self.icon = icon
         self.heartbeat = heartbeat
+        self.monochrome = monochrome
         self.showsReadings = showsReadings
         self.layout = layout
         self.items = items
@@ -176,6 +181,7 @@ public struct MenuBarConfiguration: Equatable, Sendable {
         MenuBarConfiguration(
             icon: defaults.string(forKey: SettingsKey.menuBarIcon).flatMap(MenuBarIcon.init) ?? .pulse,
             heartbeat: defaults.string(forKey: SettingsKey.menuBarHeartbeat).flatMap(HeartbeatMode.init) ?? .whenWarm,
+            monochrome: defaults.bool(forKey: SettingsKey.menuBarMonochrome),
             showsReadings: defaults.object(forKey: SettingsKey.menuBarShowsReadings) as? Bool ?? true,
             layout: defaults.string(forKey: SettingsKey.menuBarLayout).flatMap(MenuBarLayout.init) ?? .stacked,
             items: defaults.string(forKey: SettingsKey.menuBarItems).map(decodeItems) ?? defaultItems,

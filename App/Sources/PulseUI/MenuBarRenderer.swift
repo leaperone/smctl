@@ -13,9 +13,11 @@ public struct MenuBarDrawing: Equatable, Sendable {
     public var latched: Bool
     /// SF Symbol for the fan icon (`fan` or `fan.fill`).
     public var fanSymbol: String
+    /// Draw the pulse dot in the menu bar's ink instead of the heat colour.
+    public var monochrome: Bool
 
     public init(icon: MenuBarIcon, layout: MenuBarLayout, entries: [MenuBarState.Entry], heatCelsius: Double?,
-                beat: Double = 0, latched: Bool = false, fanSymbol: String = "fan") {
+                beat: Double = 0, latched: Bool = false, fanSymbol: String = "fan", monochrome: Bool = false) {
         self.icon = icon
         self.layout = layout
         self.entries = entries
@@ -23,11 +25,15 @@ public struct MenuBarDrawing: Equatable, Sendable {
         self.beat = beat
         self.latched = latched
         self.fanSymbol = fanSymbol
+        self.monochrome = monochrome
     }
 
     /// The coloured dot needs a non-template image; everything else is
     /// monochrome and tinted by macOS for the menu bar appearance.
-    public var isTemplate: Bool { latched || icon != .pulse }
+    public var isTemplate: Bool { latched || monochrome || icon != .pulse }
+
+    /// Colour of the pulse dot, or nil when the image is a template.
+    public var dotColor: NSColor? { isTemplate ? nil : MenuBarRenderer.heatColor(heatCelsius) }
 }
 
 /// Draws the whole menu bar item (icon and readings) as one image, centred on
@@ -87,7 +93,7 @@ public enum MenuBarRenderer {
                 drawSymbol("exclamationmark.triangle.fill", in: NSRect(x: 0, y: 0, width: iconWidth, height: height), color: ink)
             } else {
                 switch icon {
-                case .pulse: drawPulseDot(slot: iconWidth, beat: drawing.beat, color: heatColor(drawing.heatCelsius))
+                case .pulse: drawPulseDot(slot: iconWidth, beat: drawing.beat, color: drawing.dotColor ?? ink)
                 case .heartbeat: drawHeartbeat(slot: iconWidth, beat: drawing.beat, color: ink)
                 case .fan: drawSymbol(drawing.fanSymbol, in: NSRect(x: 0, y: 0, width: iconWidth, height: height), color: ink)
                 case .none: break

@@ -31,7 +31,7 @@ Pulse is a lightweight, native Swift app for Apple silicon Macs. It shows your M
 
 | | |
 |---|---|
-| **Menu bar** | A **pulse dot** coloured by temperature (green → yellow → orange → red) that **beats like a heart**, faster as the Mac heats up (40 to 120 bpm). Alternatives are a heartbeat trace, a fan, or no icon. Readings are optional: CPU and GPU temperature, fan speed (RPM or %), and power draw, **stacked** on two small lines or inline. Values are smoothed over ~8 s and centred on cap height, with fixed widths so nothing shifts. |
+| **Menu bar** | A **pulse dot** coloured by temperature (green → yellow → orange → red) that **beats like a heart**, faster as the Mac heats up (40 to 120 bpm), or a **monochrome** dot that blends in with the other menu bar icons. Alternatives are a heartbeat trace, a fan, or no icon. Readings are optional: CPU and GPU temperature, fan speed (RPM or %), and power draw, **stacked** on two small lines or inline. Values are smoothed over ~8 s and centred on cap height, with fixed widths so nothing shifts. |
 | **Popover** | Average and hottest sensor per group (CPU, GPU, board), fan speed and curve target, a 5-minute history, and one-click profiles. Warnings appear when the fan service is missing, the safety guard has engaged, or another fan app is running. |
 | **Profiles** | *Auto* (macOS), *Silent*, *Balanced*, *Performance*, and your own curves. |
 | **Custom curves** | Percent-based shapes (linear, sigmoid, exponential, logarithmic, steps) that you stretch with start/end temperatures, a floor, a ceiling and a steepness. You can also use explicit points. |

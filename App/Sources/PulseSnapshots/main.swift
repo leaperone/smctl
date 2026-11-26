@@ -64,7 +64,8 @@ func main() async {
         ("fan-inline", MenuBarConfiguration(icon: .fan, layout: .inline, items: [.cpu, .fan])),
         ("pulse-only", MenuBarConfiguration(icon: .pulse, showsReadings: false)),
         ("heartbeat-only", MenuBarConfiguration(icon: .heartbeat, showsReadings: false)),
-        ("inline-cpu-fan", MenuBarConfiguration(layout: .inline, items: [.cpu, .fan]))
+        ("inline-cpu-fan", MenuBarConfiguration(layout: .inline, items: [.cpu, .fan])),
+        ("stacked-mono", MenuBarConfiguration(monochrome: true, layout: .stacked, items: [.cpu, .fan]))
     ]
     for (name, configuration) in variants {
         for scheme in [ColorScheme.light, .dark] {
