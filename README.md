@@ -54,7 +54,7 @@ By default the icon beats **only when the Mac is warm** (CPU above 65 °C). At r
 
 Every curve maps a **smoothed** temperature to a fan speed in **percent of the fan's own range**. 0% is the fan's minimum RPM and 100% its maximum. The same curve therefore behaves the same on a Mac mini and on a MacBook with two fans.
 
-When a curve asks for 0%, Pulse hands the fan back to macOS instead of holding the minimum. A MacBook's fans then stop while it is cool, as they do without Pulse; its reported minimum (1200 RPM on a 14" MacBook Pro) is only the slowest *spinning* speed. A Mac mini keeps idling at its minimum either way. As soon as the curve rises above 0%, it takes the fan again. A curve with a floor above 0%, like *Performance* (10%), keeps the fans spinning.
+When a curve has asked for 0% for 15 s, Pulse hands the fan back to macOS instead of holding the minimum (the delay keeps a temperature hovering at the ramp start from toggling the fan). A MacBook's fans then stop while it is cool, as they do without Pulse; its reported minimum (1200 RPM on a 14" MacBook Pro) is only the slowest *spinning* speed. A Mac mini keeps idling at its minimum either way. As soon as the curve rises above 0%, it takes the fan again. A curve with a floor above 0%, like *Performance* (10%), keeps the fans spinning.
 
 <p align="center">
   <picture>

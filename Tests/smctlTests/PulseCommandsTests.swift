@@ -125,6 +125,15 @@ final class PulseCommandsTests: XCTestCase {
         }
     }
 
+    func testPreviewShowsMacOSBelowTheRamp() {
+        let range = FanSpeedRange(minimumRPM: 1000, maximumRPM: 4900)
+        let text = curvePreview(FanCurvePresets.balanced, builtin: true, active: false, range: range)
+        XCTAssertTrue(text.contains("macOS\n"), text)
+        XCTAssertTrue(text.contains("goes back to macOS after 15 s"), text)
+        let performance = curvePreview(FanCurvePresets.performance, builtin: true, active: false, range: range)
+        XCTAssertFalse(performance.contains("macOS"), "a 10% floor never hands off")
+    }
+
     func testStatusListsAverageBeforeMaximumAndHandlesPoweredDownGroups() {
         let report = StatusReport(
             timestamp: Date(), daemon: .init(running: true, version: "0.2.4", message: nil), profile: "auto",
@@ -145,6 +154,18 @@ final class PulseCommandsTests: XCTestCase {
             XCTFail("CPU line: \(String(describing: cpu))")
         }
         XCTAssertTrue(lines.contains { $0.hasPrefix("  GPU") && $0.contains("sensors off") }, report.humanDescription)
+    }
+
+    func testStatusSaysWhenMacOSRunsTheFan() {
+        let report = StatusReport(
+            timestamp: Date(), daemon: .init(running: true, version: "0.2.5", message: nil), profile: "balanced",
+            temperatures: [TemperatureDTO(key: "Tp01", group: "Tp", celsius: 45)],
+            fans: [FanStatusDTO(index: 0, actualRPM: 0, targetRPM: 0, minimumRPM: 1200, maximumRPM: 5779, mode: "auto")],
+            curve: [FanCurveStateDTO(index: 0, aggregatedCelsius: 45, effectiveCelsius: 45, targetRPM: 0, handedToSystem: true)],
+            power: [], safety: SafetyStateDTO(latched: false, ceilingCelsius: 100, lastTripReason: nil),
+            conflicts: []
+        )
+        XCTAssertTrue(report.humanDescription.contains("0% · macOS runs the fan"), report.humanDescription)
     }
 
     func testStatusTextFlagsLatchedSafetyAndRunningConflicts() {

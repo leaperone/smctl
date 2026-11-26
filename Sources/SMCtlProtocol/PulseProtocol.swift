@@ -43,13 +43,32 @@ public struct FanCurveStateDTO: Codable, Equatable, Sendable {
     public var index: Int
     public var aggregatedCelsius: Double
     public var effectiveCelsius: Double
+    /// What the fan is asked to do: the curve's target, or macOS's own target
+    /// while `handedToSystem`.
     public var targetRPM: Double
+    /// The curve is at 0% and macOS runs this fan (it may stop it, or spin it
+    /// faster than the curve's floor). False from daemons that predate it.
+    public var handedToSystem: Bool
 
-    public init(index: Int, aggregatedCelsius: Double, effectiveCelsius: Double, targetRPM: Double) {
+    public init(index: Int, aggregatedCelsius: Double, effectiveCelsius: Double, targetRPM: Double, handedToSystem: Bool = false) {
         self.index = index
         self.aggregatedCelsius = aggregatedCelsius
         self.effectiveCelsius = effectiveCelsius
         self.targetRPM = targetRPM
+        self.handedToSystem = handedToSystem
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case index, aggregatedCelsius, effectiveCelsius, targetRPM, handedToSystem
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        index = try container.decode(Int.self, forKey: .index)
+        aggregatedCelsius = try container.decode(Double.self, forKey: .aggregatedCelsius)
+        effectiveCelsius = try container.decode(Double.self, forKey: .effectiveCelsius)
+        targetRPM = try container.decode(Double.self, forKey: .targetRPM)
+        handedToSystem = try container.decodeIfPresent(Bool.self, forKey: .handedToSystem) ?? false
     }
 }
 

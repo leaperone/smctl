@@ -199,7 +199,8 @@ struct StatusReport: Codable, Equatable {
             out += "\nCurve\n"
             for state in curve {
                 out += "  " + pad("Fan \(state.index)", 8)
-                    + "\(celsius(state.aggregatedCelsius)) in → \(celsius(state.effectiveCelsius)) effective → \(rpm(state.targetRPM))\n"
+                    + "\(celsius(state.aggregatedCelsius)) in → \(celsius(state.effectiveCelsius)) effective → "
+                    + (state.handedToSystem ? "0% · macOS runs the fan (target \(rpm(state.targetRPM)))" : rpm(state.targetRPM)) + "\n"
             }
         }
 
@@ -595,12 +596,21 @@ func curvePreview(_ spec: FanCurveSpec, builtin: Bool, active: Bool, range: FanS
     let to = (upper / 5).rounded(.up) * 5
     out += "  Fan range \(Int(range.minimumRPM))–\(Int(range.maximumRPM)) RPM\n"
     out += "     °C      %      RPM\n"
+    var handsOff = false
     for celsius in stride(from: from, through: to, by: 5) {
         let target = FanCurveEngine.interpolate(points: curve.points, temperature: celsius)
         let clamped = Swift.min(range.maximumRPM, Swift.max(range.minimumRPM, target))
         let fraction = range.fraction(forRPM: clamped)
         let bar = String(repeating: "█", count: Int((fraction * 24).rounded()))
-        out += String(format: "  %5.0f  %4.0f%%  %7.0f  ", celsius, fraction * 100, clamped) + bar + "\n"
+        if FanCurveHandoff.releasesToSystem(targetRPM: clamped, range: range) {
+            handsOff = true
+            out += String(format: "  %5.0f  %4.0f%%  ", celsius, fraction * 100) + "  macOS" + "\n"
+        } else {
+            out += String(format: "  %5.0f  %4.0f%%  %7.0f  ", celsius, fraction * 100, clamped) + bar + "\n"
+        }
+    }
+    if handsOff {
+        out += "\n  At 0% the fan goes back to macOS after \(Int(FanCurveHandoff.releaseDelaySeconds)) s: it may stop it, or spin it faster.\n"
     }
     return out
 }

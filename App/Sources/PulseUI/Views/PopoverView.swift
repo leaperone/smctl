@@ -306,7 +306,9 @@ struct FansCard: View {
                     }
                     SpeedBar(fraction: (percent ?? 0) / 100)
                     if let state = curve.first(where: { $0.index == fan.index }) {
-                        Text("Curve input \(Format.temperature(state.effectiveCelsius, decimals: 1)) → target \(Format.rpm(state.targetRPM)) RPM")
+                        Text(state.handedToSystem
+                             ? "Curve input \(Format.temperature(state.effectiveCelsius, decimals: 1)) → 0 %, macOS runs the fan"
+                             : "Curve input \(Format.temperature(state.effectiveCelsius, decimals: 1)) → target \(Format.rpm(state.targetRPM)) RPM")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .monospacedDigit()

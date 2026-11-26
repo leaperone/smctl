@@ -218,27 +218,85 @@ final class PulseFanCurveTests: XCTestCase {
         XCTAssertEqual(daemon.telemetry().curve.first?.targetRPM ?? -1, 0, "reports macOS's target, not the 1000 RPM floor")
     }
 
-    func testTheCurveTakesTheFanAndHandsItBackAcrossTheRampStart() throws {
+    func testTheCurveTakesTheFanAndHandsItBackAfterTheDelay() throws {
         let (backend, daemon) = makeDaemon(celsius: 70)
+        let clock = TestClock()
+        daemon.now = { clock.date }
         try daemon.upsertFanCurve(
             FanCurveSpec(name: "flat", points: [FanCurveSpecPoint(50, .percent(0)), FanCurveSpecPoint(90, .percent(100))]),
             activate: true
         )
         XCTAssertEqual(backend.values["F0Md"], [1])
 
+        // Cooled to 0%: the floor is held until the delay has passed.
         backend.setTemperature(40)
         daemon.evaluateFanSubsystemLocked()
-        XCTAssertEqual(backend.values["F0Md"], [0], "back to macOS at 0%")
+        XCTAssertEqual(backend.values["F0Md"], [1], "held at the floor first")
+        XCTAssertEqual(try XCTUnwrap(backend.float("F0Tg")), 1000, accuracy: 0.5)
+        XCTAssertEqual(daemon.telemetry().curve.first?.handedToSystem, false)
+
+        clock.advance(FanCurveHandoff.releaseDelaySeconds - 1)
+        daemon.evaluateFanSubsystemLocked()
+        XCTAssertEqual(backend.values["F0Md"], [1], "not yet")
+
+        clock.advance(1)
+        daemon.evaluateFanSubsystemLocked()
+        XCTAssertEqual(backend.values["F0Md"], [0], "back to macOS after the delay")
         XCTAssertEqual(daemon.config.fan.profile, "flat", "the curve stays active")
+        XCTAssertEqual(daemon.telemetry().curve.first?.handedToSystem, true)
 
         backend.writes.removeAll()
+        clock.advance(1)
         daemon.evaluateFanSubsystemLocked()
         XCTAssertTrue(backend.writes.isEmpty, "no repeated handoff: \(backend.writes)")
 
+        // Taking the fan back is immediate.
         backend.setTemperature(70)
+        clock.advance(1)
         daemon.evaluateFanSubsystemLocked()
         XCTAssertEqual(backend.values["F0Md"], [1])
         XCTAssertEqual(try XCTUnwrap(backend.float("F0Tg")), 2950, accuracy: 0.5)
+        XCTAssertEqual(daemon.telemetry().curve.first?.handedToSystem, false)
+    }
+
+    /// A temperature hovering at the ramp start with no hysteresis or smoothing
+    /// must not toggle the fan's mode every second.
+    func testHoveringAtTheRampStartDoesNotToggleTheMode() throws {
+        let (backend, daemon) = makeDaemon(celsius: 51)
+        let clock = TestClock()
+        daemon.now = { clock.date }
+        try daemon.upsertFanCurve(
+            FanCurveSpec(name: "edge", points: [FanCurveSpecPoint(50, .percent(0)), FanCurveSpecPoint(90, .percent(100))]),
+            activate: true
+        )
+        backend.writes.removeAll()
+        for second in 0..<60 {
+            backend.setTemperature(second.isMultiple(of: 2) ? 49.5 : 50.5)
+            clock.advance(1)
+            daemon.evaluateFanSubsystemLocked()
+        }
+        let handoffs = backend.writes.filter { $0.key == "F0Md" && $0.bytes == [0] }.count
+        XCTAssertEqual(handoffs, 0, "held at the floor throughout, never handed back: \(backend.writes)")
+        XCTAssertEqual(backend.values["F0Md"], [1])
+    }
+
+    func testAMacThatIsAlreadyCoolStaysWithMacOSWithoutWaiting() throws {
+        let (backend, daemon) = makeDaemon(celsius: 40)
+        try daemon.upsertFanCurve(
+            FanCurveSpec(name: "flat", points: [FanCurveSpecPoint(50, .percent(0)), FanCurveSpecPoint(90, .percent(100))]),
+            activate: true
+        )
+        XCTAssertEqual(backend.values["F0Md"], [0])
+        XCTAssertEqual(daemon.telemetry().curve.first?.handedToSystem, true)
+    }
+
+    func testCurveStateFromAnOlderDaemonDecodesAsNotHandedOff() throws {
+        let json = #"{"index":0,"aggregatedCelsius":60,"effectiveCelsius":60,"targetRPM":1500}"#
+        let state = try JSONDecoder().decode(FanCurveStateDTO.self, from: Data(json.utf8))
+        XCTAssertFalse(state.handedToSystem)
+        let roundTrip = try JSONDecoder().decode(FanCurveStateDTO.self, from: JSONEncoder().encode(
+            FanCurveStateDTO(index: 0, aggregatedCelsius: 60, effectiveCelsius: 60, targetRPM: 0, handedToSystem: true)))
+        XCTAssertTrue(roundTrip.handedToSystem)
     }
 
     func testAFloorAboveZeroKeepsTheFanSpinning() throws {
@@ -393,6 +451,13 @@ final class PulseFanCurveTests: XCTestCase {
         )
         return (backend, daemon)
     }
+}
+
+private final class TestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current = Date(timeIntervalSinceReferenceDate: 800_000_000)
+    var date: Date { lock.withLock { current } }
+    func advance(_ seconds: TimeInterval) { lock.withLock { current += seconds } }
 }
 
 /// Minimal SMC fake: stores written bytes, reports 1-byte keys as ui8 and 4-byte

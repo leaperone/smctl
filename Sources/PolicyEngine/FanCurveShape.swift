@@ -203,6 +203,9 @@ public struct FanSpeedRange: Equatable, Sendable {
 public enum FanCurveHandoff {
     /// Targets under this fraction of the fan's range count as "off".
     public static let idleFraction = 0.005
+    /// Time a curve must stay at 0% before the fan is handed back, so a
+    /// temperature hovering at the ramp start cannot toggle the fan's mode.
+    public static let releaseDelaySeconds: TimeInterval = 15
 
     public static func releasesToSystem(targetRPM: Double, range: FanSpeedRange) -> Bool {
         targetRPM <= range.minimumRPM || range.fraction(forRPM: targetRPM) < idleFraction

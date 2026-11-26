@@ -346,6 +346,10 @@ public final class SmctlDaemon: @unchecked Sendable {
     // Pulse: cached per-tick state served by getTelemetry without extra SMC I/O.
     var lastSnapshot: SensorSnapshot?
     var lastCurveEvaluations: [Int: FanCurveEvaluation] = [:]
+    // Pulse: idle handoff state (PulseFanCurves.swift).
+    var curveIdleSince: [Int: Date] = [:]
+    var handedOffFans: Set<Int> = []
+    var now: @Sendable () -> Date = { Date() }
     var lastSafetyTripReason: String?
     // Stateful: carries per-rule debounce/cooldown across ticks.
     var alertEngine = AlertEngine()
@@ -1135,15 +1139,13 @@ public final class SmctlDaemon: @unchecked Sendable {
             let minimum = readNumericLocked(fan.minimumKey) ?? 0
             let range = FanSpeedRange(minimumRPM: minimum, maximumRPM: maximum)
             let curve = try curveForProfileLocked(profile, range: range)
+            let freshEngine = fanCurveEngines[fan.index] == nil
             var engine = fanCurveEngines[fan.index] ?? FanCurveEngine()
-            var evaluation = try engine.evaluate(curve: curve, samples: samples, now: Date())
+            var evaluation = try engine.evaluate(curve: curve, samples: samples, now: now())
             fanCurveEngines[fan.index] = engine
-            if FanCurveHandoff.releasesToSystem(targetRPM: evaluation.targetRPM, range: range) {
-                // At 0% macOS runs the fan: stopped on a cool MacBook, at its
-                // minimum on a Mac mini. Report what macOS asks for, not the floor.
-                if fanIsManualLocked(fan) {
-                    try restoreFansAutoLocked(indices: [fan.index])
-                }
+            if freshEngine { curveIdleSince[fan.index] = nil }
+            if try handOffIdleFanLocked(fan, evaluation: evaluation, range: range) {
+                // macOS runs the fan: report what it asks for, not the curve's floor.
                 evaluation.targetRPM = readNumericLocked(fan.targetKey) ?? 0
                 lastCurveEvaluations[fan.index] = evaluation
                 continue
@@ -1153,13 +1155,6 @@ public final class SmctlDaemon: @unchecked Sendable {
             guard fanTargetNeedsWriteLocked(fan: fan, target: target, range: range) else { continue }
             _ = try setManualFanTargetLocked(index: fan.index, rpm: target)
         }
-    }
-
-    /// Unreadable mode counts as manual, so a handoff is never skipped by mistake.
-    private func fanIsManualLocked(_ fan: FanCapability) -> Bool {
-        if ftstGate.manualFanIndices.contains(fan.index) { return true }
-        guard let modeKey = fan.modeKey, let mode = readUInt8Locked(modeKey) else { return true }
-        return mode != FanModeValue.auto.rawValue
     }
 
     func curveForProfileLocked(_ profile: String, range: FanSpeedRange) throws -> FanCurve {

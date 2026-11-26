@@ -221,6 +221,50 @@ extension SmctlDaemon {
     /// True unless the fan is verifiably already in manual mode with a target close
     /// enough. Any unreadable state means "write", so the deadband can only skip
     /// redundant writes, never hide a lost manual mode (e.g. after sleep).
+    // MARK: Idle handoff
+
+    /// Whether macOS runs `fan` this tick. At the curve's 0% floor the fan is
+    /// handed back to macOS, but only after `FanCurveHandoff.releaseDelaySeconds`
+    /// spent continuously at 0%: until then the floor is held, so a temperature
+    /// hovering at the ramp start (no hysteresis, no smoothing) cannot toggle the
+    /// mode — and, on Ftst Macs, the blocking unlock — every second. Taking the
+    /// fan back when the curve rises is immediate.
+    func handOffIdleFanLocked(_ fan: FanCapability, evaluation: FanCurveEvaluation, range: FanSpeedRange) throws -> Bool {
+        guard FanCurveHandoff.releasesToSystem(targetRPM: evaluation.targetRPM, range: range) else {
+            curveIdleSince[fan.index] = nil
+            handedOffFans.remove(fan.index)
+            return false
+        }
+        guard fanIsManualLocked(fan) else {
+            // Already macOS's (e.g. a cool Mac when the curve was activated).
+            curveIdleSince[fan.index] = nil
+            handedOffFans.insert(fan.index)
+            return true
+        }
+        let now = now()
+        let since = curveIdleSince[fan.index] ?? now
+        curveIdleSince[fan.index] = since
+        guard now.timeIntervalSince(since) >= FanCurveHandoff.releaseDelaySeconds else {
+            handedOffFans.remove(fan.index)
+            return false
+        }
+        try restoreFansAutoLocked(indices: [fan.index])
+        curveIdleSince[fan.index] = nil
+        handedOffFans.insert(fan.index)
+        return true
+    }
+
+    /// Whether Pulse holds `fan` in manual mode. An unreadable mode counts as
+    /// manual, so a handoff is never skipped by mistake; a fan with no mode key
+    /// cannot be in manual mode (setAuto and unlock both need the key), so only
+    /// the daemon's own bookkeeping counts there.
+    func fanIsManualLocked(_ fan: FanCapability) -> Bool {
+        if ftstGate.manualFanIndices.contains(fan.index) || manualFanTargets[fan.index] != nil { return true }
+        guard let modeKey = fan.modeKey else { return false }
+        guard let mode = readUInt8Locked(modeKey) else { return true }
+        return mode != FanModeValue.auto.rawValue
+    }
+
     func fanTargetNeedsWriteLocked(fan: FanCapability, target: Double, range: FanSpeedRange) -> Bool {
         guard let modeKey = fan.modeKey,
               readUInt8Locked(modeKey) == FanModeValue.manual.rawValue,
@@ -302,6 +346,8 @@ extension SmctlDaemon {
                 manualFanTargets.removeAll()
                 fanCurveEngines.removeAll()
                 lastCurveEvaluations.removeAll()
+                curveIdleSince.removeAll()
+                handedOffFans.removeAll()
                 runtimeFanProfile = nil
                 config.fan.profile = "auto"
             }
@@ -338,7 +384,8 @@ extension SmctlDaemon {
                         index: index,
                         aggregatedCelsius: evaluation.aggregatedTemperature,
                         effectiveCelsius: evaluation.effectiveTemperature,
-                        targetRPM: evaluation.targetRPM
+                        targetRPM: evaluation.targetRPM,
+                        handedToSystem: handedOffFans.contains(index)
                     )
                 } : [],
                 power: (snapshot?.power ?? []).compactMap { reading in

@@ -114,7 +114,9 @@ public struct CurveEditor: View {
     }
 
     private func readout(_ preview: CurvePreview) -> String {
-        var text = "Now \(Int(preview.celsius.rounded())) °C → this curve asks \(speed(preview.percent))"
+        var text = preview.handsOffToSystem
+            ? "Now \(Int(preview.celsius.rounded())) °C → 0 %, macOS runs the fan"
+            : "Now \(Int(preview.celsius.rounded())) °C → this curve asks \(speed(preview.percent))"
         if let fan = preview.fanPercent {
             text += " · fan at \(speed(fan))"
         }

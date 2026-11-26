@@ -42,4 +42,14 @@ struct CurvePreviewTests {
         let rpm = FanCurveSpec(name: "r", shape: FanCurvePresets.balanced.shape, riseRate: .rpmPerSecond(400))
         #expect(ResponseSummary.text(rpm, range: range) == "Minimum to full speed in 10 s; slows down immediately.")
     }
+
+    @Test func zeroPercentHandsOffToMacOS() throws {
+        let draft = CurveDraft(FanCurvePresets.balanced)
+        let cool = [TemperatureDTO(key: "Tp01", group: "Tp", celsius: 50)]
+        #expect(try #require(CurvePreview.make(draft: draft, temperatures: cool, fan: nil)).handsOffToSystem)
+        let warm = [TemperatureDTO(key: "Tp01", group: "Tp", celsius: 85)]
+        #expect(try #require(CurvePreview.make(draft: draft, temperatures: warm, fan: nil)).handsOffToSystem == false)
+        let floor = CurveDraft(FanCurvePresets.performance)
+        #expect(try #require(CurvePreview.make(draft: floor, temperatures: cool, fan: nil)).handsOffToSystem == false, "10% floor")
+    }
 }
