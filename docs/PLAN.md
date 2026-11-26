@@ -105,7 +105,7 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 
 ### 3d. Aperçu live
 
-> ✅ **Faite le 26/11/2026** (voir le journal). « Essayer 60 s » n'est pas fait : c'est à toi de décider.
+> ✅ **Faite le 26/11/2026** (voir le journal). « Essayer 60 s » : abandonné à la revue.
 - Une ligne verticale indique la température lissée actuelle, avec un point sur la courbe : « 54 °C → 12 % (1 450 RPM) ». On ajoute aussi la vitesse réelle du ventilateur.
 - Les presets apparaissent en courbes « fantômes » pâles, pour se repérer.
 - Un panneau de réponse indique le temps pour passer du minimum au maximum avec les vitesses de montée choisies, et l'effet de l'hystérésis.
@@ -313,10 +313,59 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 5. ⌘Z / ⇧⌘Z dans l'éditeur.
 
 **Décisions qui t'attendent :**
-- **« Essayer 60 s »** (activation temporaire avec retour automatique, côté daemon) : à faire ou pas ?
+- ~~**« Essayer 60 s »**~~ : abandonné à la revue.
 - **Preset Performance** : on le laisse, ou tu en fais une copie plus douce avec l'éditeur ?
 
 **Ajustements pour la phase 4 :**
 - 4b : le lancement au login est déjà là ; le test de redémarrage s'ajoutera à la campagne 4e.
 - 4d : sur MacBook, mesurer le glisser avec `PULSE_BENCH_DRAG_ONLY=1 PulseBench`. Au-delà de 16 ms par image, appliquer la parade prévue (30 Hz pendant le glisser).
 - 4e : réutiliser l'approche de `PulseLiveCheck` (étapes automatiques avec remise en état) pour les tests matériels qui ne demandent pas d'action physique.
+
+### 26/11/2026 : après la phase 3, comportement à 0 % (avant la revue)
+**Livré (`8ce69d5`, `0e2dc18`, `e73436b`, `785b752`) :**
+- Une courbe qui demande 0 % rend le ventilateur à macOS, mais seulement après **15 s** passées à 0 %. Sans ce délai, la courbe et macOS se renvoyaient le ventilateur à chaque petite variation. La télémétrie indique ce passage de main.
+- **Comportement à 0 %, réglable par courbe** : `idle = system` (macOS décide, par défaut), `minimum` (Pulse garde la vitesse minimale) ou `off` (le ventilateur s'arrête).
+  - `off` exige `[safety] allow_below_minimum = true`.
+  - Garde-fous : le ventilateur redémarre au-dessus de 75 °C pour les puces et de 50 °C pour les autres capteurs.
+  - L'éditeur affiche un avertissement clair (« may harm your Mac »).
+- Popover : la ligne du capteur TC est masquée quand des points chauds Tp existent.
+
+**Test réel :** le ventilateur du Mac mini M4 accepte 0 tr/min. Il s'arrête en moins de 2 s et repart à 1 000 tr/min de façon fiable. Une courbe `idle = off` l'arrête bien après 15 s.
+
+**Reste ouvert :**
+- l'essai prolongé ventilateur arrêté (10–15 min au repos), pour valider les seuils de 75 et 50 °C ;
+- tu as dit être repassé en mode sûr, mais **`/etc/pulse/config.toml` contient encore `allow_below_minimum = true`** au moment de cette entrée.
+
+### 26/11/2026 : revue de la phase 3 (`8fcb594`)
+**Tes retours et ce qui a été fait :**
+
+| Retour | Correction |
+|---|---|
+| Sélection de la liste : gris clair | Normal : c'est la sélection du système quand la liste n'a pas le focus. Rien à changer. |
+| Glisser fluide, mais valeur exacte difficile à lire | Étiquette « 74.5 °C · 4 % » (ou en RPM) au-dessus du point glissé, survolé ou sélectionné. Elle est dessinée dans une couche au-dessus des marques : en annotation Charts, le point voisin la recouvrait. |
+| Les questions « Save changes…? » sont pénibles | **Enregistrement automatique** quand on quitte une courbe (autre courbe, « Edit Curves… », fermeture, quitter l'app). Pulse ne pose de question que si l'enregistrement échoue (courbe invalide, refus du daemon). Dans l'éditeur, Save et Revert restent disponibles. |
+| « Essayer 60 s » | **Abandonné** : passer d'un profil à l'autre suffit. |
+| La fenêtre de réglages change de taille selon l'onglet | **Une seule taille** (780 × 720) pour les quatre onglets. |
+| La courbe se transforme en épines quand on bouge vite la raideur | Corrigé, voir ci-dessous. |
+| Sélecteurs Hottest/Average et comportement à 0 % trop lourds | **Contrôles segmentés en petite taille** (même hauteur que %/RPM), steppers en petite taille, boutons ⓘ qui expliquent chaque réglage (capteurs, hottest/average, vitesses, 0 %, hystérésis, lissage, raideur). |
+
+**Ce qui n'a pas marché, et ce qu'on en retient :**
+1. **Les épines.** L'échantillonnage adaptatif des formes change le nombre de points à chaque cran de raideur. Swift Charts anime alors le passage d'un tracé à l'autre, avec des nombres de points différents, ce qui produit des épines pendant l'animation. Une capture statique ne le montre pas : il a fallu raisonner à partir du rendu animé. **Correctif** : les formes lisses sont dessinées sur une grille fixe de 0,5 °C (161 points), identifiés par leur indice, et les animations sont coupées. Un test vérifie que le nombre de points reste constant. **Règle** : toute série tracée par Charts garde des identifiants stables d'une mise à jour à l'autre.
+2. Le curseur créait une étape d'annulation par cran. Un geste ne compte maintenant que pour une étape (`beginContinuousEdit` / `endContinuousEdit`), testé.
+3. **Incident** : pour comparer avec l'ancienne version, j'ai mis l'arbre de travail de côté avec `git stash` pendant qu'un agent en arrière-plan modifiait le même fichier. Le retour du stash a échoué. Rien n'a été perdu (stash conservé et restauré, changement de l'agent réappliqué). **Règle** : ne jamais faire de `git stash` quand un agent peut travailler dans l'arbre. Pour comparer, utiliser `git worktree add`.
+4. PulseBench est bruité d'une exécution à l'autre : éditeur ouvert à 4,8 %, puis 1,3 % en relançant. **Règle** : avant de conclure à une régression, relancer PulseBench au moins une fois et comparer à une référence mesurée dans un worktree.
+
+**Mesures :**
+- PulseBench :
+  - éditeur ouvert 1,3 %, refermé 0,24 % ;
+  - aucune vue SwiftUI ne survit à la fermeture ;
+  - **glisser 7,1 ms par image** (contre 12 ms avant) : la grille fixe coûte moins cher que l'échantillonnage adaptatif.
+- App réelle : entre 0,2 et 0,3 % les minutes suivantes, contre 0,07 % pour la référence. 140 Mo, sans doute parce que le popover ou les réglages ont été ouverts pendant la mesure. **À refaire au calme en 4a.**
+
+**Décisions qui restent :**
+- **Preset Performance** : proposition dans le message de revue (rampe linéaire de 50 à 85 °C, de 10 à 100 %). En attente de ta réponse.
+- **Aide** : les boutons ⓘ couvrent l'immédiat. Une section « Aide » complète, qui explique l'effet de chaque réglage sur la ventilation, pourra s'ajouter en 4f avec la documentation de la 1.0.
+
+**Ajustements pour la phase 4 :**
+- **4a** : commencer par une mesure de l'app au repos sans interaction, pour fermer le point ouvert ci-dessus.
+- **4e** : ajouter l'essai prolongé ventilateur arrêté (`idle = off`) à la campagne de tests.
