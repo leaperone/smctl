@@ -6,11 +6,12 @@ import SwiftUI
 /// Settings panes, hosted by `SettingsWindowController` in a toolbar-style tab
 /// view, like the Settings windows of Apple's apps.
 public enum SettingsPane: String, CaseIterable, Sendable {
-    case general, service, about
+    case general, curves, service, about
 
     public var title: String {
         switch self {
         case .general: return "General"
+        case .curves: return "Curves"
         case .service: return "Service"
         case .about: return "About"
         }
@@ -19,6 +20,7 @@ public enum SettingsPane: String, CaseIterable, Sendable {
     public var systemImage: String {
         switch self {
         case .general: return "gearshape"
+        case .curves: return "chart.xyaxis.line"
         case .service: return "lock.shield"
         case .about: return "info.circle"
         }
@@ -29,6 +31,7 @@ public enum SettingsPane: String, CaseIterable, Sendable {
     public var size: CGSize {
         switch self {
         case .general: return CGSize(width: 500, height: 720)
+        case .curves: return CGSize(width: 780, height: 560)
         case .service: return CGSize(width: 500, height: 420)
         case .about: return CGSize(width: 500, height: 300)
         }
@@ -38,16 +41,19 @@ public enum SettingsPane: String, CaseIterable, Sendable {
 public struct SettingsView: View {
     let store: PulseStore
     let pane: SettingsPane
+    let navigation: SettingsNavigation
 
-    public init(store: PulseStore, pane: SettingsPane) {
+    public init(store: PulseStore, pane: SettingsPane, navigation: SettingsNavigation = SettingsNavigation()) {
         self.store = store
         self.pane = pane
+        self.navigation = navigation
     }
 
     public var body: some View {
         Group {
             switch pane {
             case .general: GeneralSettings(store: store)
+            case .curves: CurvesSettings(store: store, navigation: navigation)
             case .service: ServiceSettings(store: store)
             case .about: AboutView()
             }

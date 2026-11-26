@@ -45,14 +45,14 @@ final class Bench: NSObject, NSApplicationDelegate {
         try? await Task.sleep(for: .seconds(seconds))
         let cpu = cpuSeconds() - start
         let percent = cpu / Date().timeIntervalSince(began) * 100
-        print(String(format: "%-34@ %6.2f%% CPU   %5.1f MB", name as NSString, percent, footprintMB()))
+        setvbuf(stdout, nil, _IONBF, 0); print(String(format: "%-34@ %6.2f%% CPU   %5.1f MB", name as NSString, percent, footprintMB()))
     }
 
     func run() async {
         // A full history, as after a few minutes of running.
         store = await PulseStore.preview(samples: PulseStore.historyLength)
         settings = SettingsWindowController(store: store)
-        statusItem = StatusItemController(store: store) { [settings] in settings?.show() }
+        statusItem = StatusItemController(store: store) { [settings] in settings?.show($0) }
         store.start()
         print("PulseBench: \(Int(seconds)) s per phase, poll every 2 s\n")
 
@@ -65,6 +65,10 @@ final class Bench: NSObject, NSApplicationDelegate {
         await measure("settings open")
         settings.close()
         await measure("settings closed")
+        settings.show(.curve("balanced"))
+        await measure("curves pane open")
+        settings.close()
+        await measure("curves pane closed")
         statusItem.showPopover()
         try? await Task.sleep(for: .seconds(1))
         statusItem.closePopover()

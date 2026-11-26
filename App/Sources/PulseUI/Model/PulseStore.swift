@@ -200,23 +200,60 @@ public final class PulseStore {
         await perform { try $0.activate(profile: profile) }
     }
 
-    public func save(_ spec: FanCurveSpec, activate: Bool) async {
+    @discardableResult
+    public func save(_ spec: FanCurveSpec, activate: Bool) async -> Bool {
         await perform { try $0.upsert(spec, activate: activate) }
     }
 
-    public func delete(curve name: String) async {
+    @discardableResult
+    public func delete(curve name: String) async -> Bool {
         await perform { try $0.delete(curve: name) }
     }
 
-    private func perform(_ action: @escaping @Sendable (any PulseService) throws -> Void) async {
+    /// Saves a copy of `spec` under a new name and returns that name.
+    public func duplicate(_ spec: FanCurveSpec) async -> String? {
+        var copy = spec
+        let label = CurveNaming.copyLabel(spec.label ?? spec.name.capitalized, existing: Set(curveEntries.compactMap(\.spec.label)))
+        copy.label = label
+        copy.name = CurveNaming.uniqueName(base: label, existing: curveNames)
+        return await save(copy, activate: false) ? copy.name : nil
+    }
+
+    /// Saves a new curve (Balanced's shape, as a sensible start) and returns its name.
+    public func createCurve() async -> String? {
+        let labels = Set(curveEntries.compactMap(\.spec.label))
+        var label = "Custom"
+        var index = 2
+        while labels.contains(label) { label = "Custom \(index)"; index += 1 }
+        var spec = FanCurvePresets.balanced
+        spec.label = label
+        spec.name = CurveNaming.uniqueName(base: label, existing: curveNames)
+        return await save(spec, activate: false) ? spec.name : nil
+    }
+
+    /// Changes a user curve's display label; its technical name stays the same.
+    @discardableResult
+    public func rename(curve name: String, to label: String) async -> Bool {
+        guard var spec = curveEntries.first(where: { $0.spec.name == name && !$0.builtin })?.spec,
+              let label = CurveNaming.cleanLabel(label) else { return false }
+        spec.label = label
+        return await save(spec, activate: false)
+    }
+
+    @discardableResult
+    private func perform(_ action: @escaping @Sendable (any PulseService) throws -> Void) async -> Bool {
         let service = self.service
         let result = await Task.detached { Result { try action(service) } }.value
+        let succeeded: Bool
         if case .failure(let error) = result {
             actionError = Self.describe(error)
+            succeeded = false
         } else {
             actionError = nil
+            succeeded = true
         }
         await refresh(forceLists: true)
+        return succeeded
     }
 
     // MARK: Derived state
@@ -243,6 +280,18 @@ public final class PulseStore {
     public var fans: [FanStatusDTO] { telemetry?.fans ?? [] }
 
     public var activeProfile: String { telemetry?.profile ?? "auto" }
+
+    /// Curves for the editor: the daemon's list, or the built-in presets
+    /// (read-only) when the daemon is not reachable.
+    public var curveEntries: [FanCurveEntryDTO] {
+        if daemonState.isConnected, !curves.isEmpty { return curves }
+        return FanCurvePresets.all.map { FanCurveEntryDTO(builtin: true, spec: $0) }
+    }
+
+    var curveNames: Set<String> { Set(curveEntries.map(\.spec.name)).union(invalidCurves.keys) }
+
+    /// User curves can be created and changed only through the daemon.
+    public var canEditCurves: Bool { daemonState.isConnected }
 
     public var canControlFans: Bool { daemonState.isConnected && !fans.isEmpty }
 

@@ -21,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let settings = SettingsWindowController(store: store)
         self.settings = settings
-        statusItem = StatusItemController(store: store) { settings.show() }
+        statusItem = StatusItemController(store: store) { settings.show($0) }
         store.start()
     }
 }

@@ -7,10 +7,10 @@ import SwiftUI
 /// The window shown from the menu bar item.
 public struct PopoverView: View {
     let store: PulseStore
-    let openSettings: () -> Void
+    let openSettings: (SettingsDestination) -> Void
     @AppStorage(SettingsKey.fanSpeedUnit) private var unit: FanSpeedUnit = .rpm
 
-    public init(store: PulseStore, openSettings: @escaping () -> Void = {}) {
+    public init(store: PulseStore, openSettings: @escaping (SettingsDestination) -> Void = { _ in }) {
         self.store = store
         self.openSettings = openSettings
     }
@@ -27,7 +27,7 @@ public struct PopoverView: View {
                 HistoryChart(history: store.history)
             }
             if store.daemonState.isConnected {
-                ProfilesSection(store: store)
+                ProfilesSection(store: store) { openSettings(.curve($0)) }
             }
             Divider()
             footer
@@ -89,7 +89,7 @@ public struct PopoverView: View {
 
     private var footer: some View {
         HStack {
-            Button(action: openSettings) {
+            Button { openSettings(.pane(.general)) } label: {
                 Label("Settings…", systemImage: "gearshape")
             }
             .keyboardShortcut(",")
@@ -388,12 +388,22 @@ struct LegendDot: View {
 
 struct ProfilesSection: View {
     let store: PulseStore
+    let editCurves: (String?) -> Void
 
     var body: some View {
         let choices = store.profileChoices
         let rows = stride(from: 0, to: choices.count, by: 2).map { Array(choices[$0..<min($0 + 2, choices.count)]) }
         VStack(alignment: .leading, spacing: 8) {
-            Text("Profile").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            HStack {
+                Text("Profile").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                Button("Edit Curves…") {
+                    editCurves(store.activeProfile == "auto" ? nil : store.activeProfile)
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .foregroundStyle(.tint)
+            }
             Grid(horizontalSpacing: 8, verticalSpacing: 8) {
                 ForEach(rows, id: \.first?.id) { row in
                     GridRow {

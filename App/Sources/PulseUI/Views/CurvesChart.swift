@@ -14,9 +14,11 @@ public struct CurvesChart: View {
 
     let series: [Series]
     let temperatures: ClosedRange<Double>
+    let showsLegend: Bool
 
-    public init(specs: [(FanCurveSpec, Color)], temperatures: ClosedRange<Double> = 40...110) {
+    public init(specs: [(FanCurveSpec, Color)], temperatures: ClosedRange<Double> = 40...110, showsLegend: Bool = true) {
         self.temperatures = temperatures
+        self.showsLegend = showsLegend
         // Resolved on a 0–100 "RPM" range, so the values read directly as percent.
         let range = FanSpeedRange(minimumRPM: 0, maximumRPM: 100)
         series = specs.compactMap { spec, color in
@@ -59,6 +61,7 @@ public struct CurvesChart: View {
         }
         .chartXAxisLabel("Smoothed temperature (max of all sensors)")
         .chartYAxisLabel("Fan speed (% of the fan's range)")
+        .chartLegend(showsLegend ? .visible : .hidden)
         .chartLegend(position: .top, alignment: .leading)
     }
 }

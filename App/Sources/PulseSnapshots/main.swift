@@ -73,6 +73,12 @@ func main() async {
                          scheme: scheme, to: output.appendingPathComponent("menubar-\(name)-\(scheme == .dark ? "dark" : "light").png"))
         }
     }
+    for (name, store, curve) in [("curves", normal, "balanced"), ("curves-user", normal, "night"), ("curves-readonly", readOnly, "silent")] {
+        for scheme in [ColorScheme.light, .dark] {
+            await render(SettingsView(store: store, pane: .curves, navigation: SettingsNavigation(selectedCurve: curve)), scheme: scheme,
+                         to: output.appendingPathComponent("settings-\(name)-\(scheme == .dark ? "dark" : "light").png"))
+        }
+    }
     for scheme in [ColorScheme.light, .dark] {
         await render(SettingsView(store: normal, pane: .general), scheme: scheme, to: output.appendingPathComponent("settings-\(scheme == .dark ? "dark" : "light").png"))
     }

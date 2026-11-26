@@ -14,9 +14,10 @@ public final class StatusItemController: NSObject, NSPopoverDelegate {
     static let beatFrames: [(delay: TimeInterval, beat: Double)] = [(0, 1), (0.16, 0)]
 
     private let store: PulseStore
-    private let openSettings: @MainActor () -> Void
+    private let openSettings: @MainActor (SettingsDestination) -> Void
     private let statusItem: NSStatusItem
-    private let popover = NSPopover()
+    /// Created on open and dropped on close (see `showPopover`).
+    private var popover: NSPopover?
     private var renderedKey: String?
     private var frameCache: [Double: NSImage] = [:]
     private var frameCacheKey: String?
@@ -24,15 +25,11 @@ public final class StatusItemController: NSObject, NSPopoverDelegate {
     private var beatTimer: Timer?
     private var screensAsleep = false
 
-    public init(store: PulseStore, openSettings: @escaping @MainActor () -> Void) {
+    public init(store: PulseStore, openSettings: @escaping @MainActor (SettingsDestination) -> Void) {
         self.store = store
         self.openSettings = openSettings
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
-
-        popover.behavior = .transient
-        popover.animates = true
-        popover.delegate = self
 
         if let button = statusItem.button {
             button.target = self
@@ -172,38 +169,53 @@ public final class StatusItemController: NSObject, NSPopoverDelegate {
     }
 
     @objc private func togglePopover(_ sender: Any?) {
-        if popover.isShown {
+        if popover?.isShown == true {
             closePopover()
         } else {
             showPopover()
         }
     }
 
-    /// The popover's SwiftUI tree exists only while it is shown: a closed but
-    /// retained hosting view keeps observing the store and re-rendering its
-    /// charts on every poll (measured: 0.5% → 1.8% CPU and +75 MB after one opening).
+    /// The popover and its SwiftUI tree exist only while shown. A closed popover
+    /// keeps its window and hosting view (clearing `contentViewController` does
+    /// not release them), which kept observing the store and re-rendering the
+    /// charts on every poll: ~3.5% CPU and +75 MB after a single opening.
     public func showPopover() {
-        guard !popover.isShown, let button = statusItem.button else { return }
+        guard popover?.isShown != true, let button = statusItem.button else { return }
         let openSettings = self.openSettings
-        popover.contentViewController = NSHostingController(rootView: PopoverView(store: store) { [weak self] in
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = true
+        popover.delegate = self
+        popover.contentViewController = NSHostingController(rootView: PopoverView(store: store) { [weak self] destination in
             self?.closePopover()
-            openSettings()
+            openSettings(destination)
         })
+        self.popover = popover
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
     }
 
     public func closePopover() {
-        popover.performClose(nil)
+        popover?.performClose(nil)
     }
 
     public func popoverWillShow(_ notification: Notification) {
         store.popoverDidOpen()
     }
 
-    public func popoverDidClose(_ notification: Notification) {
+    /// Releases the popover as soon as it starts closing. `popoverDidClose`
+    /// is not a reliable signal: when the close animation cannot run (app not
+    /// active) it never arrives, and the hidden popover kept rendering.
+    public func popoverWillClose(_ notification: Notification) {
         store.popoverDidClose()
-        popover.contentViewController = nil
+        guard let closing = notification.object as? NSPopover, closing === popover else { return }
+        popover = nil
+        // Let the close animation finish before tearing down the content.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if closing.isShown { closing.close() }
+            closing.contentViewController = nil
+        }
     }
 }
 
@@ -215,6 +227,8 @@ public final class StatusItemController: NSObject, NSPopoverDelegate {
 public final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let store: PulseStore
     private var window: NSWindow?
+    private var tabs: NSTabViewController?
+    public let navigation = SettingsNavigation()
 
     public init(store: PulseStore) {
         self.store = store
@@ -225,18 +239,22 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         // Release after AppKit finishes closing it.
         DispatchQueue.main.async { [weak self] in
             closing.contentViewController = nil
-            if self?.window === closing { self?.window = nil }
+            if self?.window === closing {
+                self?.window = nil
+                self?.tabs = nil
+            }
         }
     }
 
-    public func show() {
+    public func show(_ destination: SettingsDestination = .pane(.general)) {
+        navigation.apply(destination)
         if window == nil {
             let tabs = NSTabViewController()
             tabs.tabStyle = .toolbar
             tabs.transitionOptions = [.crossfade, .allowUserInteraction]
             tabs.canPropagateSelectedChildViewControllerTitle = false
             for pane in SettingsPane.allCases {
-                let controller = NSHostingController(rootView: SettingsView(store: store, pane: pane))
+                let controller = NSHostingController(rootView: SettingsView(store: store, pane: pane, navigation: navigation))
                 controller.sizingOptions = [.preferredContentSize]
                 controller.preferredContentSize = pane.size
                 controller.title = pane.title
@@ -255,6 +273,10 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
             if !window.setFrameUsingName("PulseSettings") { window.center() }
             window.setFrameAutosaveName("PulseSettings")
             self.window = window
+            self.tabs = tabs
+        }
+        if let index = SettingsPane.allCases.firstIndex(of: destination.pane), tabs?.selectedTabViewItemIndex != index {
+            tabs?.selectedTabViewItemIndex = index
         }
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)

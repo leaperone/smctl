@@ -17,13 +17,13 @@ Chaque étape se clôt de la même façon (« porte de validation ») :
 
 | Mesure | Résultat | Objectif |
 |---|---|---|
-| App au repos, battement désactivé | **0,13 %** de CPU, 20 Mo | < 0,1 %, < 30 Mo |
+| App au repos, battement désactivé | **0,13 %** de CPU, 20 Mo (après 3a : **0,07 %**, 17 Mo) | < 0,1 %, < 30 Mo |
 | App au repos, battement « toujours » | 2,1 % de CPU | coût connu et documenté |
 | `pulsed` | 0,22 % de CPU, 18 Mo | < 0,2 % |
 | PulseBench, au repos | 0,6 % (données d'exemple très variables) | – |
 | PulseBench, popover ouvert | 2,9 % (sondage chaque seconde, graphique) | acceptable quand visible |
 | PulseBench, réglages ouverts | 2,6 % (aperçu qui bat) | acceptable quand visible |
-| PulseBench, popover ou réglages refermés | **0,5–0,65 %** (avant correctif : 1,8 % et **11 %**) | ≈ repos |
+| PulseBench, popover ou réglages refermés | **0,5–1 %** (avant correctifs : 3,5 % et **11 %**) | ≈ repos |
 | Mémoire après ouverture des vues | ~50 Mo (SwiftUI et Charts restent chargés) | à surveiller |
 
 Le correctif `656b888` a supprimé une fuite : les vues fermées continuaient d'être rendues. Après 7 h 30, l'app consommait 16 % de CPU et 150 Mo. **Leçon pour la suite** : toute nouvelle fenêtre (l'éditeur en particulier) est construite à l'ouverture et libérée à la fermeture. Chaque nouvelle vue ajoute sa phase dans PulseBench.
@@ -70,6 +70,8 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 - La fenêtre est construite à l'ouverture et libérée à la fermeture (leçon de ce jour).
 
 ### 3a. Onglet « Courbes » et navigation
+
+> ✅ **Faite le 26/11/2026** (voir le journal).
 - `SettingsPane.curves`, avec des tailles par onglet. L'onglet Courbes est plus grand (environ 760 × 560) ; la taille de la fenêtre suit l'onglet avec une animation.
 - Colonne gauche : liste des profils. Les presets (Silencieux, Équilibré, Performance, cadenas) sont en lecture seule et proposent « Dupliquer ». Les courbes perso permettent renommer, dupliquer et supprimer, avec confirmation. Les courbes invalides lues dans la config sont signalées avec leur message d'erreur.
 - `SettingsWindowController.show(pane:selecting:)` est appelé depuis le popover.
@@ -162,3 +164,23 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 - Problème rencontré : aucun (`git filter-repo` n'était pas installé, `filter-branch` suffisait pour une plage de commits).
 - À faire de ton côté : vérifier le fork, puis décider de supprimer ou non `pulse-archive`. Conseillé : activer « Block command line pushes that expose my email » dans GitHub, rubrique Settings → Emails.
 - Conséquence pour la suite : le CI du fork compile le package principal à chaque push ; on étudiera l'ajout d'`App/` en 4f. Phase 3 : en attente de ton feu vert (« on verra pour la partie 3 »).
+
+### 26/11/2026 : étape 3a terminée
+**Livré :**
+- Onglet **Courbes** (780 × 560) : liste Presets / Mes courbes / Illisibles, détail avec graphique, résumé en clair (forme, capteurs, réponse, hystérésis, lissage), bouton Activer.
+- Actions Dupliquer, Nouvelle (+), Renommer, Supprimer (avec confirmation ; un avertissement s'affiche si la courbe est le profil actif). Elles sont disponibles par menu contextuel, par le bouton « … » et par la barre +/−.
+- Lien « Edit Curves… » dans le popover, qui ouvre l'onglet sur la courbe active.
+- Sans daemon, les presets restent affichés en lecture seule avec un bandeau d'explication.
+- 9 nouveaux tests (noms, résumés, actions du store, navigation).
+
+**Ce qui n'a pas marché, et ce qu'on en retient :**
+1. **La fuite du popover n'était pas vraiment corrigée** par `656b888`. Mettre `contentViewController` à `nil` dans `popoverDidClose` ne suffit pas, et `popoverDidClose` n'arrive même pas quand l'animation de fermeture ne peut pas se jouer (app inactive). Le popover caché continuait de rendre ses graphiques : 3,5 % de CPU et +75 Mo. Correctif : un `NSPopover` neuf à chaque ouverture, libéré dès `popoverWillClose`. Mesuré à 0,24–1 % une fois refermé. **Règle pour la suite** : ne jamais compter sur `…DidClose` pour libérer ; vérifier dans PulseBench que les fenêtres fermées n'ont plus de `NSHostingView`.
+2. Les captures `PulseSnapshots` ne dessinent pas le fond de sélection des listes (barre noire). C'est une limite de `cacheDisplay`, pas un bug de l'app. **À vérifier à l'œil pendant ta revue.**
+3. **Choix de conception** : « Renommer » ne change que le libellé. Le nom technique (CLI, TOML) reste celui donné à la création, pour ne pas casser le profil actif ni les scripts SSH. La CLI l'affiche sous le titre.
+
+**Mesures :** app au repos à 0,07 % de CPU (17 Mo), objectif atteint. Daemon à 0,25 %, toujours un peu au-dessus de l'objectif (sera traité en 4f). PulseBench : onglet Courbes ouvert 1,8 %, refermé 0,5 %.
+
+**Ajustements des étapes suivantes :**
+- 3b/3c : l'éditeur remplace le résumé dans `CurveDetail`, pour les courbes perso uniquement. Les presets restent en lecture seule, avec Dupliquer.
+- 3e : vérifier si le daemon recharge une courbe active qu'on enregistre sans `activate` (`upsertFanCurve` n'appelle `setFanProfile` que si `activate` est vrai). Si ce n'est pas le cas, réactiver la courbe après l'enregistrement.
+- 3f : ajouter au bench un glisser simulé et une vérification automatique qu'aucune `NSHostingView` ne survit à la fermeture.
