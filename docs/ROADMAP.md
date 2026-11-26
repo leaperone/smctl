@@ -98,7 +98,7 @@ Le déroulé détaillé de chaque étape restante, réévalué entre deux étape
   - [x] 4c : déclencheurs selon l'état du système (app ou jeu ouvert, mode économie d'énergie, batterie ou secteur)
   - [x] 4d : validation sur MacBook Pro M1 Pro, `pulse doctor`, interface pour les Mac sans ventilateur et à deux ventilateurs
   - [ ] 4e : campagne de tests matériels, sur le MacBook et le Mac mini
-  - [ ] 4f : 1.0 — fait : profilage, intervalle de collecte de 1 à 5 s (avec un rythme sur batterie), fenêtre gardée au premier plan après le mot de passe ; reste : CI pour `App/`, section Aide, publication
+  - [ ] 4f : 1.0 — fait : profilage, intervalle de collecte de 1 à 5 s (avec un rythme sur batterie), fenêtre gardée au premier plan après le mot de passe, CI pour `App/`, onglet Aide ; reste : publication (après la 4e)
 
 ## 4. Tests
 

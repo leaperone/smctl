@@ -195,7 +195,7 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 
 ### 4f. Préparation de la version 1.0
 
-> 🟡 **En cours.** Fait : profilage, intervalle de collecte (1 à 5 s, rythme sur batterie), fenêtre gardée au premier plan après le mot de passe. Reste : CI pour `App/`, section Aide, version 1.0 et ses décisions.
+> 🟡 **Partie code terminée le 26/11/2026** : profilage, intervalle de collecte (1 à 5 s, rythme sur batterie), fenêtre gardée au premier plan après le mot de passe, CI pour `App/`, onglet Aide. **Reste la publication**, qui attend la 4e et tes décisions (signature, version 1.0, PR vers smctl, `pulse-archive`).
 - Profiler `pulsed` (objectif < 0,2 %) et viser < 0,1 % pour l'app au repos.
 - CI : ajout de la compilation et des tests de `App/` si les runners proposent Xcode 26.
 - Version 1.0, notes de version, archive de `Pulse.app`. Signature : ad hoc ou compte développeur, à décider.
@@ -589,3 +589,9 @@ macOS n'offre donc **aucun signal fiable**, et sa propre heuristique ne reconna�
   1. **Fin de la 4f, partie code** : CI pour `App/` (si les runners GitHub ont Xcode 26), section Aide dans les Réglages.
   2. **4e, campagne de tests matériels** : un script guidé, à lancer sur le MacBook puis sur le Mac mini. Il commence par `pulse doctor --test-fans`, puis couvre installation, changement de profil, veille, `kill -9`, redémarrage, garde-fou (`scripts/test-safety-notification.sh`), outil concurrent, bascule d'intervalle au débranchement (MacBook) et essai prolongé ventilateurs arrêtés (Mac mini).
   3. **Dépôt et publication**, à décider ensemble : signature (ad hoc ou compte développeur), version 1.0 et notes, archive de `Pulse.app`, PR vers smctl, suppression de `pulse-archive`.
+
+### 26/11/2026 : fin de la partie code de la 4f
+- **CI** (`ci: build and test…`) : nouveau job « App Build & Test (macOS 26) ». L'image `macos-26` de GitHub a Xcode 26 (Swift 6.3, SDK macOS 26), ce qui suffit à l'app. Premier passage réussi pour les deux jobs. Les tests de l'app tournent sur `SampleService` : ni SMC, ni daemon, ni droits.
+- **Aide** (`76ae361`) : onglet « Help » dans les Réglages, huit sujets (fonctionnement, profils, lecture d'une courbe, réglages de réponse, rythme des capteurs, automatisation, limite de température, dépannage avec `pulse doctor`). Les plages des presets, les plafonds du garde-fou et la plage du rythme sont lus dans le code ; les réglages de réponse reprennent les textes des boutons ⓘ. Rien ne peut donc diverger de l'app. 4 tests, captures vérifiées en clair et en sombre.
+- **Porte de validation** : 98 tests app, tous les tests du package, PulseBench (phases fermées entre 0,4 et 0,8 %, aucune vue restante, glisser à 11,5 ms par image).
+- **Ensuite** : la 4e ensemble, sur le MacBook puis le Mac mini. La publication suivra, avec tes décisions.
