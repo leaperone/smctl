@@ -24,9 +24,9 @@ public struct PopoverView: View {
                 FansCard(fans: store.fans, curve: store.telemetry?.curve ?? [], unit: unit)
             }
             if store.history.count > 1 {
-                HistoryChart(history: store.history)
+                HistoryChart(history: store.history, showsFan: !store.isFanless)
             }
-            if store.daemonState.isConnected {
+            if store.daemonState.isConnected, !store.isFanless {
                 ProfilesSection(store: store) { openSettings(.curve($0)) }
             }
             Divider()
@@ -147,6 +147,7 @@ struct StatusCapsule: View {
         case .connecting: return "Connecting…"
         case .unavailable: return "Read-only"
         case .connected:
+            if store.isFanless { return "No fan" }
             return store.activeProfile == "auto" ? "macOS control" : store.title(forProfile: store.activeProfile)
         }
     }
@@ -155,7 +156,9 @@ struct StatusCapsule: View {
         switch store.daemonState {
         case .connecting: return .gray
         case .unavailable: return .orange
-        case .connected: return store.safetyLatched ? .red : (store.activeProfile == "auto" ? .secondary : .green)
+        case .connected:
+            if store.isFanless { return .secondary }
+            return store.safetyLatched ? .red : (store.activeProfile == "auto" ? .secondary : .green)
         }
     }
 }
@@ -332,6 +335,7 @@ struct FansCard: View {
 
 struct HistoryChart: View {
     let history: [HistorySample]
+    var showsFan = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -339,7 +343,9 @@ struct HistoryChart: View {
                 Text("Last \(minutes) min").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 LegendDot(color: .orange, text: "CPU avg")
-                LegendDot(color: .accentColor, text: "Fan")
+                if showsFan {
+                    LegendDot(color: .accentColor, text: "Fan")
+                }
             }
             Chart {
                 ForEach(history) { sample in

@@ -319,6 +319,9 @@ public final class PulseStore {
 
     public var canControlFans: Bool { daemonState.isConnected && !fans.isEmpty }
 
+    /// Readings arrive but the Mac reports no fan (MacBook Air): monitoring only.
+    public var isFanless: Bool { telemetry != nil && fans.isEmpty }
+
     public var safetyLatched: Bool { telemetry?.safety.latched ?? false }
 
     public var profileChoices: [ProfileChoice] {

@@ -9,6 +9,12 @@ struct AutomationSettings: View {
 
     var body: some View {
         Form {
+            if store.isFanless {
+                Section {
+                    Label("This Mac has no fan, so there is no profile to switch.", systemImage: "fanblades.slash")
+                        .foregroundStyle(.secondary)
+                }
+            }
             Section {
                 Toggle(isOn: $automation.enabled) {
                     Text("Switch profiles automatically")

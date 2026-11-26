@@ -200,6 +200,8 @@ struct CurvesSettings: View {
         VStack(alignment: .leading, spacing: 0) {
             if !store.canEditCurves {
                 serviceBanner
+            } else if store.isFanless {
+                fanlessBanner
             }
             if let saved = conflict, let editor {
                 conflictBanner(saved: saved, editor: editor)
@@ -221,6 +223,16 @@ struct CurvesSettings: View {
 
     private var serviceBanner: some View {
         Label("Install the Pulse service (Service tab) to create and edit curves.", systemImage: "lock.shield")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.blue.opacity(0.08))
+    }
+
+    private var fanlessBanner: some View {
+        Label("This Mac has no fan. Pulse shows its temperatures; curves can be edited but have nothing to drive.", systemImage: "fanblades.slash")
             .font(.callout)
             .foregroundStyle(.secondary)
             .padding(.horizontal, 20)
@@ -384,7 +396,7 @@ struct CurveDetail: View {
             if let editor {
                 CurveEditor(model: editor, unit: $unit, hasFanRange: hasFanRange,
                             preview: CurvePreview.make(draft: editor.draft, temperatures: store.telemetry?.temperatures ?? [], fan: store.fans.first),
-                            allowsStopping: allowsStopping)
+                            allowsStopping: allowsStopping, fanRangeNote: FanRangeNote.text(fans: store.fans))
                 CurveSettingsForm(model: editor, allowsStopping: allowsStopping)
                 Spacer(minLength: 0)
                 saveBar(editor)
@@ -392,7 +404,7 @@ struct CurveDetail: View {
                 let viewer = CurveEditorModel(spec: spec, range: fanRange ?? FanSpeedRange(minimumRPM: 0, maximumRPM: 100))
                 CurveEditor(model: viewer, unit: $unit, hasFanRange: hasFanRange,
                             preview: CurvePreview.make(draft: viewer.draft, temperatures: store.telemetry?.temperatures ?? [], fan: store.fans.first),
-                            editable: false)
+                            editable: false, fanRangeNote: FanRangeNote.text(fans: store.fans))
                 summary
                 Spacer(minLength: 0)
             }

@@ -50,7 +50,11 @@ func main() async {
         latched: true
     ))
 
-    for (name, store) in [("popover", normal), ("popover-readonly", readOnly), ("popover-alerts", alerts)] {
+    let macBookPro = await PulseStore.preview(SampleService(profile: "performance", fanRanges: SampleService.macBookProFans))
+    let fanless = await PulseStore.preview(SampleService(fanRanges: []))
+
+    for (name, store) in [("popover", normal), ("popover-readonly", readOnly), ("popover-alerts", alerts),
+                          ("popover-macbookpro", macBookPro), ("popover-fanless", fanless)] {
         for scheme in [ColorScheme.light, .dark] {
             await render(PopoverView(store: store), scheme: scheme, to: output.appendingPathComponent("\(name)-\(scheme == .dark ? "dark" : "light").png"))
         }
@@ -74,7 +78,8 @@ func main() async {
                          scheme: scheme, to: output.appendingPathComponent("menubar-\(name)-\(scheme == .dark ? "dark" : "light").png"))
         }
     }
-    for (name, store, curve) in [("curves", normal, "balanced"), ("curves-user", normal, "night"), ("curves-points", normal, "steady"), ("curves-readonly", readOnly, "silent")] {
+    for (name, store, curve) in [("curves", normal, "balanced"), ("curves-user", normal, "night"), ("curves-points", normal, "steady"), ("curves-readonly", readOnly, "silent"),
+                                ("curves-macbookpro", macBookPro, "night"), ("curves-fanless", fanless, "night")] {
         for scheme in [ColorScheme.light, .dark] {
             await render(SettingsView(store: store, pane: .curves, navigation: SettingsNavigation(selectedCurve: curve)), scheme: scheme,
                          to: output.appendingPathComponent("settings-\(name)-\(scheme == .dark ? "dark" : "light").png"))

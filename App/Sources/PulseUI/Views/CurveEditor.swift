@@ -12,8 +12,12 @@ public struct CurveEditor: View {
     let editable: Bool
     /// The daemon allows `idle = off` (`allow_below_minimum`).
     let allowsStopping: Bool
+    /// Shown in RPM mode when the Mac's fans do not share one speed range.
+    let fanRangeNote: String?
 
-    public init(model: CurveEditorModel, unit: Binding<FanSpeedUnit>, hasFanRange: Bool, preview: CurvePreview? = nil, editable: Bool = true, allowsStopping: Bool = false) {
+    public init(model: CurveEditorModel, unit: Binding<FanSpeedUnit>, hasFanRange: Bool, preview: CurvePreview? = nil, editable: Bool = true,
+                allowsStopping: Bool = false, fanRangeNote: String? = nil) {
+        self.fanRangeNote = fanRangeNote
         self.model = model
         self._unit = unit
         self.hasFanRange = hasFanRange
@@ -58,6 +62,12 @@ public struct CurveEditor: View {
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.orange)
                             .monospacedDigit()
+                    }
+                    if hasFanRange, unit == .rpm, let fanRangeNote {
+                        Text(fanRangeNote)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     if editable {
                         Text(hint)

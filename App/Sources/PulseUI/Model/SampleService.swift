@@ -13,8 +13,16 @@ public final class SampleService: PulseService, @unchecked Sendable {
     public var failing: Bool
     public var conflictList: [FanControlConflict]
     public var latched: Bool
+    /// One speed range per fan: Mac mini M4 by default, `macBookProFans` or `[]` (fanless MacBook Air).
+    public var fanRanges: [FanSpeedRange]
 
-    public init(profile: String = "balanced", failing: Bool = false, conflicts: [FanControlConflict] = [], latched: Bool = false) {
+    public static let macMiniFans = [FanSpeedRange(minimumRPM: 1000, maximumRPM: 4900)]
+    /// MacBook Pro M1 Pro (14"/16"): two fans with different maxima.
+    public static let macBookProFans = [FanSpeedRange(minimumRPM: 1200, maximumRPM: 5779), FanSpeedRange(minimumRPM: 1200, maximumRPM: 6241)]
+
+    public init(profile: String = "balanced", failing: Bool = false, conflicts: [FanControlConflict] = [], latched: Bool = false,
+                fanRanges: [FanSpeedRange] = SampleService.macMiniFans) {
+        self.fanRanges = fanRanges
         self.profile = profile
         self.failing = failing
         self.conflictList = conflicts
@@ -42,14 +50,21 @@ public final class SampleService: PulseService, @unchecked Sendable {
                 + [("Tg0C", 41.0), ("Tg0D", 44.2), ("Tg0H", 43.9), ("Tg0P", 43.6)].map { TemperatureDTO(key: $0, group: "Tg", celsius: $1 + wave * 2) }
                 + [("Ts00", 36.3), ("Ts01", 36.3), ("Ts0M", 39.5)].map { TemperatureDTO(key: $0, group: "Ts", celsius: $1) }
             let manual = profile != "auto"
-            let rpm = manual ? 1450 + wave * 200 : 1000
+            let fraction = manual ? 0.1 + wave * 0.05 : 0
             return TelemetryDTO(
                 timestamp: Date(),
                 daemonVersion: "0.2.4",
                 profile: profile,
                 temperatures: temperatures,
-                fans: [FanStatusDTO(index: 0, actualRPM: rpm, targetRPM: rpm.rounded(), minimumRPM: 1000, maximumRPM: 4900, mode: manual ? "manual" : "auto")],
-                curve: manual ? [FanCurveStateDTO(index: 0, aggregatedCelsius: cpu.max() ?? 0, effectiveCelsius: 58.4 + wave * 4, targetRPM: rpm.rounded())] : [],
+                fans: fanRanges.enumerated().map { index, range in
+                    let rpm = range.rpm(forFraction: fraction)
+                    return FanStatusDTO(index: index, actualRPM: rpm, targetRPM: rpm.rounded(), minimumRPM: range.minimumRPM,
+                                        maximumRPM: range.maximumRPM, mode: manual ? "manual" : "auto")
+                },
+                curve: manual ? fanRanges.enumerated().map { index, range in
+                    FanCurveStateDTO(index: index, aggregatedCelsius: cpu.max() ?? 0, effectiveCelsius: 58.4 + wave * 4,
+                                     targetRPM: range.rpm(forFraction: fraction).rounded())
+                } : [],
                 power: [PowerReadingDTO(key: "PSTR", name: "System Power", value: 6.2, unit: "W")],
                 safety: SafetyStateDTO(latched: latched, ceilingCelsius: 100, lastTripReason: latched ? "Tp3P held at 111 °C" : nil),
                 lastError: nil
