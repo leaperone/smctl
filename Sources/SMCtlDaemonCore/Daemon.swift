@@ -128,10 +128,14 @@ struct BatteryConfig: Codable, Equatable, Sendable {
 struct FanConfig: Codable, Equatable, Sendable {
     var profile: String
     var curves: [FanCurveConfig]
+    /// Seconds between sensor reads (Pulse): 1 to 5. Longer saves energy, shorter
+    /// reacts faster. The safety guard samples every second near the ceiling.
+    var interval: Int
 
-    init(profile: String = "auto", curves: [FanCurveConfig] = []) {
+    init(profile: String = "auto", curves: [FanCurveConfig] = [], interval: Int = SmctlDaemon.defaultSamplingInterval) {
         self.profile = profile
         self.curves = curves
+        self.interval = SmctlDaemon.clampedSamplingInterval(interval)
     }
 
     // Defensive decoding — see BatteryConfig. The config file written by the daemon
@@ -141,6 +145,10 @@ struct FanConfig: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         profile = try container.decodeIfPresent(String.self, forKey: .profile) ?? "auto"
         curves = try container.decodeIfPresent([FanCurveConfig].self, forKey: .curves) ?? []
+        interval = SmctlDaemon.clampedSamplingInterval(
+            (try container.decodeLenientDoubleIfPresent(forKey: .interval)).map { Int($0.rounded()) }
+                ?? SmctlDaemon.defaultSamplingInterval
+        )
     }
 }
 
@@ -350,6 +358,8 @@ public final class SmctlDaemon: @unchecked Sendable {
     var safetyGuard = FanSafetyGuard()
     // Pulse: cached per-tick state served by getTelemetry without extra SMC I/O.
     var lastSnapshot: SensorSnapshot?
+    /// When the timer last ran a full tick (see `samplingTickLocked`).
+    var lastSampledTick: Date?
     var lastCurveEvaluations: [Int: FanCurveEvaluation] = [:]
     // Pulse: idle handoff state (PulseFanCurves.swift).
     var curveIdleSince: [Int: Date] = [:]
@@ -427,7 +437,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         let fanSource = DispatchSource.makeTimerSource(queue: queue)
         fanSource.schedule(deadline: .now() + .seconds(1), repeating: .seconds(1))
         fanSource.setEventHandler { [weak self] in
-            self?.tickFanAndAlertsLocked()
+            self?.samplingTickLocked()
         }
         fanSource.resume()
         queue.sync {
@@ -1030,18 +1040,6 @@ public final class SmctlDaemon: @unchecked Sendable {
             || (!capabilities.fans.isEmpty && backend != nil && manualPolicyActiveLocked(profile: currentFanProfileLocked()))
     }
 
-    /// The last snapshot, re-read when older than `maxAge` (ticks skip reading
-    /// when nothing needs per-second temperatures).
-    func freshSnapshotLocked(maxAge: TimeInterval = 1.5) -> SensorSnapshot? {
-        if let snapshot = lastSnapshot, Date().timeIntervalSince(snapshot.timestamp) < maxAge {
-            return snapshot
-        }
-        guard let reader else { return lastSnapshot }
-        let snapshot = reader.snapshot()
-        lastSnapshot = snapshot
-        return snapshot
-    }
-
     /// Evaluate alert rules against the current tick's metrics and dispatch any
     /// edge-triggered events to the (isolated) action runner. Runs on the state
     /// queue; the runner does all blocking work off-queue.
@@ -1282,7 +1280,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         guard let reader else {
             return []
         }
-        let snapshot = reader.snapshot()
+        let snapshot = reader.snapshot(includingBatteryAndPower: false)
         lastSnapshot = snapshot
         return snapshot.temperatures.compactMap {
             $0.celsius.isFinite ? FanTemperatureSample(sensor: $0.key, celsius: $0.celsius) : nil
@@ -1408,6 +1406,7 @@ public final class SmctlDaemon: @unchecked Sendable {
 
         [fan]
         profile = "\(config.fan.profile)"
+        interval = \(config.fan.interval)
 
         [safety]
         temp_ceiling = \(FanSafetyGuard(configuredCeilingCelsius: config.safety.temp_ceiling).configuredCeilingCelsius)

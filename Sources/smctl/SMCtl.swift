@@ -185,7 +185,7 @@ struct Fan: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "fan",
         abstract: "Inspect and control fans through \(ProductIdentity.daemonName).",
-        subcommands: [FanStatus.self, FanSet.self, FanAuto.self, FanProfile.self, FanCurveCommand.self]
+        subcommands: [FanStatus.self, FanSet.self, FanAuto.self, FanProfile.self, FanCurveCommand.self, FanInterval.self]
     )
 }
 
@@ -265,6 +265,38 @@ struct FanProfile: ParsableCommand {
     func run() throws {
         try mapDaemonClient { try DaemonClient().setFanProfile(name) }
         print("Fan profile set to \(name).")
+    }
+}
+
+struct FanInterval: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "interval",
+        abstract: "Show or set the seconds between sensor reads (1 to 5).",
+        discussion: "Shorter reacts faster to heat; longer uses less energy. Near the safety ceiling the daemon reads every second regardless."
+    )
+
+    @Argument(help: "Seconds between sensor reads, 1 to 5. Omit to show the current value.")
+    var seconds: Int?
+
+    func validate() throws {
+        if let seconds, !(1...5).contains(seconds) {
+            throw ValidationError("The interval must be between 1 and 5 seconds.")
+        }
+    }
+
+    func run() throws {
+        let client = DaemonClient()
+        if let seconds {
+            try mapDaemonClient { try client.setSamplingInterval(seconds: seconds) }
+            print("Sensors are now read every \(seconds) s.")
+        } else {
+            let telemetry: TelemetryDTO = try mapDaemonClient { try client.getTelemetry() }
+            if let interval = telemetry.samplingInterval {
+                print("Sensors are read every \(interval) s.")
+            } else {
+                print("This \(ProductIdentity.daemonName) predates the interval setting (it reads every second). Reinstall it to change it.")
+            }
+        }
     }
 }
 

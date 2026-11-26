@@ -556,6 +556,64 @@ final class PulseFanCurveTests: XCTestCase {
         XCTAssertTrue(backend.reads.contains("Tp01"), "curves and the safety guard read every tick")
     }
 
+    // MARK: Sampling interval
+
+    func testSamplingIntervalDefaultsClampsAndPersists() throws {
+        let (_, daemon) = makeDaemon(celsius: 55)
+        XCTAssertEqual(daemon.config.fan.interval, 2)
+        XCTAssertEqual(daemon.telemetry().samplingInterval, 2)
+        try daemon.setSamplingInterval(4)
+        XCTAssertThrowsError(try daemon.setSamplingInterval(0))
+        XCTAssertThrowsError(try daemon.setSamplingInterval(6))
+        let (_, reloaded) = makeDaemon(celsius: 55)
+        XCTAssertEqual(reloaded.config.fan.interval, 4, "written to [fan] interval")
+
+        try "[fan]\nprofile = \"auto\"\ninterval = 9\n".write(toFile: configPath, atomically: true, encoding: .utf8)
+        XCTAssertEqual(makeDaemon(celsius: 55).daemon.config.fan.interval, 5, "out-of-range values are clamped, not rejected")
+    }
+
+    func testTicksFollowTheSamplingInterval() throws {
+        let (backend, daemon) = makeDaemon(celsius: 55)
+        try daemon.upsertFanCurve(linearSpec(name: "test"), activate: true)
+        try daemon.setSamplingInterval(3)
+        let start = Date()
+        var sampled: [Int] = []
+        for second in 0..<7 {
+            backend.reads = []
+            daemon.samplingTickLocked(now: start + TimeInterval(second))
+            if backend.reads.contains("Tp01") { sampled.append(second) }
+        }
+        XCTAssertEqual(sampled, [0, 3, 6])
+    }
+
+    func testNearTheCeilingTicksRunEverySecond() throws {
+        let (backend, daemon) = makeDaemon(celsius: 55)
+        try daemon.upsertFanCurve(linearSpec(name: "test"), activate: true)
+        try daemon.setSamplingInterval(5)
+        let ceiling = daemon.safetyGuard.effectiveCeiling(for: FanTemperatureSample(sensor: "Tp01", celsius: 0))
+        backend.setTemperature(ceiling - 10)
+        let start = Date()
+        daemon.samplingTickLocked(now: start)
+        backend.reads = []
+        daemon.samplingTickLocked(now: start + 1)
+        XCTAssertTrue(backend.reads.contains("Tp01"), "within 20 °C of the ceiling the guard samples every second")
+
+        backend.setTemperature(55)
+        daemon.samplingTickLocked(now: start + 2)
+        backend.reads = []
+        daemon.samplingTickLocked(now: start + 3)
+        XCTAssertFalse(backend.reads.contains("Tp01"), "back to the configured interval once cool")
+    }
+
+    func testPowerKeysAreReadForTelemetryNotEveryTick() throws {
+        let (backend, daemon) = makeDaemon(celsius: 55, sensors: ["PDTR": 12])
+        try daemon.upsertFanCurve(linearSpec(name: "test"), activate: true)
+        backend.reads = []
+        daemon.tickFanAndAlertsLocked()
+        XCTAssertFalse(backend.reads.contains("PDTR"))
+        XCTAssertEqual(daemon.telemetry().power.first?.value ?? -1, 12, accuracy: 0.01)
+    }
+
     func testTelemetryAndCurveDTOsRoundTripOverTheWireFormat() throws {
         let (_, daemon) = makeDaemon(celsius: 70)
         let telemetry = daemon.telemetry()

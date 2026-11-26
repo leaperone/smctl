@@ -666,7 +666,7 @@ public struct FanSafetyGuard: Codable, Equatable, Sendable {
         return FanSafetyDecision(forceAuto: false)
     }
 
-    private func effectiveCeiling(for sample: FanTemperatureSample) -> Double {
+    public func effectiveCeiling(for sample: FanTemperatureSample) -> Double {
         guard sample.sensor.hasPrefix(Self.hotSpotSensorPrefix) else {
             return configuredCeilingCelsius
         }

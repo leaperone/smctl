@@ -53,27 +53,37 @@ public final class SensorReader {
         return detected
     }
 
-    public func snapshot() -> SensorSnapshot {
+    /// `includingBatteryAndPower: false` skips the 11 battery and power keys,
+    /// for callers that only need temperatures and fans each tick.
+    public func snapshot(includingBatteryAndPower: Bool = true) -> SensorSnapshot {
         let capabilities = capabilities()
         return SensorSnapshot(
             timestamp: Date(),
             capabilities: capabilities,
             temperatures: readTemperatures(keys: capabilities.temperatureKeys),
             fans: readFans(capabilities.fans),
-            battery: readNamedReadings([
-                ("BUIC", "Charge", "%", 1),
-                ("B0AC", "Current", "A", 0.001),  // si16 in mA
-                ("B0AV", "Voltage", "V", 0.001),  // ui16 in mV
-                ("PPBR", "Battery Power", "W", 1),
-                ("AC-W", "Adapter Power", "W", 1)
-            ], availableKeys: capabilities.batteryKeys),
-            power: readNamedReadings([
-                ("PDTR", "Package Power", "W", 1),
-                ("PSTR", "System Power", "W", 1),
-                ("ID0R", "Input Current", "A", 1),
-                ("VD0R", "Input Voltage", "V", 1)
-            ], availableKeys: capabilities.powerKeys)
+            battery: includingBatteryAndPower ? batteryReadings() : [],
+            power: includingBatteryAndPower ? powerReadings() : []
         )
+    }
+
+    public func batteryReadings() -> [NamedReading] {
+        readNamedReadings([
+            ("BUIC", "Charge", "%", 1),
+            ("B0AC", "Current", "A", 0.001),  // si16 in mA
+            ("B0AV", "Voltage", "V", 0.001),  // ui16 in mV
+            ("PPBR", "Battery Power", "W", 1),
+            ("AC-W", "Adapter Power", "W", 1)
+        ], availableKeys: capabilities().batteryKeys)
+    }
+
+    public func powerReadings() -> [NamedReading] {
+        readNamedReadings([
+            ("PDTR", "Package Power", "W", 1),
+            ("PSTR", "System Power", "W", 1),
+            ("ID0R", "Input Current", "A", 1),
+            ("VD0R", "Input Voltage", "V", 1)
+        ], availableKeys: capabilities().powerKeys)
     }
 
     private func readTemperatures(keys: [String]) -> [TemperatureReading] {

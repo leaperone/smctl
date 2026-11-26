@@ -23,6 +23,13 @@ extension DaemonClient {
         }
     }
 
+    public func setSamplingInterval(seconds: Int) throws {
+        let data = try SMCtlProtocolCoding.encode(SetSamplingIntervalRequestDTO(seconds: seconds))
+        let _: EmptyResponseDTO = try call { proxy, reply in
+            proxy.setSamplingInterval(data, withReply: reply)
+        }
+    }
+
     public func deleteFanCurve(named name: String) throws {
         let data = try SMCtlProtocolCoding.encode(DeleteFanCurveRequestDTO(name: name))
         let _: EmptyResponseDTO = try call { proxy, reply in

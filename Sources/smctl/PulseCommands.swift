@@ -87,6 +87,8 @@ struct StatusReport: Codable, Equatable {
     var power: [PowerReadingDTO]
     var safety: SafetyStateDTO?
     var conflicts: [FanControlConflict]
+    /// Seconds between the daemon's sensor reads; nil without a daemon or from an older one.
+    var samplingInterval: Int?
 
     /// Daemon telemetry when reachable; otherwise a direct, read-only SMC snapshot.
     static func collect(client: DaemonClient, fallback: SensorReader?) -> StatusReport {
@@ -128,6 +130,7 @@ struct StatusReport: Codable, Equatable {
             temperatures: telemetry.temperatures, fans: telemetry.fans, curve: telemetry.curve,
             power: telemetry.power, safety: telemetry.safety, conflicts: conflicts
         )
+        samplingInterval = telemetry.samplingInterval
     }
 
     init(
@@ -164,6 +167,7 @@ struct StatusReport: Codable, Equatable {
         }
         out += "\(ProductIdentity.cliName) · \(daemonText)"
         if let profile { out += " · profile \(profile)" }
+        if let samplingInterval { out += " · every \(samplingInterval) s" }
         out += "\n"
         if !daemon.running, let message = daemon.message {
             out += "  \(message)\n"

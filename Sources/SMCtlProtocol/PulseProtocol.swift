@@ -10,6 +10,8 @@ public protocol PulseDaemonXPCProtocol: SMCtlDaemonXPCProtocol {
     func listFanCurves(withReply reply: @escaping (Data?, String?) -> Void)
     func upsertFanCurve(_ requestData: Data, withReply reply: @escaping (Data?, String?) -> Void)
     func deleteFanCurve(_ requestData: Data, withReply reply: @escaping (Data?, String?) -> Void)
+    /// `[fan] interval`, 1 to 5 seconds between sensor reads.
+    func setSamplingInterval(_ requestData: Data, withReply reply: @escaping (Data?, String?) -> Void)
 }
 
 public struct TemperatureDTO: Codable, Equatable, Sendable {
@@ -115,6 +117,8 @@ public struct TelemetryDTO: Codable, Equatable, Sendable {
     public var power: [PowerReadingDTO]
     public var safety: SafetyStateDTO
     public var lastError: String?
+    /// Seconds between the daemon's sensor reads; nil from daemons that predate it.
+    public var samplingInterval: Int?
 
     public init(
         timestamp: Date,
@@ -125,7 +129,8 @@ public struct TelemetryDTO: Codable, Equatable, Sendable {
         curve: [FanCurveStateDTO],
         power: [PowerReadingDTO],
         safety: SafetyStateDTO,
-        lastError: String?
+        lastError: String?,
+        samplingInterval: Int? = nil
     ) {
         self.timestamp = timestamp
         self.daemonVersion = daemonVersion
@@ -136,6 +141,7 @@ public struct TelemetryDTO: Codable, Equatable, Sendable {
         self.power = power
         self.safety = safety
         self.lastError = lastError
+        self.samplingInterval = samplingInterval
     }
 }
 
@@ -179,5 +185,13 @@ public struct DeleteFanCurveRequestDTO: Codable, Equatable, Sendable {
 
     public init(name: String) {
         self.name = name
+    }
+}
+
+public struct SetSamplingIntervalRequestDTO: Codable, Equatable, Sendable {
+    public var seconds: Int
+
+    public init(seconds: Int) {
+        self.seconds = seconds
     }
 }

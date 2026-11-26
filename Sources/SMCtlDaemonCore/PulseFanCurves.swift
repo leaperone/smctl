@@ -451,7 +451,7 @@ extension SmctlDaemon {
                         stopped: stoppedFans.contains(index)
                     )
                 } : [],
-                power: (snapshot?.power ?? []).compactMap { reading in
+                power: powerReadingsLocked().compactMap { reading in
                     reading.value.flatMap { $0.isFinite ? PowerReadingDTO(key: reading.key, name: reading.name, value: $0, unit: reading.unit) : nil }
                 },
                 safety: SafetyStateDTO(
@@ -460,7 +460,8 @@ extension SmctlDaemon {
                     lastTripReason: lastSafetyTripReason,
                     allowsStoppingFans: config.safety.allow_below_minimum
                 ),
-                lastError: lastError
+                lastError: lastError,
+                samplingInterval: config.fan.interval
             )
         }
     }
