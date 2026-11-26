@@ -111,6 +111,8 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 - Option à décider à cette étape : **« Essayer 60 s »**, qui active le brouillon temporairement puis revient au profil précédent. Il faut un petit ajout au daemon (activation temporaire avec retour automatique, garde-fou toujours actif). Sinon, on se contente d'« Enregistrer » et « Enregistrer et activer ».
 
 ### 3e. Enregistrement et robustesse
+
+> ✅ **Faite le 26/11/2026** (voir le journal).
 - « Enregistrer », « Enregistrer et activer », « Annuler les modifications ». À la fermeture ou au changement de courbe avec des modifications en cours : proposer d'enregistrer, d'ignorer ou d'annuler.
 - Les erreurs du daemon (validation, daemon absent) s'affichent dans l'éditeur, et le brouillon est conservé.
 - Si la config change ailleurs pendant l'édition (SSH, `pulse fan curve set`) : avertissement « modifiée ailleurs », avec rechargement ou écrasement.
@@ -252,3 +254,33 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 **Mesures :** app au repos à 0,12 % (17,5 Mo). PulseBench : éditeur ouvert 1,7 %, refermé 0,35 %.
 
 **Ajustements pour 3e :** l'onglet fait maintenant 780 × 660. Le bouton Activer de l'en-tête doit proposer d'enregistrer d'abord si le brouillon est modifié.
+
+### 26/11/2026 : étape 3e terminée
+**Livré :**
+- **Enregistrer** (⌘S), **Annuler les modifications**, et un bouton d'en-tête qui devient **« Save & Activate »** (ou « Save » pour la courbe active) dès qu'il y a des modifications. Activer la version enregistrée alors que des modifications sont à l'écran serait trompeur.
+- **Les modifications non enregistrées sont protégées** par la question « Save changes to “Night”? » (Enregistrer / Ne pas enregistrer / Annuler) dans tous les cas :
+  - changement de courbe dans la liste ;
+  - « Edit Curves… » depuis le popover ;
+  - fermeture de la fenêtre ;
+  - **quitter l'app**.
+
+  La ligne de la courbe modifiée indique « Edited ».
+- **Changements faits ailleurs** (CLI, SSH, autre fenêtre) pendant l'édition :
+  - sans modification en cours, l'éditeur se recharge en silence ;
+  - avec des modifications, un bandeau propose « Use Saved Version » ou « Keep My Edits » ;
+  - un simple renommage ailleurs est intégré sans rien demander ;
+  - le retour de notre propre enregistrement n'est jamais pris pour un conflit.
+- « Dupliquer » sur la courbe en cours d'édition copie **ce qui est à l'écran** : les modifications partent dans la copie et l'original reste tel qu'enregistré. « Renommer » pendant l'édition passe par le brouillon.
+- Une erreur d'enregistrement (validation du daemon, daemon absent) s'affiche dans l'éditeur, en rouge, et le brouillon est conservé.
+- Les presets utilisent le même graphique que l'éditeur, en lecture seule, avec la lecture « maintenant » et la bascule %/RPM.
+- Tests : 6 nouveaux côté app (sélection en attente, conflit, renommage, retour de notre enregistrement) et 1 côté daemon (une courbe active enregistrée s'applique au cycle suivant). Au total : 63 tests app, et 216 tests XCTest dans le package principal (j'avais compté 91 à tort : une seule des suites).
+
+**Ce qui n'a pas marché, et ce qu'on en retient :**
+1. Vérification faite : **le daemon relit la courbe active par son nom à chaque cycle**. Enregistrer une courbe active l'applique donc sans réactivation. Un test de non-régression verrouille ce comportement.
+2. Pour protéger les modifications, l'éditeur a dû remonter de `CurveDetail` à `CurvesSettings`, avec une référence dans `SettingsNavigation` que le contrôleur de fenêtre consulte à la fermeture et au moment de quitter. **Règle** : tout état d'édition qui doit survivre à un changement de sélection appartient au volet, pas au détail.
+3. Les captures ne montrent ni les dialogues ni le bandeau de conflit (il faudrait injecter un état). Ces chemins sont couverts par des tests de logique : **à vérifier à l'œil pendant ta revue**.
+4. Performance preset (raideur entre 60 et 63 °C) : rien n'est changé. « Duplicate » puis le curseur de raideur ou la poignée de départ permettent maintenant d'en faire une version plus douce en quelques secondes.
+
+**Mesures :** app au repos à 0,07 % (17,3 Mo). PulseBench : éditeur refermé 0,6 %, glisser 12 ms par image (inchangé).
+
+**Pour 3f :** vérifier tout le parcours sur le vrai daemon (créer, activer, modifier en SSH, voir l'app suivre, supprimer), mettre le README à jour (capture de l'éditeur) et cocher la phase 3 dans la feuille de route.

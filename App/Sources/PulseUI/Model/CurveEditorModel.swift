@@ -67,6 +67,40 @@ public final class CurveEditorModel {
         dragOrigin = nil
     }
 
+    /// What to do when the saved curve changed outside this editor (command
+    /// line, another window, a rename).
+    public enum ExternalChange: Equatable, Sendable {
+        /// Nothing to do: it is what the editor holds, or there were no edits
+        /// and the editor now shows the new version.
+        case absorbed
+        /// The editor has edits and the saved curve changed: ask the user.
+        case conflict
+    }
+
+    /// Reconciles the editor with the curve as now saved.
+    public func savedCurveChanged(to saved: FanCurveSpec) -> ExternalChange {
+        guard saved != draft.original else { return .absorbed }
+        if saved == draft.spec || !draft.isDirty {
+            // Our own save coming back, or no edits to protect.
+            reload(spec: saved, range: draft.range)
+            return .absorbed
+        }
+        var labelOnly = draft.original
+        labelOnly.label = saved.label
+        if labelOnly == saved {
+            // Renamed elsewhere: take the new name, keep the edits.
+            draft.rebase(onto: saved)
+            draft.setLabel(saved.label ?? "")
+            return .absorbed
+        }
+        return .conflict
+    }
+
+    /// Keeps the edits on top of the new saved version (saving overwrites it).
+    public func keepEdits(over saved: FanCurveSpec) {
+        draft.rebase(onto: saved)
+    }
+
     // MARK: Dragging
 
     public func beginDrag(_ handle: EditorHandle) {

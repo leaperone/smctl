@@ -49,7 +49,8 @@ public struct CurveDraft: Equatable, Sendable {
     public static let maximumPoints = 24
 
     public private(set) var spec: FanCurveSpec
-    public let original: FanCurveSpec
+    /// The saved curve the draft is compared with.
+    public private(set) var original: FanCurveSpec
     /// The fan range used to show and convert RPM values in hand-written point curves.
     public let range: FanSpeedRange
 
@@ -81,6 +82,12 @@ public struct CurveDraft: Equatable, Sendable {
 
     public mutating func revert() {
         spec = original
+    }
+
+    /// Takes `saved` as the new original, keeping the edits (the curve was
+    /// changed elsewhere and the user keeps editing; saving overwrites it).
+    public mutating func rebase(onto saved: FanCurveSpec) {
+        original = saved
     }
 
     // MARK: Label

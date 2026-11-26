@@ -24,4 +24,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = StatusItemController(store: store) { settings.show($0) }
         store.start()
     }
+
+    /// Unsaved curve edits get a chance to be saved before quitting.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let settings else { return .terminateNow }
+        var immediate: Bool?
+        var asked = false
+        settings.confirmTermination { quit in
+            if asked {
+                sender.reply(toApplicationShouldTerminate: quit)
+            } else {
+                immediate = quit
+            }
+        }
+        asked = true
+        if let immediate { return immediate ? .terminateNow : .terminateCancel }
+        return .terminateLater
+    }
 }

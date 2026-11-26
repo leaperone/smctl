@@ -4,10 +4,17 @@ import SMCtlProtocol
 import SwiftUI
 
 /// The Curves pane: built-in presets and user curves on the left, the selected
-/// curve on the right.
+/// curve on the right. Owns the editor of the selected user curve, so unsaved
+/// edits are protected when the selection changes or the window closes.
 struct CurvesSettings: View {
     let store: PulseStore
     @Bindable var navigation: SettingsNavigation
+    @Environment(\.undoManager) private var undoManager
+    @State private var editor: CurveEditorModel?
+    @State private var saving = false
+    @State private var saveError: String?
+    /// The saved version, when it changed elsewhere while the editor had edits.
+    @State private var conflict: FanCurveSpec?
     @State private var renaming: FanCurveSpec?
     @State private var renameText = ""
     @State private var deleting: String?
@@ -21,6 +28,12 @@ struct CurvesSettings: View {
         entries.first { $0.spec.name == navigation.selectedCurve }
     }
 
+    /// The first fan's range, for RPM labels; nil on fanless Macs or without telemetry.
+    private var fanRange: FanSpeedRange? {
+        guard let fan = store.fans.first, let low = fan.minimumRPM, let high = fan.maximumRPM, high > low else { return nil }
+        return FanSpeedRange(minimumRPM: low, maximumRPM: high)
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             sidebar
@@ -32,14 +45,31 @@ struct CurvesSettings: View {
         .task {
             await store.refresh(forceLists: true)
             ensureSelection()
+            loadEditor()
         }
         .onChange(of: entries.map(\.spec.name)) { ensureSelection() }
+        .onChange(of: navigation.selectedCurve) { loadEditor() }
+        .onChange(of: selectedEntry?.spec) { _, saved in reconcile(with: saved) }
+        .onChange(of: undoManager) { editor?.undoManager = undoManager }
+        .alert(pendingTitle, isPresented: Binding(get: { navigation.pending != nil }, set: { if !$0 { navigation.cancelPending() } })) {
+            Button("Save") {
+                Task {
+                    if await save(activate: false) { navigation.confirmPending() } else { navigation.cancelPending() }
+                }
+            }
+            .disabled(editor?.draft.validationError != nil)
+            Button("Don't Save", role: .destructive) {
+                editor?.revert()
+                navigation.confirmPending()
+            }
+            Button("Cancel", role: .cancel) { navigation.cancelPending() }
+        } message: {
+            Text("Your changes are lost if you don't save them.")
+        }
         .alert("Rename Curve", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $renameText)
             Button("Rename") {
-                if let spec = renaming {
-                    Task { await store.rename(curve: spec.name, to: renameText) }
-                }
+                if let spec = renaming { rename(spec, to: renameText) }
             }
             .disabled(CurveNaming.cleanLabel(renameText) == nil)
             Button("Cancel", role: .cancel) {}
@@ -64,10 +94,14 @@ struct CurvesSettings: View {
         }
     }
 
+    private var pendingTitle: String {
+        "Save changes to “\(editor?.draft.spec.label ?? navigation.selectedCurve ?? "")”?"
+    }
+
     // MARK: Sidebar
 
     private var sidebar: some View {
-        List(selection: $navigation.selectedCurve) {
+        List(selection: Binding(get: { navigation.selectedCurve }, set: { navigation.request($0) })) {
             Section("Presets") {
                 ForEach(presets, id: \.spec.name) { row($0) }
             }
@@ -95,7 +129,7 @@ struct CurvesSettings: View {
             HStack(spacing: 2) {
                 Button {
                     Task {
-                        if let name = await store.createCurve() { navigation.selectedCurve = name }
+                        if let name = await store.createCurve() { navigation.request(name) }
                     }
                 } label: {
                     Image(systemName: "plus").frame(width: 22, height: 20)
@@ -122,8 +156,13 @@ struct CurvesSettings: View {
 
     private func row(_ entry: FanCurveEntryDTO) -> some View {
         let spec = entry.spec
+        let edited = editor?.draft.spec.name == spec.name && editor?.draft.isDirty == true
         return HStack {
-            Label(spec.label ?? spec.name.capitalized, systemImage: PulseStore.symbol(for: spec.name, builtin: entry.builtin))
+            Label((edited ? editor?.draft.spec.label : spec.label) ?? spec.name.capitalized,
+                  systemImage: PulseStore.symbol(for: spec.name, builtin: entry.builtin))
+            if edited {
+                Text("Edited").font(.caption).foregroundStyle(.secondary)
+            }
             Spacer()
             if store.activeProfile == spec.name {
                 Image(systemName: "checkmark")
@@ -159,8 +198,13 @@ struct CurvesSettings: View {
             if !store.canEditCurves {
                 serviceBanner
             }
+            if let saved = conflict, let editor {
+                conflictBanner(saved: saved, editor: editor)
+            }
             if let entry = selectedEntry {
-                CurveDetail(store: store, entry: entry,
+                CurveDetail(store: store, entry: entry, editor: entry.builtin || !store.canEditCurves ? nil : editor,
+                            saving: saving, saveError: saveError,
+                            save: { activate in Task { await save(activate: activate) } },
                             duplicate: { duplicate(entry.spec) },
                             rename: { startRename(entry.spec) },
                             delete: { deleting = entry.spec.name })
@@ -182,12 +226,80 @@ struct CurvesSettings: View {
             .background(.blue.opacity(0.08))
     }
 
+    private func conflictBanner(saved: FanCurveSpec, editor: CurveEditorModel) -> some View {
+        HStack(spacing: 10) {
+            Label("This curve was changed elsewhere (command line or another window).", systemImage: "arrow.triangle.2.circlepath")
+                .font(.callout)
+            Spacer()
+            Button("Use Saved Version") {
+                editor.reload(spec: saved, range: editor.draft.range)
+                conflict = nil
+            }
+            Button("Keep My Edits") {
+                editor.keepEdits(over: saved)
+                conflict = nil
+            }
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .background(.orange.opacity(0.12))
+    }
+
+    // MARK: Editing
+
+    /// One editor per selected user curve, kept while it stays selected.
+    private func loadEditor() {
+        conflict = nil
+        saveError = nil
+        guard let entry = selectedEntry, !entry.builtin else {
+            editor = nil
+            navigation.editor = nil
+            return
+        }
+        if editor?.draft.spec.name == entry.spec.name { return }
+        let model = CurveEditorModel(spec: entry.spec, range: fanRange ?? FanSpeedRange(minimumRPM: 0, maximumRPM: 100))
+        model.undoManager = undoManager
+        editor = model
+        navigation.editor = model
+    }
+
+    private func reconcile(with saved: FanCurveSpec?) {
+        guard let editor, let saved, saved.name == editor.draft.spec.name, !saving else { return }
+        if editor.savedCurveChanged(to: saved) == .conflict {
+            conflict = saved
+        }
+    }
+
+    /// Saves the draft; on success it becomes the editor's new original.
+    @discardableResult
+    private func save(activate: Bool) async -> Bool {
+        guard let editor, editor.draft.validationError == nil else { return false }
+        saving = true
+        defer { saving = false }
+        let spec = editor.draft.spec
+        if !editor.draft.isDirty {
+            if activate { await store.activate(spec.name) }
+            return true
+        }
+        if await store.save(spec, activate: activate) {
+            editor.reload(spec: spec, range: editor.draft.range)
+            conflict = nil
+            saveError = nil
+            return true
+        }
+        // Shown here rather than in the popover.
+        saveError = store.actionError ?? "The curve could not be saved."
+        store.actionError = nil
+        return false
+    }
+
     // MARK: Actions
 
     private func ensureSelection() {
         let names = Set(entries.map(\.spec.name)).union(invalidNames)
         if let selected = navigation.selectedCurve, names.contains(selected) { return }
-        navigation.selectedCurve = names.contains(store.activeProfile) ? store.activeProfile : entries.first?.spec.name
+        navigation.select(names.contains(store.activeProfile) ? store.activeProfile : entries.first?.spec.name)
     }
 
     private func canDelete(_ name: String?) -> Bool {
@@ -199,21 +311,37 @@ struct CurvesSettings: View {
         entries.first { $0.spec.name == name }.map { $0.spec.label ?? name } ?? name
     }
 
+    /// Duplicates what is on screen: the edits, when duplicating the curve
+    /// being edited (they move to the copy and the original is left as saved).
     private func duplicate(_ spec: FanCurveSpec) {
+        let source = editor?.draft.spec.name == spec.name ? (editor?.draft.spec ?? spec) : spec
         Task {
-            if let name = await store.duplicate(spec) { navigation.selectedCurve = name }
+            guard let name = await store.duplicate(source) else { return }
+            if editor?.draft.spec.name == spec.name { editor?.revert() }
+            navigation.select(name)
         }
     }
 
     private func startRename(_ spec: FanCurveSpec) {
-        renameText = spec.label ?? spec.name.capitalized
+        renameText = editor?.draft.spec.name == spec.name ? (editor?.draft.spec.label ?? spec.name.capitalized) : (spec.label ?? spec.name.capitalized)
         renaming = spec
+    }
+
+    /// Renaming the curve being edited changes the draft's label, saved with
+    /// the rest; otherwise it is saved right away.
+    private func rename(_ spec: FanCurveSpec, to text: String) {
+        if let editor, editor.draft.spec.name == spec.name, editor.draft.isDirty {
+            editor.edit("Rename") { $0.setLabel(text) }
+        } else {
+            Task { await store.rename(curve: spec.name, to: text) }
+        }
     }
 
     private func delete(_ name: String) {
         Task {
+            if editor?.draft.spec.name == name { editor?.revert() }
             if await store.delete(curve: name), navigation.selectedCurve == name {
-                navigation.selectedCurve = nil
+                navigation.select(nil)
                 ensureSelection()
             }
         }
@@ -225,82 +353,72 @@ struct CurvesSettings: View {
 struct CurveDetail: View {
     let store: PulseStore
     let entry: FanCurveEntryDTO
+    let editor: CurveEditorModel?
+    let saving: Bool
+    let saveError: String?
+    let save: (_ activate: Bool) -> Void
     let duplicate: () -> Void
     let rename: () -> Void
     let delete: () -> Void
     @AppStorage(SettingsKey.fanSpeedUnit) private var unit: FanSpeedUnit = .rpm
-    @Environment(\.undoManager) private var undoManager
-    @State private var editor: CurveEditorModel?
-    @State private var saving = false
 
-    private var spec: FanCurveSpec { entry.spec }
-    private var isActive: Bool { store.activeProfile == spec.name }
+    private var spec: FanCurveSpec { editor?.draft.spec ?? entry.spec }
+    private var isActive: Bool { store.activeProfile == entry.spec.name }
+    private var isDirty: Bool { editor?.draft.isDirty ?? false }
 
-    /// The first fan's range, for RPM labels; nil on fanless Macs or without telemetry.
     private var fanRange: FanSpeedRange? {
         guard let fan = store.fans.first, let low = fan.minimumRPM, let high = fan.maximumRPM, high > low else { return nil }
         return FanSpeedRange(minimumRPM: low, maximumRPM: high)
     }
 
+    private var hasFanRange: Bool { fanRange != nil }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
-            if entry.builtin || !store.canEditCurves {
-                CurvesChart(specs: [(spec, .accentColor)], temperatures: CurveDraft.temperatureRange, showsLegend: false)
-                    .frame(height: 250)
-                summary(showsShape: true)
-                Spacer(minLength: 0)
-            } else if let editor {
-                CurveEditor(model: editor, unit: $unit, hasFanRange: fanRange != nil,
+            if let editor {
+                CurveEditor(model: editor, unit: $unit, hasFanRange: hasFanRange,
                             preview: CurvePreview.make(draft: editor.draft, temperatures: store.telemetry?.temperatures ?? [], fan: store.fans.first))
                 CurveSettingsForm(model: editor)
                 Spacer(minLength: 0)
                 saveBar(editor)
+            } else {
+                let viewer = CurveEditorModel(spec: spec, range: fanRange ?? FanSpeedRange(minimumRPM: 0, maximumRPM: 100))
+                CurveEditor(model: viewer, unit: $unit, hasFanRange: hasFanRange,
+                            preview: CurvePreview.make(draft: viewer.draft, temperatures: store.telemetry?.temperatures ?? [], fan: store.fans.first),
+                            editable: false)
+                summary
+                Spacer(minLength: 0)
             }
         }
         .padding(20)
-        .task(id: spec.name) { loadEditor() }
-        .onChange(of: undoManager) { editor?.undoManager = undoManager }
-    }
-
-    private func loadEditor() {
-        guard !entry.builtin else {
-            editor = nil
-            return
-        }
-        let model = CurveEditorModel(spec: spec, range: fanRange ?? FanSpeedRange(minimumRPM: 0, maximumRPM: 100))
-        model.undoManager = undoManager
-        editor = model
     }
 
     private func saveBar(_ editor: CurveEditorModel) -> some View {
         HStack {
-            if let error = editor.draft.validationError {
+            if let error = saveError ?? editor.draft.validationError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(saveError != nil ? .red : .orange)
+                    .lineLimit(2)
+            } else if isDirty && isActive {
+                Text("Active curve: saving applies it right away.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
+            if saving { ProgressView().controlSize(.small) }
             Button("Revert") { editor.revert() }
-                .disabled(!editor.draft.isDirty || saving)
-            Button("Save") {
-                Task {
-                    saving = true
-                    defer { saving = false }
-                    let draft = editor.draft.spec
-                    if await store.save(draft, activate: false) {
-                        editor.reload(spec: draft, range: editor.draft.range)
-                    }
-                }
-            }
-            .keyboardShortcut("s", modifiers: .command)
-            .disabled(!editor.draft.isDirty || editor.draft.validationError != nil || saving)
+                .disabled(!isDirty || saving)
+            Button("Save") { save(false) }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(!isDirty || editor.draft.validationError != nil || saving)
         }
     }
 
     private var header: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: PulseStore.symbol(for: spec.name, builtin: entry.builtin))
+            Image(systemName: PulseStore.symbol(for: entry.spec.name, builtin: entry.builtin))
                 .font(.title2)
                 .foregroundStyle(.tint)
                 .frame(width: 32)
@@ -328,20 +446,30 @@ struct CurveDetail: View {
                 .fixedSize()
                 .disabled(!store.canEditCurves)
             }
+            activateButton
+        }
+    }
+
+    @ViewBuilder
+    private var activateButton: some View {
+        if isDirty {
+            // Activating the saved version while edits are on screen would be
+            // misleading: save them first.
+            Button(isActive ? "Save" : "Save & Activate") { save(!isActive) }
+                .buttonStyle(.borderedProminent)
+                .disabled(saving || editor?.draft.validationError != nil || (!isActive && !store.canControlFans))
+        } else {
             Button(isActive ? "Active" : "Activate") {
-                Task { await store.activate(spec.name) }
+                Task { await store.activate(entry.spec.name) }
             }
             .buttonStyle(.borderedProminent)
             .disabled(isActive || !store.canControlFans || store.busyProfile != nil)
         }
     }
 
-    private func summary(showsShape: Bool) -> some View {
-        let spec = editor?.draft.spec ?? spec
-        return Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 6) {
-            if showsShape {
-                summaryRow("Shape", CurveSummary.shape(spec))
-            }
+    private var summary: some View {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 6) {
+            summaryRow("Shape", CurveSummary.shape(spec))
             summaryRow("Sensors", CurveSummary.sensors(spec))
             summaryRow("Response", CurveSummary.response(spec))
             summaryRow("Hysteresis", CurveSummary.hysteresis(spec))

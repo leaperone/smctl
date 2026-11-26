@@ -234,6 +234,70 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.store = store
     }
 
+    /// Asks before quitting over unsaved curve edits; `reply(true)` lets the
+    /// app quit (after saving or discarding).
+    public func confirmTermination(_ reply: @escaping @MainActor (Bool) -> Void) {
+        guard navigation.hasUnsavedEdits, let editor = navigation.editor else {
+            reply(true)
+            return
+        }
+        show(.curve(nil))
+        let alert = NSAlert()
+        alert.messageText = "Save changes to “\(editor.draft.spec.label ?? editor.draft.spec.name)” before quitting?"
+        alert.informativeText = "Your changes are lost if you don't save them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don't Save").hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons[0].isEnabled = editor.draft.validationError == nil
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            let spec = editor.draft.spec
+            Task { @MainActor in
+                let saved = await store.save(spec, activate: false)
+                if saved { editor.reload(spec: spec, range: editor.draft.range) }
+                reply(saved)
+            }
+        case .alertSecondButtonReturn:
+            editor.revert()
+            reply(true)
+        default:
+            reply(false)
+        }
+    }
+
+    /// Asks before closing over unsaved curve edits.
+    public func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard navigation.hasUnsavedEdits, let editor = navigation.editor else { return true }
+        let alert = NSAlert()
+        alert.messageText = "Save changes to “\(editor.draft.spec.label ?? editor.draft.spec.name)”?"
+        alert.informativeText = "Your changes are lost if you don't save them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don't Save").hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons[0].isEnabled = editor.draft.validationError == nil
+        alert.beginSheetModal(for: sender) { [weak self, weak sender] response in
+            MainActor.assumeIsolated {
+                guard let self, let sender else { return }
+                switch response {
+                case .alertFirstButtonReturn:
+                    let spec = editor.draft.spec
+                    Task { @MainActor in
+                        if await self.store.save(spec, activate: false) {
+                            editor.reload(spec: spec, range: editor.draft.range)
+                            sender.close()
+                        }
+                    }
+                case .alertSecondButtonReturn:
+                    editor.revert()
+                    sender.close()
+                default:
+                    break
+                }
+            }
+        }
+        return false
+    }
+
     public func windowWillClose(_ notification: Notification) {
         guard let closing = notification.object as? NSWindow, closing === window else { return }
         // Release after AppKit finishes closing it.

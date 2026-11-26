@@ -8,12 +8,15 @@ public struct CurveEditor: View {
     @Binding var unit: FanSpeedUnit
     let hasFanRange: Bool
     let preview: CurvePreview?
+    /// False for presets: same chart and live readout, no handles or controls.
+    let editable: Bool
 
-    public init(model: CurveEditorModel, unit: Binding<FanSpeedUnit>, hasFanRange: Bool, preview: CurvePreview? = nil) {
+    public init(model: CurveEditorModel, unit: Binding<FanSpeedUnit>, hasFanRange: Bool, preview: CurvePreview? = nil, editable: Bool = true) {
         self.model = model
         self._unit = unit
         self.hasFanRange = hasFanRange
         self.preview = preview
+        self.editable = editable
     }
 
     private var draft: CurveDraft { model.draft }
@@ -29,6 +32,7 @@ public struct CurveEditor: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if editable {
             HStack {
                 Picker("Shape", selection: kindSelection) {
                     ForEach(FanCurveShapeKind.allCases, id: \.self) { kind in
@@ -41,7 +45,8 @@ public struct CurveEditor: View {
                 Spacer(minLength: 12)
                 shapeControl
             }
-            EditableCurveChart(model: model, unit: hasFanRange ? unit : .percent, preview: preview)
+            }
+            EditableCurveChart(model: model, unit: hasFanRange ? unit : .percent, preview: preview, editable: editable)
                 .frame(height: 240)
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -51,10 +56,12 @@ public struct CurveEditor: View {
                             .foregroundStyle(.orange)
                             .monospacedDigit()
                     }
-                    Text(hint)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if editable {
+                        Text(hint)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 Spacer()
                 if hasFanRange {
@@ -127,6 +134,7 @@ struct EditableCurveChart: View {
     @Bindable var model: CurveEditorModel
     let unit: FanSpeedUnit
     var preview: CurvePreview?
+    var editable = true
     @State private var hovered: EditorHandle?
     @FocusState private var focused: Bool
 
@@ -180,7 +188,7 @@ struct EditableCurveChart: View {
                     .symbolSize(70)
                     .foregroundStyle(.orange)
             }
-            ForEach(handles, id: \.handle) { item in
+            ForEach(editable ? handles : [], id: \.handle) { item in
                 PointMark(x: .value("Temperature", item.celsius), y: .value("Fan speed", item.percent))
                     .symbolSize(symbolSize(for: item.handle))
                     .foregroundStyle(isSelected(item.handle) ? Color.accentColor : Color(nsColor: .controlBackgroundColor))
@@ -196,6 +204,13 @@ struct EditableCurveChart: View {
         .chartYAxis(.hidden)
         .chartLegend(.hidden)
         .chartOverlay { proxy in
+            if editable {
+                overlay(proxy: proxy, handles: handles)
+            }
+        }
+    }
+
+    private func overlay(proxy: ChartProxy, handles: [(handle: EditorHandle, celsius: Double, percent: Double)]) -> some View {
             GeometryReader { geometry in
                 let plot = proxy.plotFrame.map { geometry[$0] } ?? .zero
                 let positions = handles.compactMap { item -> (EditorHandle, CGPoint)? in
@@ -229,7 +244,6 @@ struct EditableCurveChart: View {
                     .pointerStyle(model.dragging != nil ? .grabActive : (hovered != nil ? .grabIdle : nil))
                 accessibilityHandles(positions: positions)
             }
-        }
     }
 
     // MARK: Gestures

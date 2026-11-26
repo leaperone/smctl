@@ -227,6 +227,25 @@ final class PulseFanCurveTests: XCTestCase {
         XCTAssertTrue(backend.writes.contains { $0.key == "F0Tg" })
     }
 
+    /// The app saves edits to the active curve without re-activating it: the
+    /// next tick must already use the new curve (it is resolved by name).
+    func testSavingTheActiveCurveAppliesOnTheNextTick() throws {
+        let (backend, daemon) = makeDaemon(celsius: 70)
+        try daemon.upsertFanCurve(
+            FanCurveSpec(name: "flat", points: [FanCurveSpecPoint(50, .percent(0)), FanCurveSpecPoint(90, .percent(100))]),
+            activate: true
+        )
+        XCTAssertEqual(try XCTUnwrap(backend.float("F0Tg")), 2950, accuracy: 0.5)
+
+        try daemon.upsertFanCurve(
+            FanCurveSpec(name: "flat", points: [FanCurveSpecPoint(50, .percent(0)), FanCurveSpecPoint(70, .percent(100))]),
+            activate: false
+        )
+        XCTAssertEqual(daemon.config.fan.profile, "flat", "still active")
+        daemon.evaluateFanSubsystemLocked()
+        XCTAssertEqual(try XCTUnwrap(backend.float("F0Tg")), 4900, accuracy: 0.5, "70C is now the top of the curve")
+    }
+
     func testDeletingTheActiveCurveHandsFansBackToTheSystem() throws {
         let (backend, daemon) = makeDaemon(celsius: 70)
         try daemon.upsertFanCurve(linearSpec(name: "work"), activate: true)
