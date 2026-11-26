@@ -7,11 +7,13 @@ public struct CurveEditor: View {
     @Bindable var model: CurveEditorModel
     @Binding var unit: FanSpeedUnit
     let hasFanRange: Bool
+    let preview: CurvePreview?
 
-    public init(model: CurveEditorModel, unit: Binding<FanSpeedUnit>, hasFanRange: Bool) {
+    public init(model: CurveEditorModel, unit: Binding<FanSpeedUnit>, hasFanRange: Bool, preview: CurvePreview? = nil) {
         self.model = model
         self._unit = unit
         self.hasFanRange = hasFanRange
+        self.preview = preview
     }
 
     private var draft: CurveDraft { model.draft }
@@ -39,13 +41,21 @@ public struct CurveEditor: View {
                 Spacer(minLength: 12)
                 shapeControl
             }
-            EditableCurveChart(model: model, unit: hasFanRange ? unit : .percent)
+            EditableCurveChart(model: model, unit: hasFanRange ? unit : .percent, preview: preview)
                 .frame(height: 240)
             HStack(alignment: .firstTextBaseline) {
-                Text(hint)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 2) {
+                    if let preview {
+                        Text(readout(preview))
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.orange)
+                            .monospacedDigit()
+                    }
+                    Text(hint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Spacer()
                 if hasFanRange {
                     Picker("Speed unit", selection: $unit) {
@@ -90,6 +100,20 @@ public struct CurveEditor: View {
         }
     }
 
+    private func speed(_ percent: Double) -> String {
+        let text = "\(Int(percent.rounded())) %"
+        guard hasFanRange else { return text }
+        return "\(text) (\(Format.rpm(model.draft.range.rpm(forFraction: percent / 100))) RPM)"
+    }
+
+    private func readout(_ preview: CurvePreview) -> String {
+        var text = "Now \(Int(preview.celsius.rounded())) °C → this curve asks \(speed(preview.percent))"
+        if let fan = preview.fanPercent {
+            text += " · fan at \(speed(fan))"
+        }
+        return text
+    }
+
     private var hint: String {
         draft.isPoints
             ? "Drag a point to move it. Double-click to add one; select it and press Delete to remove it."
@@ -102,6 +126,7 @@ public struct CurveEditor: View {
 struct EditableCurveChart: View {
     @Bindable var model: CurveEditorModel
     let unit: FanSpeedUnit
+    var preview: CurvePreview?
     @State private var hovered: EditorHandle?
     @FocusState private var focused: Bool
 
@@ -146,6 +171,14 @@ struct EditableCurveChart: View {
                 LineMark(x: .value("Temperature", point.celsius), y: .value("Fan speed", point.percent))
                     .foregroundStyle(Color.accentColor)
                     .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+            }
+            if let preview, CurveDraft.temperatureRange.contains(preview.celsius) {
+                RuleMark(x: .value("Now", preview.celsius))
+                    .foregroundStyle(.orange.opacity(0.7))
+                    .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                PointMark(x: .value("Now", preview.celsius), y: .value("Fan speed", preview.percent))
+                    .symbolSize(70)
+                    .foregroundStyle(.orange)
             }
             ForEach(handles, id: \.handle) { item in
                 PointMark(x: .value("Temperature", item.celsius), y: .value("Fan speed", item.percent))
@@ -308,12 +341,25 @@ struct CurveAxes: View, Equatable {
         return "\(Int(percent))%"
     }
 
+    /// The built-in presets, drawn faintly for reference.
+    static let ghosts: [(name: String, outline: [(celsius: Double, percent: Double)])] =
+        FanCurvePresets.all.map { ($0.label ?? $0.name, CurveDraft($0).outline) }
+
     var body: some View {
         Chart {
             // Charts draws nothing (not even axes) for an empty chart.
             PointMark(x: .value("Temperature", CurveDraft.temperatureRange.lowerBound), y: .value("Fan speed", 0))
                 .opacity(0)
+            ForEach(Self.ghosts, id: \.name) { ghost in
+                ForEach(ghost.outline, id: \.celsius) { point in
+                    LineMark(x: .value("Temperature", point.celsius), y: .value("Fan speed", point.percent),
+                             series: .value("Preset", ghost.name))
+                        .foregroundStyle(Color.secondary.opacity(0.28))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                }
+            }
         }
+        .chartLegend(.hidden)
         .chartXScale(domain: CurveDraft.temperatureRange)
         .chartYScale(domain: 0...100)
         .chartXAxis {

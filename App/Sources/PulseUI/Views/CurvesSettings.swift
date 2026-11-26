@@ -251,8 +251,9 @@ struct CurveDetail: View {
                 summary(showsShape: true)
                 Spacer(minLength: 0)
             } else if let editor {
-                CurveEditor(model: editor, unit: $unit, hasFanRange: fanRange != nil)
-                summary(showsShape: false)
+                CurveEditor(model: editor, unit: $unit, hasFanRange: fanRange != nil,
+                            preview: CurvePreview.make(draft: editor.draft, temperatures: store.telemetry?.temperatures ?? [], fan: store.fans.first))
+                CurveSettingsForm(model: editor)
                 Spacer(minLength: 0)
                 saveBar(editor)
             }

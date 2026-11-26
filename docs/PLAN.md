@@ -103,6 +103,8 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 - Performance : pendant un glisser, on recalcule environ 140 points par image. Si ce n'est pas fluide, on réduit la résolution pendant le glisser.
 
 ### 3d. Aperçu live
+
+> ✅ **Faite le 26/11/2026** (voir le journal). « Essayer 60 s » n'est pas fait : c'est à toi de décider.
 - Une ligne verticale indique la température lissée actuelle, avec un point sur la courbe : « 54 °C → 12 % (1 450 RPM) ». On ajoute aussi la vitesse réelle du ventilateur.
 - Les presets apparaissent en courbes « fantômes » pâles, pour se repérer.
 - Un panneau de réponse indique le temps pour passer du minimum au maximum avec les vitesses de montée choisies, et l'effet de l'hystérésis.
@@ -233,3 +235,20 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 **Ajustements des étapes suivantes :**
 - 3d : les réglages d'entrée et de réponse (capteurs, agrégation, hystérésis, vitesses, lissage) deviennent éditables à la place du résumé, et la marque « température actuelle » s'ajoute dans la couche de la courbe. Les courbes fantômes des presets iront dans la couche fixe des axes, pour ne rien coûter pendant un glisser.
 - 3e : brancher Enregistrer et Activer, gérer la sauvegarde d'une courbe active, protéger les modifications non enregistrées (changement de courbe, fermeture de la fenêtre).
+
+### 26/11/2026 : étape 3d terminée
+**Livré :**
+- **Aperçu live** : une ligne orange pointillée à la température actuelle, un point sur la courbe et une lecture « Now 56 °C → this curve asks 0 % (1000 RPM) · fan at 7 % (1274 RPM) ». La température est calculée comme le fait le daemon (même fonction d'agrégation), mais sur les capteurs **du brouillon** : cocher GPU déplace la ligne avant même d'enregistrer.
+- **Presets fantômes** : Silencieux, Équilibré et Performance en pointillés pâles, dans la couche fixe des axes. Ils ne coûtent rien pendant un glisser (11,2 ms par image, contre 12,2 avant).
+- **Entrées et réponse éditables** (chaque changement est annulable) : cases CPU, GPU et Boîtier (aucune cochée = tous les capteurs), « Hottest sensor » ou « Average », montée et descente en %/s (0 = « Immediate »), hystérésis, lissage.
+- **Phrase de conséquence** : « Minimum to full speed in 25 s, back to minimum in 50 s. Slows down only once 3 °C cooler. Ignores spikes shorter than about 15 s. »
+- 3 nouveaux tests (entrée selon les capteurs et l'agrégation, capteur éteint ignoré, phrases de réponse).
+
+**Ce qui n'a pas marché, et ce qu'on en retient :**
+1. Le premier formulaire empilait des pas à pas avec des écarts irréguliers et des colonnes mal alignées. Il est passé sur une grille à 4 colonnes (libellé, valeur alignée à droite, flèches).
+2. La température « maintenant » est instantanée, pas lissée comme celle du daemon (qui applique l'EMA). Elle peut donc sauter de quelques degrés entre deux lectures. C'est acceptable pour un aperçu, et la lecture le dit (« Now »).
+3. **« Essayer 60 s » non développé.** Il faudrait une activation temporaire dans le daemon, avec retour automatique et sans désactiver le garde-fou. C'est faisable (environ ½ journée, avec tests), mais ça touche au daemon. On peut déjà enregistrer et activer, puis revenir au profil précédent depuis le popover. **Décision pour ta revue.**
+
+**Mesures :** app au repos à 0,12 % (17,5 Mo). PulseBench : éditeur ouvert 1,7 %, refermé 0,35 %.
+
+**Ajustements pour 3e :** l'onglet fait maintenant 780 × 660. Le bouton Activer de l'en-tête doit proposer d'enregistrer d'abord si le brouillon est modifié.
