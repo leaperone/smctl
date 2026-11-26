@@ -379,8 +379,10 @@ t_idle_off() {
 }
 
 t_reboot() {
-    "$PULSE" fan profile "$CURVE" >/dev/null 2>&1
-    printf 'PROFILE=%s\nINTERVAL=%s\nRESULTS=%s\n' "$CURVE" "$(status 'd.get("samplingInterval")')" "$RESULTS" > "$STATE"
+    # Put the user's own settings back first (the script exits here, before
+    # its usual restore), then check after the reboot that they survived.
+    restore >/dev/null
+    printf 'PROFILE=%s\nINTERVAL=%s\nRESULTS=%s\n' "$(profile)" "$(status 'd.get("samplingInterval")')" "$RESULTS" > "$STATE"
     bold "Redémarre le Mac, ouvre ta session, attends 30 s, puis lance :"
     info "scripts/hardware-campaign.sh --after-reboot"
     record 13 "${TITLES[12]}" info "en attente de --after-reboot"
