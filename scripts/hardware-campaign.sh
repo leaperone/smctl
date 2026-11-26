@@ -316,25 +316,38 @@ t_safety() {
 }
 
 t_install() {
+    # Two paths: "Reinstall" (install over a running service, as the app's
+    # button does) keeps the profile; uninstall hands the fans back to macOS
+    # for good and saves "auto", so a later install starts on Auto.
     "$PULSE" fan profile "$CURVE" >/dev/null 2>&1
     sleep 3
-    info "sudo pulse daemon uninstall, puis install (mot de passe demandé)…"
+    info "1/2 Réinstallation par-dessus le service (sudo pulse daemon install)…"
+    local install_error
+    install_error="$(sudo "$PULSE" daemon install 2>&1 >/dev/null)" || { record 11 "${TITLES[10]}" fail "réinstallation : ${install_error:-sudo refusé}"; return; }
+    local over=no; wait_for 15 daemon_running && over=yes
+    sleep 2
+    local p_over; p_over="$(profile)"
+
+    info "2/2 Désinstallation puis installation…"
     sudo "$PULSE" daemon uninstall >/dev/null || { record 11 "${TITLES[10]}" skip "sudo refusé"; return; }
     sleep 2
     local modes; modes="$(fan_modes)"
     local stopped=yes; [[ -n "$(daemon_pid)" ]] && stopped=no
-    local install_error
     install_error="$(sudo "$PULSE" daemon install 2>&1 >/dev/null)"
     local back=no; wait_for 15 daemon_running && back=yes
     if [[ $back == no ]]; then
         # Never leave the Mac without its service: retry with the app's own CLI.
         sudo "$APP/Contents/Helpers/pulse" daemon install >/dev/null 2>&1 && wait_for 15 daemon_running && install_error+=" (réinstallé via l'app)"
     fi
-    local p; p="$(profile)"
-    if [[ $stopped == yes && $modes != *manual* && $back == yes && $p == "$CURVE" ]]; then
-        record 11 "${TITLES[10]}" pass "après désinstallation : ventilateurs $modes ; réinstallé, profil $p conservé"
+    sleep 2
+    local p_after; p_after="$(profile)"
+    "$PULSE" fan profile "$CURVE" >/dev/null 2>&1
+
+    local notes="réinstallation : relancé $over, profil $p_over conservé ; désinstallation : arrêté $stopped, ventilateurs $modes ; installation : relancé $back, profil $p_after"
+    if [[ $over == yes && $p_over == "$CURVE" && $stopped == yes && $modes != *manual* && $back == yes && $p_after == auto ]]; then
+        record 11 "${TITLES[10]}" pass "$notes"
     else
-        record 11 "${TITLES[10]}" fail "arrêté : $stopped, ventilateurs $modes, relancé : $back, profil $p ; erreur : ${install_error:-aucune}"
+        record 11 "${TITLES[10]}" fail "$notes ; erreur : ${install_error:-aucune}"
     fi
 }
 
