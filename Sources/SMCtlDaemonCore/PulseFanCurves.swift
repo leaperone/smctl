@@ -421,7 +421,7 @@ extension SmctlDaemon {
 
     func telemetry() -> TelemetryDTO {
         queue.sync {
-            let snapshot = lastSnapshot
+            let snapshot = freshSnapshotLocked()
             let profile = currentFanProfileLocked()
             let curveActive = profile != "auto" && profile != "manual"
             return TelemetryDTO(

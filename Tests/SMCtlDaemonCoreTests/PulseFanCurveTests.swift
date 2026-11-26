@@ -538,6 +538,24 @@ final class PulseFanCurveTests: XCTestCase {
         XCTAssertTrue(daemon.telemetry().curve.isEmpty, "no curve state while macOS is in control")
     }
 
+    func testAutoProfileTicksSkipSensorReadsAndTelemetryReadsOnDemand() throws {
+        let (backend, daemon) = makeDaemon(celsius: 55)
+        backend.reads = []
+        daemon.tickFanAndAlertsLocked()
+        daemon.tickFanAndAlertsLocked()
+        XCTAssertFalse(backend.reads.contains("Tp01"), "auto, no alerts: nothing needs per-second temperatures")
+
+        XCTAssertEqual(daemon.telemetry().temperatures.first?.celsius ?? -1, 55, accuracy: 0.01, "telemetry reads on demand")
+        backend.reads = []
+        _ = daemon.telemetry()
+        XCTAssertFalse(backend.reads.contains("Tp01"), "a fresh snapshot is reused")
+
+        try daemon.upsertFanCurve(linearSpec(name: "test"), activate: true)
+        backend.reads = []
+        daemon.tickFanAndAlertsLocked()
+        XCTAssertTrue(backend.reads.contains("Tp01"), "curves and the safety guard read every tick")
+    }
+
     func testTelemetryAndCurveDTOsRoundTripOverTheWireFormat() throws {
         let (_, daemon) = makeDaemon(celsius: 70)
         let telemetry = daemon.telemetry()
@@ -593,6 +611,11 @@ private final class PulseFakeSMC: SMCWriteBackend, @unchecked Sendable {
         set { lock.withLock { stored = newValue } }
     }
     var writes: [(key: String, bytes: [UInt8])] = []
+    private var readLog: [String] = []
+    var reads: [String] {
+        get { lock.withLock { readLog } }
+        set { lock.withLock { readLog = newValue } }
+    }
 
     func setTemperature(_ celsius: Double) {
         values["Tp01"] = FanController.float32LittleEndianBytes(Float(celsius))
@@ -613,7 +636,8 @@ private final class PulseFakeSMC: SMCWriteBackend, @unchecked Sendable {
     }
 
     func readValue(_ key: String) throws -> SMCReadValue {
-        SMCReadValue(key: key, info: try readKeyInfo(key), bytes: values[key] ?? [])
+        lock.withLock { readLog.append(key) }
+        return SMCReadValue(key: key, info: try readKeyInfo(key), bytes: values[key] ?? [])
     }
 
     func writeRawValue(_ key: String, bytes: [UInt8]) throws {

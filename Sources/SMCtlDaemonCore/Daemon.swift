@@ -948,7 +948,10 @@ public final class SmctlDaemon: @unchecked Sendable {
     /// early-returns) so temperature/write-error alerts still work there.
     func tickFanAndAlertsLocked() {
         evaluateForegroundDischargeLocked()
-        let samples = temperatureSamplesLocked()
+        // Each SMC read blocks ~0.2 ms on the SMC and wakes the thread: a full
+        // snapshot is ~60 reads. Skip it when nothing consumes per-second
+        // temperatures; telemetry() refreshes on demand instead.
+        let samples = tickNeedsSamplesLocked() ? temperatureSamplesLocked() : []
         evaluateFanSubsystemLocked(samples: samples)
         evaluateAlertsLocked(samples: samples)
     }
@@ -967,11 +970,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         }
         let samples = (providedSamples ?? temperatureSamplesLocked()).filter { $0.celsius.isFinite }
         let profile = currentFanProfileLocked()
-        // "Manual policy active" covers direct manual targets, residual Ftst/manual
-        // modes, and curve profiles (which drive fans via manual mode every tick).
-        let manualPolicyActive = ftstGate.hasManualFans
-            || !manualFanTargets.isEmpty
-            || (profile != "auto" && profile != "manual")
+        let manualPolicyActive = manualPolicyActiveLocked(profile: profile)
 
         // The guard is stateful (latch); it must be evaluated every tick — including
         // with manualPolicyActive == false — so the latch can release after cooling.
@@ -1011,6 +1010,36 @@ public final class SmctlDaemon: @unchecked Sendable {
             logger.error("Fan policy evaluation failed: \(String(describing: error), privacy: .public)")
             SentryReporter.capture(error, context: "Fan policy evaluation failed")
         }
+    }
+
+    /// "Manual policy active" covers direct manual targets, residual Ftst/manual
+    /// modes, and curve profiles (which drive fans via manual mode every tick).
+    func manualPolicyActiveLocked(profile: String) -> Bool {
+        ftstGate.hasManualFans
+            || !manualFanTargets.isEmpty
+            || (profile != "auto" && profile != "manual")
+    }
+
+    /// Whether this tick needs fresh temperatures: the safety guard while fans
+    /// are under manual control or latched (to release it), curves, and alert
+    /// rules. With macOS driving the fans and no alerts, nothing does.
+    func tickNeedsSamplesLocked() -> Bool {
+        guard reader != nil else { return false }
+        return safetyGuard.isLatched
+            || !config.alerts.compactMap(\.rule).isEmpty
+            || (!capabilities.fans.isEmpty && backend != nil && manualPolicyActiveLocked(profile: currentFanProfileLocked()))
+    }
+
+    /// The last snapshot, re-read when older than `maxAge` (ticks skip reading
+    /// when nothing needs per-second temperatures).
+    func freshSnapshotLocked(maxAge: TimeInterval = 1.5) -> SensorSnapshot? {
+        if let snapshot = lastSnapshot, Date().timeIntervalSince(snapshot.timestamp) < maxAge {
+            return snapshot
+        }
+        guard let reader else { return lastSnapshot }
+        let snapshot = reader.snapshot()
+        lastSnapshot = snapshot
+        return snapshot
     }
 
     /// Evaluate alert rules against the current tick's metrics and dispatch any
