@@ -143,6 +143,8 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 
 ### 4c. Déclencheurs selon l'état du système (révisé le 26/11/2026)
 
+> ✅ **Faite le 26/11/2026** (`03d496d`, voir le journal). Concentration reste en option, non développée.
+
 **Ta décision :** pas d'horaires fixes dans le daemon. Le profil suit ce que fait le Mac : un mode Concentration actif, Night Shift, un jeu, la charge, l'économie d'énergie…
 
 **Ce que macOS permet de lire** (testé sur le Mac mini) :
@@ -444,3 +446,47 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
   - **Règle** : rien de bloquant sur le fil principal, même quand on attend l'utilisateur.
 - **CI** (`106f9ec`) : la compilation macOS n'est plus lancée pour les changements de documentation seule (`*.md`, `docs/`, `assets/`, `LICENSE`).
 - **4c recadrée** : Mode Jeu en priorité, puis économie d'énergie et secteur/batterie. Concentration en option, Night Shift abandonné.
+
+### 26/11/2026 : étape 4c terminée (`03d496d`)
+**Constat sur le Mode Jeu** (deux parties avec `scripts/gamemode-probe.sh`) :
+- aucune notification Darwin de `gamepolicyd` reçue ;
+- aucune clé dans le SCDynamicStore ;
+- rien dans le journal système ;
+- et les jeux testés ne déclarent pas la catégorie « jeux » dans leur `Info.plist` (une app iPhone/iPad n'en déclare pas non plus).
+
+macOS n'offre donc **aucun signal fiable**, et sa propre heuristique ne reconnaîtrait même pas ces jeux. **Décision** : la condition est « une de ces apps est ouverte ». Tu choisis tes jeux une fois. Si tu choisis un lanceur, les apps qu'il contient sont reprises aussi (un lanceur peut contenir le vrai jeu).
+
+**Livré :**
+- **Réglages > Automation** :
+  - règles « When ‹condition›, use ‹profile› » ;
+  - activation règle par règle, ordre via « Move Up / Down » ;
+  - ligne d'état (« Now: Performance, because War Thunder is open », ou « Paused after the temperature limit… »).
+- **Conditions** : app ou jeu ouvert ; économie d'énergie ; sur batterie / sur secteur (proposées seulement sur un Mac avec batterie).
+  - Toutes sont observées par notifications système (`NSWorkspace`, `NSProcessInfoPowerStateDidChange`, `IOPSNotificationCreateRunLoopSource`). **Aucun sondage.**
+  - Les règles sont évaluées au rythme du sondage existant du store (2 s), via un crochet `onRefresh`.
+- **`AutomationEngine`** (logique pure) :
+  - une condition doit tenir 5 s avant d'agir ;
+  - la première règle qui correspond l'emporte ;
+  - sans règle active, retour au profil de base ;
+  - un choix manuel (app ou CLI) devient le profil de base et suspend les règles en cours jusqu'à ce que leur condition disparaisse ;
+  - après un déclenchement du garde-fou, les règles sont suspendues jusqu'à ton choix.
+- Les événements du garde-fou sont maintenant diffusés à plusieurs abonnés (notifications et automatisation).
+- 12 nouveaux tests. Au total : 86 tests côté app.
+
+**Ce qui n'a pas marché, et ce qu'on en retient :**
+1. **Course entre la bascule et le sondage.** Juste après une bascule, un sondage pouvait encore rapporter l'ancien profil. Le moteur le prenait pour un choix manuel et suspendait la règle. **Correctif** : il attend que le daemon confirme (10 s au plus). Pendant cette attente, un profil qui n'est ni l'ancien ni le nouveau compte comme un choix manuel. Si le daemon refuse, la bascule est retentée. Les trois cas sont testés.
+2. Un test simulait des dates futures alors que les sondages utilisent l'heure réelle. **Règle** : dans les tests qui mélangent un tick simulé et le vrai sondage, ne simuler que le passé.
+3. Le libellé masqué d'un `Picker` dans une ligne de `Form` prenait de la place et tronquait le texte de la règle. Le libellé est maintenant caché, et le texte a la priorité.
+
+**Test réel contre le daemon** (règle « Échecs ouvert → Performance », retirée ensuite de tes préférences) :
+- Échecs ouvert → Performance en environ 9 s (5 s de stabilisation, plus le sondage) ;
+- Échecs fermé → retour à `balanced-copy` en 2 s ;
+- `pulse fan profile silent` pendant la partie : respecté, puis Silent reste après la fermeture d'Échecs.
+
+**À faire de ton côté** : créer ta règle jeux → Performance (ou une courbe « gaming ») dans Réglages > Automation.
+
+**Mesures :**
+- App réelle au repos, battement coupé : **0,10 % de CPU** (contre 0,33 % avant la 4c), soit aucun coût mesurable de l'automatisation.
+- Avec ton réglage de battement « toujours » : 2,8 %, conforme au coût connu du battement (environ 2,5 %).
+- La mémoire reste à 80 Mo : point toujours ouvert pour la 4f.
+- **Règle** : toujours mesurer avec `--args -menuBarHeartbeat off`. Une mesure lancée par un simple `open` hérite de ton réglage « toujours ».
