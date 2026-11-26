@@ -229,6 +229,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private var tabs: NSTabViewController?
     public let navigation = SettingsNavigation()
+    public static let windowIdentifier = NSUserInterfaceItemIdentifier("PulseSettings")
 
     public init(store: PulseStore) {
         self.store = store
@@ -327,6 +328,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
             }
             let window = NSWindow(contentViewController: tabs)
             window.title = "Pulse Settings"
+            window.identifier = Self.windowIdentifier
             window.styleMask = [.titled, .closable, .miniaturizable]
             window.toolbarStyle = .preference
             window.isReleasedWhenClosed = false

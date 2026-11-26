@@ -72,21 +72,35 @@ public enum ServiceInstaller {
         "\"" + command.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 
+    /// Runs `command` as root after the standard administrator prompt. Runs
+    /// osascript in a child process: NSAppleScript had to run on the main
+    /// thread, which froze the app for as long as the prompt was open.
     private static func runAsAdministrator(_ command: String) throws {
         guard helpersAvailable else {
             throw InstallerError("The bundled \(ProductIdentity.cliName) helpers were not found in \(helpersDirectory.path).")
         }
-        let source = "do shell script \(appleScriptLiteral(command)) with administrator privileges"
-        var errorInfo: NSDictionary?
-        guard let script = NSAppleScript(source: source) else {
-            throw InstallerError("Could not prepare the installer script.")
-        }
-        script.executeAndReturnError(&errorInfo)
-        if let errorInfo {
-            // -128: the user cancelled the password prompt.
-            if (errorInfo[NSAppleScript.errorNumber] as? Int) == -128 { return }
-            throw InstallerError(errorInfo[NSAppleScript.errorMessage] as? String ?? "Installation failed.")
-        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", "do shell script \(appleScriptLiteral(command)) with administrator privileges"]
+        let errors = Pipe()
+        process.standardError = errors
+        process.standardOutput = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus != 0 else { return }
+        let message = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // -128: the user cancelled the password prompt.
+        if message.hasSuffix("(-128)") { return }
+        throw InstallerError(cleanMessage(message))
+    }
+
+    /// "0:42: execution error: Some text (1)" → "Some text".
+    static func cleanMessage(_ message: String) -> String {
+        var text = message
+        if let range = text.range(of: "execution error: ") { text = String(text[range.upperBound...]) }
+        if let range = text.range(of: #" \(-?\d+\)$"#, options: .regularExpression) { text.removeSubrange(range) }
+        return text.isEmpty ? "Installation failed." : text
     }
 }
 

@@ -304,6 +304,11 @@ struct MenuBarRendererTests {
 }
 
 struct ServiceInstallerTests {
+    @Test func osascriptErrorsReadPlainly() {
+        #expect(ServiceInstaller.cleanMessage("0:120: execution error: pulse: daemon install failed (1)") == "pulse: daemon install failed")
+        #expect(ServiceInstaller.cleanMessage("") == "Installation failed.")
+    }
+
     @Test func shellQuotingSurvivesSpacesAndQuotes() {
         #expect(ServiceInstaller.shellCommand(["/Applications/My Apps/Pulse.app/pulse", "daemon", "install"])
             == "'/Applications/My Apps/Pulse.app/pulse' 'daemon' 'install'")

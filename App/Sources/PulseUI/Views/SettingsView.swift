@@ -317,15 +317,21 @@ struct ServiceSettings: View {
         .formStyle(.grouped)
     }
 
-    private func run(_ action: @escaping () throws -> Void) {
+    /// Runs an installer action off the main thread (the administrator prompt
+    /// can stay open for a while), then brings the settings back to the front:
+    /// when the prompt closes, macOS activates the previous app and Pulse,
+    /// which has no Dock icon, would be left hidden behind it.
+    private func run(_ action: @escaping @Sendable () throws -> Void) {
         working = true
         message = nil
         Task { @MainActor in
             do {
-                try action()
+                try await Task.detached { try action() }.value
             } catch {
                 message = error.localizedDescription
             }
+            NSApp.activate()
+            NSApp.windows.first { $0.identifier == SettingsWindowController.windowIdentifier }?.makeKeyAndOrderFront(nil)
             cliLinked = ServiceInstaller.cliLinkInstalled
             await store.refresh(forceLists: true)
             working = false
