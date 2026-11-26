@@ -1136,13 +1136,30 @@ public final class SmctlDaemon: @unchecked Sendable {
             let range = FanSpeedRange(minimumRPM: minimum, maximumRPM: maximum)
             let curve = try curveForProfileLocked(profile, range: range)
             var engine = fanCurveEngines[fan.index] ?? FanCurveEngine()
-            let evaluation = try engine.evaluate(curve: curve, samples: samples, now: Date())
+            var evaluation = try engine.evaluate(curve: curve, samples: samples, now: Date())
             fanCurveEngines[fan.index] = engine
+            if FanCurveHandoff.releasesToSystem(targetRPM: evaluation.targetRPM, range: range) {
+                // At 0% macOS runs the fan: stopped on a cool MacBook, at its
+                // minimum on a Mac mini. Report what macOS asks for, not the floor.
+                if fanIsManualLocked(fan) {
+                    try restoreFansAutoLocked(indices: [fan.index])
+                }
+                evaluation.targetRPM = readNumericLocked(fan.targetKey) ?? 0
+                lastCurveEvaluations[fan.index] = evaluation
+                continue
+            }
             lastCurveEvaluations[fan.index] = evaluation
             let target = min(maximum, max(minimum, evaluation.targetRPM))
             guard fanTargetNeedsWriteLocked(fan: fan, target: target, range: range) else { continue }
             _ = try setManualFanTargetLocked(index: fan.index, rpm: target)
         }
+    }
+
+    /// Unreadable mode counts as manual, so a handoff is never skipped by mistake.
+    private func fanIsManualLocked(_ fan: FanCapability) -> Bool {
+        if ftstGate.manualFanIndices.contains(fan.index) { return true }
+        guard let modeKey = fan.modeKey, let mode = readUInt8Locked(modeKey) else { return true }
+        return mode != FanModeValue.auto.rawValue
     }
 
     func curveForProfileLocked(_ profile: String, range: FanSpeedRange) throws -> FanCurve {

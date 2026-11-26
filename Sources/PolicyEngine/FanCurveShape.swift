@@ -194,6 +194,21 @@ public struct FanSpeedRange: Equatable, Sendable {
     }
 }
 
+// MARK: - Idle handoff
+
+/// A curve at its floor (0%) hands the fan back to macOS instead of holding the
+/// SMC's reported minimum. The minimum is the lowest *spinning* speed: a MacBook
+/// Pro reports 1200 RPM but macOS stops its fans when cool, while a Mac mini
+/// idles at its minimum anyway. Curves with a floor above 0% never hand off.
+public enum FanCurveHandoff {
+    /// Targets under this fraction of the fan's range count as "off".
+    public static let idleFraction = 0.005
+
+    public static func releasesToSystem(targetRPM: Double, range: FanSpeedRange) -> Bool {
+        targetRPM <= range.minimumRPM || range.fraction(forRPM: targetRPM) < idleFraction
+    }
+}
+
 // MARK: - Sensor selection
 
 /// Matches sensor keys against exact names or glob patterns (`*`, `?`),

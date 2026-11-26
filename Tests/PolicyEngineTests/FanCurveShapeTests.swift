@@ -221,6 +221,22 @@ final class FanSpeedRangeTests: XCTestCase {
     }
 }
 
+final class FanCurveHandoffTests: XCTestCase {
+    private let macBookPro = FanSpeedRange(minimumRPM: 1200, maximumRPM: 5779)
+
+    func testTheFloorHandsTheFanToMacOS() {
+        XCTAssertTrue(FanCurveHandoff.releasesToSystem(targetRPM: 1200, range: macBookPro))
+        XCTAssertTrue(FanCurveHandoff.releasesToSystem(targetRPM: 0, range: macBookPro), "below the minimum")
+        XCTAssertTrue(FanCurveHandoff.releasesToSystem(targetRPM: 1210, range: macBookPro), "0.2% is still off")
+    }
+
+    func testAnyRealSpeedKeepsTheCurveInControl() {
+        XCTAssertFalse(FanCurveHandoff.releasesToSystem(targetRPM: 1225, range: macBookPro), "0.5%")
+        XCTAssertFalse(FanCurveHandoff.releasesToSystem(targetRPM: 1658, range: macBookPro), "10% floor (Performance)")
+        XCTAssertFalse(FanCurveHandoff.releasesToSystem(targetRPM: 5779, range: macBookPro))
+    }
+}
+
 final class SensorSelectorTests: XCTestCase {
     func testExactAndGlobMatching() {
         XCTAssertTrue(SensorSelector.matches("Tp09", pattern: "Tp09"))
