@@ -141,6 +141,8 @@ public enum SettingsKey {
     public static let menuBarItems = "menuBarItems"
     public static let temperatureMetric = "temperatureMetric"
     public static let fanSpeedUnit = "fanSpeedUnit"
+    /// Notify when the safety guard hands the fans back to macOS (default on).
+    public static let safetyNotifications = "safetyNotifications"
 }
 
 /// Everything that decides what the menu bar item looks like.

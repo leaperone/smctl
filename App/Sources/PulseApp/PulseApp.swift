@@ -17,11 +17,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = PulseStore()
     private var statusItem: StatusItemController?
     private var settings: SettingsWindowController?
+    private var safetyNotifier: SafetyNotifier?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let settings = SettingsWindowController(store: store)
         self.settings = settings
         statusItem = StatusItemController(store: store) { settings.show($0) }
+        safetyNotifier = SafetyNotifier(store: store)
         store.start()
     }
 

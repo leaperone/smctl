@@ -30,7 +30,7 @@ public enum SettingsPane: String, CaseIterable, Sendable {
     /// window (it jumped between very different sizes). Fixed because a
     /// grouped Form has no reliable intrinsic height, and an unsized pane was
     /// laid out empty until the user switched tabs.
-    public var size: CGSize { CGSize(width: 780, height: 720) }
+    public var size: CGSize { CGSize(width: 780, height: 760) }
 }
 
 public struct SettingsView: View {
@@ -67,6 +67,7 @@ struct GeneralSettings: View {
     @AppStorage(SettingsKey.menuBarItems) private var itemsText = MenuBarConfiguration.encodeItems(MenuBarConfiguration.defaultItems)
     @AppStorage(SettingsKey.temperatureMetric) private var metric: TemperatureMetric = .cpuAverage
     @AppStorage(SettingsKey.fanSpeedUnit) private var unit: FanSpeedUnit = .rpm
+    @AppStorage(SettingsKey.safetyNotifications) private var safetyNotifications = true
     @State private var launchAtLogin = ServiceInstaller.launchesAtLogin
     @State private var loginError: String?
 
@@ -135,6 +136,10 @@ struct GeneralSettings: View {
                 }
             }
             Section {
+                Toggle(isOn: $safetyNotifications) {
+                    Text("Notify when the temperature limit is reached")
+                    Text("If a sensor stays above the safety limit, Pulse hands the fans back to macOS and tells you; another notification follows once it cools down.")
+                }
                 Toggle("Open Pulse at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in
                         do {

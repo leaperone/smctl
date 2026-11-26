@@ -60,6 +60,9 @@ public final class PulseStore {
     /// Only reassigned when it changes, so the menu bar item redraws rarely.
     public private(set) var menuBar = MenuBarState()
     public var actionError: String?
+    /// Called on each change of the daemon's safety guard (see `SafetyNotifier`).
+    @ObservationIgnored public var onSafetyEvent: (@MainActor (SafetyEvent) -> Void)?
+    @ObservationIgnored private var safetyTracker = SafetyAlertTracker()
 
     @ObservationIgnored private let service: any PulseService
     @ObservationIgnored private let fallback: DirectSensorService?
@@ -120,6 +123,7 @@ public final class PulseStore {
         switch result {
         case .success(let telemetry):
             self.telemetry = telemetry
+            if let event = safetyTracker.update(telemetry) { onSafetyEvent?(event) }
             assignIfChanged(\.daemonState, .connected(version: telemetry.daemonVersion))
         case .failure(let error):
             assignIfChanged(\.daemonState, .unavailable(message: Self.describe(error)))
