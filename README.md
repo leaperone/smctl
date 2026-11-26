@@ -147,7 +147,11 @@ Safety  ok · ceiling 100.0 °C (hot-spots 110.0 °C)
 
 ## Install (from source)
 
-Requires Xcode 26 or later and an Apple silicon Mac.
+Requires Xcode 26 or later and an Apple silicon Mac. The Command Line Tools alone are not enough: SwiftUI's macros (`@State`, …) ship only with Xcode. If `xcode-select -p` prints `/Library/Developer/CommandLineTools`, `build-app.sh` uses Xcode for the build anyway. To make Xcode the default:
+
+```console
+$ sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
 
 ```console
 $ git clone https://github.com/fstormacq/pulse && cd pulse

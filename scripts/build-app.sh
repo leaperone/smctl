@@ -10,6 +10,22 @@ BUILD="$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo 1)"
 APP="$ROOT/dist/Pulse.app"
 CONTENTS="$APP/Contents"
 
+# SwiftUI's macros (@State, …) ship only with Xcode, not the Command Line Tools.
+# Use Xcode for this build if the active developer directory is the CLT.
+DEV_DIR="$(xcode-select -p 2>/dev/null || true)"
+if [[ "$DEV_DIR" != *.app/Contents/Developer ]]; then
+    XCODE="$(mdfind "kMDItemCFBundleIdentifier == 'com.apple.dt.Xcode'" 2>/dev/null | head -n 1)"
+    [[ -z "$XCODE" && -d /Applications/Xcode.app ]] && XCODE=/Applications/Xcode.app
+    if [[ -z "$XCODE" ]]; then
+        echo "error: Pulse needs Xcode 26 or later; the Command Line Tools alone can't build the app." >&2
+        echo "       Install Xcode, then run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer" >&2
+        exit 1
+    fi
+    export DEVELOPER_DIR="$XCODE/Contents/Developer"
+    echo "==> Active developer directory is ${DEV_DIR:-unset}; using $XCODE for this build"
+    echo "    (to make it the default: sudo xcode-select -s $DEVELOPER_DIR)"
+fi
+
 echo "==> Building pulse and pulsed"
 swift build -c release --package-path "$ROOT"
 echo "==> Building Pulse"
