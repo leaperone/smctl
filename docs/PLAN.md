@@ -79,6 +79,8 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 - PulseBench : ajout des phases « onglet Courbes ouvert » et « refermé ».
 
 ### 3b. Modèle `CurveDraft` (logique, sans interface)
+
+> ✅ **Faite le 26/11/2026** (voir le journal).
 - L'état comprend la spec en cours, la spec d'origine, `isDirty`, l'erreur de validation et un nom technique dérivé du libellé (`Night mode` → `night-mode`, unique, jamais un nom réservé).
 - Opérations :
   - changer de forme, en gardant start, end, min et max ;
@@ -184,3 +186,21 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 - 3b/3c : l'éditeur remplace le résumé dans `CurveDetail`, pour les courbes perso uniquement. Les presets restent en lecture seule, avec Dupliquer.
 - 3e : vérifier si le daemon recharge une courbe active qu'on enregistre sans `activate` (`upsertFanCurve` n'appelle `setFanProfile` que si `activate` est vrai). Si ce n'est pas le cas, réactiver la courbe après l'enregistrement.
 - 3f : ajouter au bench un glisser simulé et une vérification automatique qu'aucune `NSHostingView` ne survit à la fermeture.
+
+### 26/11/2026 : étape 3b terminée
+**Livré :** `CurveDraft`, un modèle d'édition sans interface (type valeur). Chaque opération borne ses entrées au lieu d'échouer, si bien que le brouillon reste toujours accepté par le daemon.
+- **Formes** : changement de famille en gardant la rampe ; poignées début (°C, min %) et fin (°C, max %) bornées entre 30 et 110 °C, avec au moins 2 °C de rampe et min ≤ max ; raideur entre 0 et 30 au dixième près ; 1 à 20 paliers.
+- **Conversion en points** : les extrémités de la rampe, plus les points où la forme s'écarte le plus de son approximation (simplification gloutonne). Écart mesuré inférieur à 2 % sur 30–110 °C pour les trois presets. Les paliers ont leur propre conversion, exacte.
+- **Points** : déplacement borné entre les voisins (0,5 °C d'écart minimum), ajout refusé trop près d'un autre point, au moins 2 points et au plus 24. Les configs écrites à la main (RPM, `max`, désordre) sont relues en %.
+- **Capteurs** : groupes CPU, GPU et boîtier ; « hottest » ou « average » (poids égaux, `*` pour tous) ; les clés personnalisées sont conservées.
+- **Réponse** : hystérésis (0–20 °C), montée et descente en %/s (0 = immédiat ; les vitesses en RPM sont converties), lissage (0–120 s).
+- **Tests** : 11 nouveaux, dont un test aléatoire (200 séquences de 30 éditions, relancé 15 fois sans échec) qui vérifie que la courbe reste valide.
+
+**Ce qui n'a pas marché, et ce qu'on en retient :**
+1. Le test aléatoire a trouvé un cas : ajouter un point sur une *forme* donnait une courbe d'un seul point, refusée par le daemon. Les opérations sur les points sont désormais réservées aux courbes en points. **Pour 3c** : un double-clic sur une forme propose d'abord de la convertir en points.
+2. Les contremarches des paliers compilés (1 % de la plage, soit 0,3 °C) étaient plus étroites que l'écart minimal entre points. Elles auraient été supprimées : d'où la conversion dédiée, avec des contremarches de 0,5 °C.
+3. Annuler et rétablir est laissé à l'interface (3c) : le modèle étant un type valeur, il suffit d'enregistrer la spec précédente dans l'`UndoManager`, en un seul groupe par glisser.
+4. Le push vers GitHub échoue : le jeton `gh` est devenu invalide après la reconnexion, et le trousseau macOS est inaccessible depuis cette session. Les commits restent en local jusqu'à ta reconnexion (`gh auth login`).
+
+**Ajustements :**
+- 3c : la plage de température affichée passe de 40–110 à 30–110 °C pour correspondre aux bornes du modèle.
