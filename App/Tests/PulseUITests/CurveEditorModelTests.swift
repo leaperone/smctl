@@ -106,4 +106,34 @@ struct CurveEditorModelTests {
         #expect(rpm == [1000, 2000, 3000, 4000])
         #expect(EditableCurveChart.rpmTicks(FanSpeedRange(minimumRPM: 1200, maximumRPM: 2800)).count == 3, "500 RPM steps when narrow")
     }
+
+    @Test func aSliderGestureIsOneUndoStep() {
+        let (model, undo) = makeModel()
+        step(undo) {
+            model.beginContinuousEdit()
+            for value in [9.0, 11.5, 13, 14.3] {
+                model.edit("Change Steepness") { $0.setSteepness(value) }
+            }
+            model.endContinuousEdit("Change Steepness")
+        }
+        #expect(model.draft.spec.shape?.steepness == 14.3)
+        #expect(undo.undoActionName == "Change Steepness")
+        undo.undo()
+        #expect(model.draft.spec.shape?.steepness == 8, "one undo returns to before the gesture")
+        #expect(!undo.canUndo)
+    }
+
+    /// Charts morphs a line between updates; a changing point count turned
+    /// the curve into spikes while the steepness slider moved.
+    @Test func drawnLineKeepsItsPointCountAcrossSteepness() {
+        let (model, _) = makeModel()
+        let counts = Set(stride(from: 0.5, through: 20, by: 0.5).map { value -> Int in
+            model.edit("Change Steepness") { $0.setSteepness(value) }
+            return EditableCurveChart.displayLine(model.draft).count
+        })
+        #expect(counts == [161])
+        let line = EditableCurveChart.displayLine(model.draft)
+        #expect(line.first?.celsius == CurveDraft.temperatureRange.lowerBound)
+        #expect(line.last?.celsius == CurveDraft.temperatureRange.upperBound)
+    }
 }

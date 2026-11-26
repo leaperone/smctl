@@ -1,4 +1,5 @@
 import AppKit
+import PolicyEngine
 import PulseUI
 import SMCtlClient
 import SwiftUI
@@ -78,6 +79,16 @@ func main() async {
             await render(SettingsView(store: store, pane: .curves, navigation: SettingsNavigation(selectedCurve: curve)), scheme: scheme,
                          to: output.appendingPathComponent("settings-\(name)-\(scheme == .dark ? "dark" : "light").png"))
         }
+    }
+    // The exact-position label shown on the selected (or dragged) point.
+    var labelled = FanCurvePresets.balanced
+    labelled.name = "labelled"
+    let labelledModel = CurveEditorModel(spec: labelled, range: FanSpeedRange(minimumRPM: 1000, maximumRPM: 4900))
+    labelledModel.setKind(nil)
+    labelledModel.selectedPoint = 1
+    for scheme in [ColorScheme.light, .dark] {
+        await render(CurveEditor(model: labelledModel, unit: .constant(.percent), hasFanRange: true).frame(width: 530).padding(20), scheme: scheme,
+                     to: output.appendingPathComponent("editor-label-\(scheme == .dark ? "dark" : "light").png"))
     }
     for scheme in [ColorScheme.light, .dark] {
         await render(SettingsView(store: normal, pane: .general), scheme: scheme, to: output.appendingPathComponent("settings-\(scheme == .dark ? "dark" : "light").png"))

@@ -13,7 +13,7 @@ struct CurveSettingsForm: View {
         VStack(alignment: .leading, spacing: 8) {
             Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
                 GridRow {
-                    label("Sensors")
+                    label("Sensors", info: CurveHelp.sensors)
                     HStack(spacing: 14) {
                         ForEach(SensorGroup.allCases) { group in
                             Toggle(group.title, isOn: sensorBinding(group))
@@ -26,15 +26,20 @@ struct CurveSettingsForm: View {
                         }
                         Spacer(minLength: 8)
                         Picker("Use", selection: aggregationBinding) {
-                            ForEach(SensorAggregation.allCases) { Text($0.title).tag($0) }
+                            Text("Hottest").tag(SensorAggregation.hottest)
+                            Text("Average").tag(SensorAggregation.average)
                         }
+                        .pickerStyle(.segmented)
+                        .controlSize(.small)
                         .labelsHidden()
+                        .controlSize(.small)
                         .fixedSize()
+                        InfoButton("Hottest or average", CurveHelp.aggregation)
                     }
                     .gridCellColumns(3)
                 }
                 GridRow {
-                    label("Speed up")
+                    label("Speed up", info: CurveHelp.rates)
                     valueStepper(rateText(draft.riseRatePercent), value: draft.riseRatePercent ?? 0, range: 0...50, step: 1) { value in
                         model.edit("Change Speed-Up Rate") { $0.setRiseRate(percentPerSecond: value > 0 ? value : nil) }
                     }
@@ -45,26 +50,29 @@ struct CurveSettingsForm: View {
                 }
                 if draft.spec.reachesZero {
                     GridRow {
-                        label("At 0 %")
+                        label("At 0 %", info: CurveHelp.idle)
                         Picker("At 0 %", selection: Binding(get: { draft.spec.idle }, set: { idle in
                             model.edit("Change Behaviour at 0 %") { $0.setIdle(idle) }
                         })) {
-                            Text("macOS decides").tag(FanCurveIdle.system)
-                            Text("Minimum speed").tag(FanCurveIdle.minimum)
-                            Text("Stopped (experimental)").tag(FanCurveIdle.off)
+                            Text("macOS").tag(FanCurveIdle.system)
+                            Text("Minimum").tag(FanCurveIdle.minimum)
+                            Text("Stopped").tag(FanCurveIdle.off)
                         }
+                        .pickerStyle(.segmented)
+                        .controlSize(.small)
                         .labelsHidden()
+                        .controlSize(.small)
                         .fixedSize()
                         .gridCellColumns(3)
                     }
                 }
                 GridRow {
-                    label("Hysteresis")
+                    label("Hysteresis", info: CurveHelp.hysteresis)
                     valueStepper(draft.spec.hysteresisCelsius > 0 ? "\(CurveSummary.number(draft.spec.hysteresisCelsius)) °C" : "None",
                                  value: draft.spec.hysteresisCelsius, range: 0...20, step: 0.5) { value in
                         model.edit("Change Hysteresis") { $0.setHysteresis(value) }
                     }
-                    label("Smoothing")
+                    label("Smoothing", info: CurveHelp.smoothing)
                     valueStepper((draft.spec.smoothingSeconds ?? 0) > 0 ? "\(CurveSummary.number(draft.spec.smoothingSeconds ?? 0)) s" : "None",
                                  value: draft.spec.smoothingSeconds ?? 0, range: 0...60, step: 1) { value in
                         model.edit("Change Smoothing") { $0.setSmoothing(seconds: value) }
@@ -99,8 +107,11 @@ struct CurveSettingsForm: View {
         return text
     }
 
-    private func label(_ text: String) -> some View {
-        Text(text).foregroundStyle(.secondary)
+    private func label(_ text: String, info: String? = nil) -> some View {
+        HStack(spacing: 3) {
+            Text(text).foregroundStyle(.secondary)
+            if let info { InfoButton(text, info) }
+        }
     }
 
     private func sensorBinding(_ group: SensorGroup) -> Binding<Bool> {
@@ -134,6 +145,7 @@ struct CurveSettingsForm: View {
                 .frame(width: 72, alignment: .trailing)
             Stepper(text, value: Binding(get: { value }, set: set), in: range, step: step)
                 .labelsHidden()
+                .controlSize(.small)
         }
     }
 }

@@ -18,6 +18,8 @@ struct CurvesSettings: View {
     @State private var renaming: FanCurveSpec?
     @State private var renameText = ""
     @State private var deleting: String?
+    /// Leaving a curve whose edits could not be saved.
+    @State private var unsavable = false
 
     private var entries: [FanCurveEntryDTO] { store.curveEntries }
     private var presets: [FanCurveEntryDTO] { entries.filter(\.builtin) }
@@ -51,20 +53,21 @@ struct CurvesSettings: View {
         .onChange(of: navigation.selectedCurve) { loadEditor() }
         .onChange(of: selectedEntry?.spec) { _, saved in reconcile(with: saved) }
         .onChange(of: undoManager) { editor?.undoManager = undoManager }
-        .alert(pendingTitle, isPresented: Binding(get: { navigation.pending != nil }, set: { if !$0 { navigation.cancelPending() } })) {
-            Button("Save") {
-                Task {
-                    if await save(activate: false) { navigation.confirmPending() } else { navigation.cancelPending() }
-                }
+        .onChange(of: navigation.pending) { _, pending in
+            guard pending != nil else { return }
+            // Leaving a curve saves it; ask only when that fails.
+            Task {
+                if await save(activate: false) { navigation.confirmPending() } else { unsavable = true }
             }
-            .disabled(editor?.draft.validationError != nil)
-            Button("Don't Save", role: .destructive) {
+        }
+        .alert(pendingTitle, isPresented: $unsavable) {
+            Button("Discard Changes", role: .destructive) {
                 editor?.revert()
                 navigation.confirmPending()
             }
-            Button("Cancel", role: .cancel) { navigation.cancelPending() }
+            Button("Keep Editing", role: .cancel) { navigation.cancelPending() }
         } message: {
-            Text("Your changes are lost if you don't save them.")
+            Text(saveError ?? editor?.draft.validationError ?? "")
         }
         .alert("Rename Curve", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("Name", text: $renameText)
@@ -95,7 +98,7 @@ struct CurvesSettings: View {
     }
 
     private var pendingTitle: String {
-        "Save changes to “\(editor?.draft.spec.label ?? navigation.selectedCurve ?? "")”?"
+        "Changes to “\(editor?.draft.spec.label ?? navigation.selectedCurve ?? "")” can't be saved"
     }
 
     // MARK: Sidebar

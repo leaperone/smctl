@@ -26,16 +26,11 @@ public enum SettingsPane: String, CaseIterable, Sendable {
         }
     }
 
-    /// Fixed sizes: a grouped Form has no reliable intrinsic height, and an
-    /// unsized pane was laid out empty until the user switched tabs.
-    public var size: CGSize {
-        switch self {
-        case .general: return CGSize(width: 500, height: 720)
-        case .curves: return CGSize(width: 780, height: 700)
-        case .service: return CGSize(width: 500, height: 420)
-        case .about: return CGSize(width: 500, height: 300)
-        }
-    }
+    /// One fixed size for every pane, so switching tabs doesn't resize the
+    /// window (it jumped between very different sizes). Fixed because a
+    /// grouped Form has no reliable intrinsic height, and an unsized pane was
+    /// laid out empty until the user switched tabs.
+    public var size: CGSize { CGSize(width: 780, height: 720) }
 }
 
 public struct SettingsView: View {

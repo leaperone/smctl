@@ -37,7 +37,7 @@ public final class CurveEditorModel {
     public func edit(_ name: String, _ change: (inout CurveDraft) -> Void) {
         let before = draft.spec
         change(&draft)
-        if draft.spec != before {
+        if draft.spec != before, continuousOrigin == nil {
             registerUndo(restoring: before, name: name)
         }
         clampSelection()
@@ -99,6 +99,21 @@ public final class CurveEditorModel {
     /// Keeps the edits on top of the new saved version (saving overwrites it).
     public func keepEdits(over saved: FanCurveSpec) {
         draft.rebase(onto: saved)
+    }
+
+    // MARK: Continuous edits
+
+    @ObservationIgnored private var continuousOrigin: FanCurveSpec?
+
+    /// Starts a slider gesture: its many edits become one undo step.
+    public func beginContinuousEdit() {
+        continuousOrigin = draft.spec
+    }
+
+    public func endContinuousEdit(_ name: String) {
+        defer { continuousOrigin = nil }
+        guard let origin = continuousOrigin, origin != draft.spec else { return }
+        registerUndo(restoring: origin, name: name)
     }
 
     // MARK: Dragging

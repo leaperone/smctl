@@ -99,11 +99,14 @@ public struct CurveEditor: View {
                     Text("Steepness").foregroundStyle(.secondary)
                     Slider(value: Binding(get: { shape.steepness }, set: { value in
                         model.edit("Change Steepness") { $0.setSteepness(value) }
-                    }), in: 0.5...20)
+                    }), in: 0.5...20) { editing in
+                        if editing { model.beginContinuousEdit() } else { model.endContinuousEdit("Change Steepness") }
+                    }
                     .frame(width: 140)
                     Text(String(format: "%.1f", shape.steepness))
                         .monospacedDigit()
                         .frame(width: 32, alignment: .trailing)
+                    InfoButton("Steepness", CurveHelp.steepness)
                 }
                 .font(.callout)
             }
@@ -152,7 +155,26 @@ struct EditableCurveChart: View {
 
     static let temperatures = CurveDraft.temperatureRange
 
-    private var line: [(celsius: Double, percent: Double)] { model.draft.outline }
+    /// Smooth shapes are drawn from a fixed grid (every 0.5 °C), so the line
+    /// always has the same points: when the point count changed (adaptive
+    /// sampling), Charts morphed between paths of different lengths and the
+    /// curve briefly turned into spikes while the steepness slider moved.
+    static func displayLine(_ draft: CurveDraft) -> [(celsius: Double, percent: Double)] {
+        guard let shape = draft.spec.shape, shape.kind != .steps else { return draft.outline }
+        return stride(from: temperatures.lowerBound, through: temperatures.upperBound, by: 0.5).map {
+            ($0, draft.percent(at: $0))
+        }
+    }
+
+    private var line: [(offset: Int, celsius: Double, percent: Double)] {
+        Self.displayLine(model.draft).enumerated().map { ($0.offset, $0.element.celsius, $0.element.percent) }
+    }
+
+    /// The handle whose exact position is shown: dragged, else hovered, else
+    /// the selected point.
+    private var labelledHandle: EditorHandle? {
+        model.dragging ?? hovered ?? model.selectedPoint.map { .point($0) }
+    }
 
     /// Plot area of the axes layer, in this view's coordinates.
     @State private var plotRect: CGRect = .zero
@@ -185,7 +207,7 @@ struct EditableCurveChart: View {
     private var marks: some View {
         let handles = model.handles
         return Chart {
-            ForEach(line, id: \.celsius) { point in
+            ForEach(line, id: \.offset) { point in
                 AreaMark(x: .value("Temperature", point.celsius), y: .value("Fan speed", point.percent))
                     .foregroundStyle(Color.accentColor.opacity(0.12))
                 LineMark(x: .value("Temperature", point.celsius), y: .value("Fan speed", point.percent))
@@ -210,6 +232,7 @@ struct EditableCurveChart: View {
                     .foregroundStyle(Color.accentColor)
             }
         }
+        .transaction { $0.animation = nil }
         .chartXScale(domain: Self.temperatures)
         .chartYScale(domain: 0...100)
         .chartXAxis(.hidden)
@@ -255,6 +278,16 @@ struct EditableCurveChart: View {
                     }
                     .pointerStyle(model.dragging != nil ? .grabActive : (hovered != nil ? .grabIdle : nil))
                 accessibilityHandles(positions: positions)
+                if let handle = labelledHandle, let item = handles.first(where: { $0.handle == handle }),
+                   let position = positions.first(where: { $0.0 == handle })?.1 {
+                    // Above the handle (below it near the top), kept inside the plot.
+                    coordinateLabel(celsius: item.celsius, percent: item.percent)
+                        .fixedSize()
+                        .position(x: min(max(position.x, plot.minX + 50), plot.maxX - 50),
+                                  y: position.y < plot.minY + 40 ? position.y + 22 : position.y - 22)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
             }
     }
 
@@ -289,6 +322,16 @@ struct EditableCurveChart: View {
 
     // MARK: Appearance
 
+    private func coordinateLabel(celsius: Double, percent: Double) -> some View {
+        Text(describe(celsius: celsius, percent: percent))
+            .font(.caption.weight(.medium))
+            .monospacedDigit()
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(.separator))
+    }
+
     private func isSelected(_ handle: EditorHandle) -> Bool {
         if case .point(let index) = handle { return model.selectedPoint == index }
         return false
@@ -306,9 +349,10 @@ struct EditableCurveChart: View {
         return stride(from: first, through: range.maximumRPM, by: step).map { range.fraction(forRPM: $0) * 100 }
     }
 
-    private func describe(_ handle: EditorHandle, celsius: Double, percent: Double) -> String {
+    /// "67.5 °C · 40 %" (half degrees are shown: drags snap to 0.5 °C).
+    private func describe(celsius: Double, percent: Double) -> String {
         let speed = unit == .rpm ? "\(Format.rpm(model.draft.range.rpm(forFraction: percent / 100))) RPM" : "\(Int(percent.rounded())) %"
-        return "\(Int(celsius.rounded())) °C, \(speed)"
+        return "\(CurveSummary.number((celsius * 2).rounded() / 2)) °C · \(speed)"
     }
 
     // MARK: Accessibility
@@ -324,7 +368,7 @@ struct EditableCurveChart: View {
                 .allowsHitTesting(false)
                 .accessibilityElement()
                 .accessibilityLabel(name(of: item.handle))
-                .accessibilityValue(describe(item.handle, celsius: item.celsius, percent: item.percent))
+                .accessibilityValue(describe(celsius: item.celsius, percent: item.percent))
                 .accessibilityAdjustableAction { direction in
                     nudge(item.handle, celsius: direction == .increment ? 1 : -1, percent: 0)
                 }

@@ -234,68 +234,66 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.store = store
     }
 
-    /// Asks before quitting over unsaved curve edits; `reply(true)` lets the
-    /// app quit (after saving or discarding).
+    /// Saves unsaved curve edits before quitting; `reply(true)` lets the app
+    /// quit. Only edits that cannot be saved (invalid curve, daemon error)
+    /// make it ask.
     public func confirmTermination(_ reply: @escaping @MainActor (Bool) -> Void) {
         guard navigation.hasUnsavedEdits, let editor = navigation.editor else {
             reply(true)
             return
         }
-        show(.curve(nil))
-        let alert = NSAlert()
-        alert.messageText = "Save changes to “\(editor.draft.spec.label ?? editor.draft.spec.name)” before quitting?"
-        alert.informativeText = "Your changes are lost if you don't save them."
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Don't Save").hasDestructiveAction = true
-        alert.addButton(withTitle: "Cancel")
-        alert.buttons[0].isEnabled = editor.draft.validationError == nil
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            let spec = editor.draft.spec
-            Task { @MainActor in
-                let saved = await store.save(spec, activate: false)
-                if saved { editor.reload(spec: spec, range: editor.draft.range) }
-                reply(saved)
+        Task { @MainActor in
+            if await autosave(editor) {
+                reply(true)
+                return
             }
-        case .alertSecondButtonReturn:
-            editor.revert()
-            reply(true)
-        default:
-            reply(false)
+            show(.curve(nil))
+            reply(unsavableAlert(editor, quitting: true).runModal() == .alertFirstButtonReturn && discard(editor))
         }
     }
 
-    /// Asks before closing over unsaved curve edits.
+    /// Saves unsaved curve edits, then closes; asks only when they cannot be
+    /// saved.
     public func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard navigation.hasUnsavedEdits, let editor = navigation.editor else { return true }
-        let alert = NSAlert()
-        alert.messageText = "Save changes to “\(editor.draft.spec.label ?? editor.draft.spec.name)”?"
-        alert.informativeText = "Your changes are lost if you don't save them."
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Don't Save").hasDestructiveAction = true
-        alert.addButton(withTitle: "Cancel")
-        alert.buttons[0].isEnabled = editor.draft.validationError == nil
-        alert.beginSheetModal(for: sender) { [weak self, weak sender] response in
-            MainActor.assumeIsolated {
-                guard let self, let sender else { return }
-                switch response {
-                case .alertFirstButtonReturn:
-                    let spec = editor.draft.spec
-                    Task { @MainActor in
-                        if await self.store.save(spec, activate: false) {
-                            editor.reload(spec: spec, range: editor.draft.range)
-                            sender.close()
-                        }
-                    }
-                case .alertSecondButtonReturn:
-                    editor.revert()
-                    sender.close()
-                default:
-                    break
+        Task { @MainActor [weak self, weak sender] in
+            guard let self, let sender else { return }
+            if await self.autosave(editor) {
+                sender.close()
+                return
+            }
+            self.unsavableAlert(editor, quitting: false).beginSheetModal(for: sender) { [weak self, weak sender] response in
+                MainActor.assumeIsolated {
+                    if response == .alertFirstButtonReturn, let self, self.discard(editor) { sender?.close() }
                 }
             }
         }
         return false
+    }
+
+    /// Saves the editor's draft as is; false when it is invalid or the
+    /// daemon refused it.
+    private func autosave(_ editor: CurveEditorModel) async -> Bool {
+        guard editor.draft.validationError == nil else { return false }
+        let spec = editor.draft.spec
+        guard await store.save(spec, activate: false) else { return false }
+        editor.reload(spec: spec, range: editor.draft.range)
+        return true
+    }
+
+    private func discard(_ editor: CurveEditorModel) -> Bool {
+        editor.revert()
+        return true
+    }
+
+    private func unsavableAlert(_ editor: CurveEditorModel, quitting: Bool) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = "Changes to “\(editor.draft.spec.label ?? editor.draft.spec.name)” can't be saved"
+        alert.informativeText = (editor.draft.validationError ?? store.actionError ?? "The Pulse service refused them.")
+            + (quitting ? "\n\nQuit anyway and lose them?" : "\n\nClose anyway and lose them?")
+        alert.addButton(withTitle: quitting ? "Quit and Discard" : "Discard").hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+        return alert
     }
 
     public func windowWillClose(_ notification: Notification) {
