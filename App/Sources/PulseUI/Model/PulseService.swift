@@ -13,12 +13,13 @@ public protocol PulseService: Sendable {
     func upsert(_ spec: FanCurveSpec, activate: Bool) throws
     func delete(curve name: String) throws
     func conflicts() -> [FanControlConflict]
-    /// The daemon's `[fan] interval`, 1 to 5 seconds between sensor reads.
-    func setSamplingInterval(_ seconds: Int) throws
+    /// The daemon's `[fan] interval` (or `battery_interval`), 1 to 5 seconds
+    /// between sensor reads; nil on battery means "same as on the adapter".
+    func setSamplingInterval(_ seconds: Int?, onBattery: Bool) throws
 }
 
 extension PulseService {
-    public func setSamplingInterval(_ seconds: Int) throws {
+    public func setSamplingInterval(_ seconds: Int?, onBattery: Bool) throws {
         throw CocoaError(.featureUnsupported)
     }
 }
@@ -51,7 +52,9 @@ public final class DaemonPulseService: PulseService, @unchecked Sendable {
     public func upsert(_ spec: FanCurveSpec, activate: Bool) throws { try withClient { try $0.upsertFanCurve(spec, activate: activate) } }
     public func delete(curve name: String) throws { try withClient { try $0.deleteFanCurve(named: name) } }
     public func conflicts() -> [FanControlConflict] { FanControlConflicts.detect() }
-    public func setSamplingInterval(_ seconds: Int) throws { try withClient { try $0.setSamplingInterval(seconds: seconds) } }
+    public func setSamplingInterval(_ seconds: Int?, onBattery: Bool) throws {
+        try withClient { try $0.setSamplingInterval(seconds: seconds, onBattery: onBattery) }
+    }
 }
 
 /// Read-only fallback when the daemon is not installed: reads the SMC directly,

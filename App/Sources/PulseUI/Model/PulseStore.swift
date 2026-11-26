@@ -116,17 +116,27 @@ public final class PulseStore {
         return .milliseconds(Int(max(0.5, value) * 1000))
     }()
 
-    /// The daemon's sensor interval (1–5 s), nil without a daemon or from one
-    /// that predates the setting.
+    /// The daemon's sensor interval on the adapter (1–5 s), nil without a
+    /// daemon or from one that predates the setting.
     public var samplingInterval: Int? {
         daemonState.isConnected ? telemetry?.samplingInterval : nil
+    }
+
+    /// The interval on battery; nil when it follows the adapter's.
+    public var batterySamplingInterval: Int? {
+        daemonState.isConnected ? telemetry?.batterySamplingInterval : nil
+    }
+
+    /// The interval in effect now (depends on the power source).
+    public var currentSamplingInterval: Int? {
+        daemonState.isConnected ? telemetry?.currentSamplingInterval : nil
     }
 
     /// Polls follow the daemon's interval: asking more often would only
     /// return the same readings. Without one, 2 s (1 s with the popover open).
     var pollInterval: Duration {
         if let pollOverride { return pollOverride }
-        if let samplingInterval { return .seconds(samplingInterval) }
+        if let currentSamplingInterval { return .seconds(currentSamplingInterval) }
         return isPopoverOpen ? .seconds(1) : .seconds(2)
     }
 
@@ -233,8 +243,8 @@ public final class PulseStore {
     }
 
     @discardableResult
-    public func setSamplingInterval(_ seconds: Int) async -> Bool {
-        await perform { try $0.setSamplingInterval(seconds) }
+    public func setSamplingInterval(_ seconds: Int?, onBattery: Bool = false) async -> Bool {
+        await perform { try $0.setSamplingInterval(seconds, onBattery: onBattery) }
     }
 
     @discardableResult

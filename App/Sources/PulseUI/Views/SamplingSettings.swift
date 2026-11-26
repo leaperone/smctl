@@ -1,48 +1,42 @@
 import SwiftUI
 
-/// "Refresh every 1–5 s": the daemon's sensor interval, which also paces the app.
-/// The slider commits once it settles, so dragging sends one change, not five.
-struct SamplingSettings: View {
+/// "Refresh every 1–5 s": the daemon's sensor interval, which also paces the
+/// app. On a Mac with a battery, an optional second interval applies on
+/// battery; the daemon switches on its own, even with the app closed.
+public struct SamplingSettings: View {
     let store: PulseStore
-    @State private var draft: Double = 2
-    @State private var editing = false
+    let hasBattery: Bool
 
     static let range = 1...5
 
-    var body: some View {
+    public init(store: PulseStore, hasBattery: Bool? = nil) {
+        self.store = store
+        self.hasBattery = hasBattery ?? AutomationController.hasInternalBattery()
+    }
+
+    public var body: some View {
         Section("Sensors") {
             if let interval = store.samplingInterval {
-                LabeledContent("Refresh every") {
-                    HStack(spacing: 10) {
-                        Slider(value: $draft, in: Double(Self.range.lowerBound)...Double(Self.range.upperBound), step: 1) {
-                            Text("Refresh every")
-                        } minimumValueLabel: {
-                            Text("\(Self.range.lowerBound) s").font(.caption).foregroundStyle(.secondary)
-                        } maximumValueLabel: {
-                            Text("\(Self.range.upperBound) s").font(.caption).foregroundStyle(.secondary)
-                        } onEditingChanged: { isEditing in
-                            editing = isEditing
+                IntervalSlider(title: hasBattery ? "On power adapter" : "Refresh every", value: interval) { seconds in
+                    await store.setSamplingInterval(seconds)
+                }
+                if hasBattery {
+                    Toggle(isOn: Binding(
+                        get: { store.batterySamplingInterval != nil },
+                        set: { enabled in
+                            Task { await store.setSamplingInterval(enabled ? min(interval + 2, Self.range.upperBound) : nil, onBattery: true) }
                         }
-                        .labelsHidden()
-                        .frame(width: 220)
-                        Text("\(Int(draft)) s")
-                            .monospacedDigit()
-                            .frame(width: 32, alignment: .trailing)
+                    )) {
+                        Text("Different pace on battery")
+                        Text("The service switches as soon as you unplug or plug in, even with Pulse closed.")
+                    }
+                    if let battery = store.batterySamplingInterval {
+                        IntervalSlider(title: "On battery", value: battery) { seconds in
+                            await store.setSamplingInterval(seconds, onBattery: true)
+                        }
                     }
                 }
-                .accessibilityValue("\(Int(draft)) seconds")
-                .onAppear { draft = Double(interval) }
-                .onChange(of: interval) { _, value in
-                    if !editing { draft = Double(value) }
-                }
-                // Commit after the value settles (drag end or keyboard steps).
-                .task(id: SettleKey(value: Int(draft), editing: editing)) {
-                    guard !editing, Int(draft) != interval else { return }
-                    try? await Task.sleep(for: .milliseconds(400))
-                    guard !Task.isCancelled else { return }
-                    await store.setSamplingInterval(Int(draft))
-                }
-                Text(Self.help(seconds: Int(draft)))
+                Text(Self.help(seconds: store.currentSamplingInterval ?? interval))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -56,11 +50,6 @@ struct SamplingSettings: View {
         }
     }
 
-    private struct SettleKey: Equatable {
-        var value: Int
-        var editing: Bool
-    }
-
     static func help(seconds: Int) -> String {
         let pace: String
         switch seconds {
@@ -69,5 +58,52 @@ struct SamplingSettings: View {
         default: pace = "Shorter reacts faster to heat; longer uses less energy."
         }
         return pace + " Readings and charts update at the same pace. Near the temperature limit, the service checks every second anyway."
+    }
+}
+
+/// A 1–5 s stepped slider that commits once the value settles, so a drag
+/// sends one change rather than one per step.
+private struct IntervalSlider: View {
+    let title: String
+    let value: Int
+    let commit: (Int) async -> Void
+    @State private var draft: Double = 2
+    @State private var editing = false
+
+    var body: some View {
+        LabeledContent(title) {
+            HStack(spacing: 10) {
+                Slider(value: $draft, in: Double(SamplingSettings.range.lowerBound)...Double(SamplingSettings.range.upperBound), step: 1) {
+                    Text(title)
+                } minimumValueLabel: {
+                    Text("\(SamplingSettings.range.lowerBound) s").font(.caption).foregroundStyle(.secondary)
+                } maximumValueLabel: {
+                    Text("\(SamplingSettings.range.upperBound) s").font(.caption).foregroundStyle(.secondary)
+                } onEditingChanged: { isEditing in
+                    editing = isEditing
+                }
+                .labelsHidden()
+                .frame(width: 220)
+                Text("\(Int(draft)) s")
+                    .monospacedDigit()
+                    .frame(width: 32, alignment: .trailing)
+            }
+        }
+        .accessibilityValue("\(Int(draft)) seconds")
+        .onAppear { draft = Double(value) }
+        .onChange(of: value) { _, newValue in
+            if !editing { draft = Double(newValue) }
+        }
+        .task(id: SettleKey(value: Int(draft), editing: editing)) {
+            guard !editing, Int(draft) != value else { return }
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            await commit(Int(draft))
+        }
+    }
+
+    private struct SettleKey: Equatable {
+        var value: Int
+        var editing: Bool
     }
 }

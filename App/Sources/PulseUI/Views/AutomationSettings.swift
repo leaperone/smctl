@@ -46,6 +46,11 @@ struct AutomationSettings: View {
                     }
                     .fixedSize()
                     Spacer()
+                    if automation.hasBattery {
+                        Text("To read sensors less often on battery: General › Sensors.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     if automation.rules.count > 1 {
                         Text("The first rule that applies wins.")
                             .font(.caption)

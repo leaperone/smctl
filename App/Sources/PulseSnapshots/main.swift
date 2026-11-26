@@ -110,6 +110,16 @@ func main() async {
     for scheme in [ColorScheme.light, .dark] {
         await render(SettingsView(store: normal, pane: .general), scheme: scheme, to: output.appendingPathComponent("settings-\(scheme == .dark ? "dark" : "light").png"))
     }
+    // Sensors section on a MacBook, with a slower pace on battery.
+    let batteryService = SampleService(fanRanges: SampleService.macBookProFans)
+    batteryService.samplingInterval = 1
+    batteryService.batterySamplingInterval = 4
+    batteryService.onBattery = false
+    let batteryStore = await PulseStore.preview(batteryService)
+    for scheme in [ColorScheme.light, .dark] {
+        await render(Form { SamplingSettings(store: batteryStore, hasBattery: true) }.formStyle(.grouped).frame(width: 780, height: 330), scheme: scheme,
+                     to: output.appendingPathComponent("settings-sensors-battery-\(scheme == .dark ? "dark" : "light").png"))
+    }
     // Heartbeat frames (rest, decay, peak) at several temperatures.
     let strip = VStack(alignment: .leading, spacing: 10) {
         ForEach([MenuBarIcon.pulse, .heartbeat], id: \.self) { icon in

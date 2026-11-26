@@ -28,3 +28,25 @@ struct SamplingIntervalTests {
         #expect(SamplingSettings.help(seconds: 3).contains("every second anyway"))
     }
 }
+
+struct BatterySamplingIntervalTests {
+    @MainActor @Test func batteryIntervalPacesPollingOnlyOnBattery() async {
+        let service = SampleService()
+        service.onBattery = true
+        let store = await PulseStore.preview(service)
+        #expect(store.batterySamplingInterval == nil)
+        #expect(store.pollInterval == .seconds(2), "no battery interval: same pace on battery")
+
+        #expect(await store.setSamplingInterval(5, onBattery: true))
+        #expect(store.batterySamplingInterval == 5)
+        #expect(store.currentSamplingInterval == 5)
+        #expect(store.pollInterval == .seconds(5))
+
+        service.onBattery = false
+        await store.refresh()
+        #expect(store.pollInterval == .seconds(2), "back on the adapter")
+
+        #expect(await store.setSamplingInterval(nil, onBattery: true))
+        #expect(store.batterySamplingInterval == nil)
+    }
+}
