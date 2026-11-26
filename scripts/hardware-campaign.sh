@@ -24,7 +24,8 @@ pmset -g batt | grep -q InternalBattery && HAS_BATTERY=true
 RESULTS_DIR="$ROOT/docs/campaign"
 RESULTS="${RESULTS:-$RESULTS_DIR/$MODEL-$(date +%Y-%m-%d).md}"
 STATE="$HOME/Library/Caches/pulse-campaign-state"
-LOAD_SECONDS="${LOAD_SECONDS:-120}"
+LOAD_SECONDS="${LOAD_SECONDS:-300}"
+COOL_SECONDS="${COOL_SECONDS:-90}"
 IDLE_OFF_MINUTES="${IDLE_OFF_MINUTES:-30}"
 CURVE="${CURVE:-balanced}"
 CAMPAIGN_START="$(date '+%Y-%m-%d %H:%M:%S')"
@@ -93,7 +94,7 @@ save_state() {
 restore() {
     for pid in "${LOAD_PIDS[@]:-}"; do [[ -n "$pid" ]] && kill "$pid" 2>/dev/null; done
     [[ -n "$FAKE_PID" ]] && kill "$FAKE_PID" 2>/dev/null
-    rm -rf "${FAKE_DIR:-/nonexistent}"
+    rm -rf "${FAKE_DIR:-/nonexistent}" "${LOAD_DIR:-/nonexistent}"
     if [[ -n "$ORIGINAL_PROFILE" && "$ORIGINAL_PROFILE" != None ]]; then
         "$PULSE" fan profile "$ORIGINAL_PROFILE" >/dev/null 2>&1
     fi
@@ -117,7 +118,7 @@ TITLES=(
     "Fermeture de l'app"
     "kill -9 du daemon"
     "Veille et réveil"
-    "Charge soutenue"
+    "Charge soutenue (CPU et GPU)"
     "Outil concurrent"
     "Garde-fou provoqué et notifications"
     "Désinstallation et réinstallation du service"
@@ -249,28 +250,38 @@ t_sleep_wake() {
 
 t_load() {
     "$PULSE" fan profile "$CURVE" >/dev/null 2>&1
-    local cores; cores="$(sysctl -n hw.ncpu)"
-    info "Charge : $cores × yes pendant $LOAD_SECONDS s, puis 60 s de retour au calme."
-    local start_rpm; start_rpm="$(fan_rpms)"
-    LOAD_PIDS=()
-    for _ in $(seq 1 "$cores"); do yes >/dev/null & LOAD_PIDS+=($!); done
-    local peak_temp=0 peak_rpm=0 tripped=no
+    info "Compiling the heat load (CPU + GPU)…"
+    LOAD_DIR="$(mktemp -d)"
+    swiftc -O "$ROOT/scripts/campaign/pulse-stress.swift" -o "$LOAD_DIR/pulse-stress" 2>/dev/null \
+        || { record 8 "${TITLES[7]}" skip "swiftc indisponible"; return; }
+    info "Load on every CPU core and the GPU for $LOAD_SECONDS s, then $COOL_SECONDS s to cool down."
+    local start_rpm start_temp start_max
+    start_rpm="$(fan_rpms)"; start_temp="$(cpu_max)"
+    start_max="$(status 'max([round(f.get("actualRPM") or 0) for f in d["fans"]] or [0])')"
+    "$LOAD_DIR/pulse-stress" >/dev/null 2>&1 & LOAD_PIDS=($!)
+    local peak_temp=0 peak_gpu=0 peak_rpm=0 peak_power=0 fans_at="" tripped=no
     for step in $(seq 1 $((LOAD_SECONDS / 5))); do
         sleep 5
-        local t r; t="$(cpu_max)"; r="$(status 'max(round(f.get("actualRPM") or 0) for f in d["fans"]) if d["fans"] else 0')"
-        printf '  %3d s  CPU max %s °C  fan %s RPM\n' $((step * 5)) "$t" "$r"
+        local line t g r w
+        line="$(status '"%s %s %s %s" % (round(max(x["maximumCelsius"] for x in d["groups"] if x["group"]=="Tp"),1), round(max([x["maximumCelsius"] for x in d["groups"] if x["group"]=="Tg"] or [0]),1), max([round(f.get("actualRPM") or 0) for f in d["fans"]] or [0]), round(next((p["value"] for p in d["power"] if p["key"]=="PDTR"), 0),1))')"
+        read -r t g r w <<< "$line"
+        printf '  %3d s  CPU %s °C  GPU %s °C  fan %s RPM  %s W\n' $((step * 5)) "$t" "$g" "$r" "$w"
         python3 -c "import sys; sys.exit(0 if float('$t') > float('$peak_temp') else 1)" && peak_temp="$t"
+        python3 -c "import sys; sys.exit(0 if float('$g') > float('$peak_gpu') else 1)" && peak_gpu="$g"
+        python3 -c "import sys; sys.exit(0 if float('$w') > float('$peak_power') else 1)" && peak_power="$w"
         [[ "${r:-0}" -gt "$peak_rpm" ]] && peak_rpm="$r"
+        # "Speed up": 300 RPM above where the fans were when the load began.
+        [[ -z "$fans_at" && "${r:-0}" -gt $((${start_max:-0} + 300)) ]] && fans_at="$((step * 5)) s à $t °C"
         [[ "$(latched)" == True ]] && tripped=yes
     done
-    for pid in "${LOAD_PIDS[@]}"; do kill "$pid" 2>/dev/null; done
-    LOAD_PIDS=()
-    sleep 60
-    local end_rpm; end_rpm="$(fan_rpms)"
-    local notes="pic CPU $peak_temp °C, ventilateur $start_rpm → pic $peak_rpm → $end_rpm RPM 60 s après ; garde-fou : $tripped"
+    kill "${LOAD_PIDS[@]}" 2>/dev/null; wait "${LOAD_PIDS[@]}" 2>/dev/null; LOAD_PIDS=()
+    rm -rf "$LOAD_DIR"
+    sleep "$COOL_SECONDS"
+    local end_rpm end_temp; end_rpm="$(fan_rpms)"; end_temp="$(cpu_max)"
+    local notes="puissance max $peak_power W ; CPU $start_temp → $peak_temp °C, GPU max $peak_gpu °C ; ventilateurs $start_rpm → pic $peak_rpm RPM, accélèrent à ${fans_at:-jamais} ; $COOL_SECONDS s après : $end_rpm RPM, CPU $end_temp °C ; garde-fou : $tripped"
     if [[ "$tripped" == yes ]]; then record 8 "${TITLES[7]}" fail "$notes"
     elif [[ "$peak_rpm" -gt 0 ]]; then record 8 "${TITLES[7]}" pass "$notes"
-    else record 8 "${TITLES[7]}" info "$notes (la rampe n'a peut-être pas été atteinte)"
+    else record 8 "${TITLES[7]}" info "$notes (la rampe de la courbe n'a pas été atteinte)"
     fi
 }
 
