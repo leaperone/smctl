@@ -1279,7 +1279,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         } else if observation == nil {
             statusMessage = "No readable battery was found. Battery commands are read-only or unsupported on this Mac."
         } else if capabilities.chargingControl == nil {
-            statusMessage = "Charging control keys are unavailable; policy writes are unsupported on this Mac/system."
+            statusMessage = "Charging control keys are unavailable on this Mac/system: macOS manages charging and charge limits cannot be enforced."
         } else {
             statusMessage = nil
         }
@@ -1288,7 +1288,9 @@ public final class SmctlDaemon: @unchecked Sendable {
         return BatteryStatusDTO(
             timestamp: Date(),
             chargePercent: observation?.chargePercent,
-            isCharging: observation?.isCharging,
+            // Without charging-control keys the SMC cannot tell whether charging
+            // is allowed; ask the OS instead of reporting "disabled".
+            isCharging: capabilities.chargingControl == nil ? timeEstimate.isCharging : observation?.isCharging,
             pluggedIn: readPluggedInLocked(),
             chargingControlSupported: capabilities.chargingControl != nil,
             adapterControlSupported: capabilities.adapterControl != nil,

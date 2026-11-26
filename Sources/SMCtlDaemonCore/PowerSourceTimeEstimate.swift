@@ -8,12 +8,14 @@ enum PowerSourceTimeEstimate {
     /// Minutes to empty (discharging) and to full (charging) for the internal
     /// battery. IOKit reports -1 while still calculating; that and missing
     /// keys both map to nil.
-    static func read() -> (toEmpty: Int?, toFull: Int?) {
+    /// `isCharging` is the OS view, used when the SMC exposes no charging-control
+    /// keys to derive it from.
+    static func read() -> (toEmpty: Int?, toFull: Int?, isCharging: Bool?) {
         guard
             let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
             let list = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [CFTypeRef]
         else {
-            return (nil, nil)
+            return (nil, nil, nil)
         }
 
         for source in list {
@@ -25,8 +27,8 @@ enum PowerSourceTimeEstimate {
             }
             let toEmpty = (description[kIOPSTimeToEmptyKey] as? Int).flatMap { $0 > 0 ? $0 : nil }
             let toFull = (description[kIOPSTimeToFullChargeKey] as? Int).flatMap { $0 > 0 ? $0 : nil }
-            return (toEmpty, toFull)
+            return (toEmpty, toFull, description[kIOPSIsChargingKey] as? Bool)
         }
-        return (nil, nil)
+        return (nil, nil, nil)
     }
 }
