@@ -14,6 +14,7 @@ public final class StatusItemController: NSObject, NSPopoverDelegate {
     static let beatFrames: [(delay: TimeInterval, beat: Double)] = [(0, 1), (0.16, 0)]
 
     private let store: PulseStore
+    private let openSettings: @MainActor () -> Void
     private let statusItem: NSStatusItem
     private let popover = NSPopover()
     private var renderedKey: String?
@@ -25,16 +26,13 @@ public final class StatusItemController: NSObject, NSPopoverDelegate {
 
     public init(store: PulseStore, openSettings: @escaping @MainActor () -> Void) {
         self.store = store
+        self.openSettings = openSettings
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
 
         popover.behavior = .transient
         popover.animates = true
         popover.delegate = self
-        popover.contentViewController = NSHostingController(rootView: PopoverView(store: store) { [weak self] in
-            self?.popover.performClose(nil)
-            openSettings()
-        })
 
         if let button = statusItem.button {
             button.target = self
@@ -175,11 +173,28 @@ public final class StatusItemController: NSObject, NSPopoverDelegate {
 
     @objc private func togglePopover(_ sender: Any?) {
         if popover.isShown {
-            popover.performClose(sender)
-        } else if let button = statusItem.button {
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
+            closePopover()
+        } else {
+            showPopover()
         }
+    }
+
+    /// The popover's SwiftUI tree exists only while it is shown: a closed but
+    /// retained hosting view keeps observing the store and re-rendering its
+    /// charts on every poll (measured: 0.5% → 1.8% CPU and +75 MB after one opening).
+    public func showPopover() {
+        guard !popover.isShown, let button = statusItem.button else { return }
+        let openSettings = self.openSettings
+        popover.contentViewController = NSHostingController(rootView: PopoverView(store: store) { [weak self] in
+            self?.closePopover()
+            openSettings()
+        })
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
+    }
+
+    public func closePopover() {
+        popover.performClose(nil)
     }
 
     public func popoverWillShow(_ notification: Notification) {
@@ -188,18 +203,30 @@ public final class StatusItemController: NSObject, NSPopoverDelegate {
 
     public func popoverDidClose(_ notification: Notification) {
         store.popoverDidClose()
+        popover.contentViewController = nil
     }
 }
 
 /// The settings window: a toolbar-style tab view (like Safari's or Xcode's
-/// Settings), one fixed-size SwiftUI pane per tab.
+/// Settings), one fixed-size SwiftUI pane per tab. Built on demand and released
+/// when closed, so its live preview and observers cost nothing afterwards
+/// (a retained closed window measured ~11% CPU).
 @MainActor
-public final class SettingsWindowController {
+public final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let store: PulseStore
     private var window: NSWindow?
 
     public init(store: PulseStore) {
         self.store = store
+    }
+
+    public func windowWillClose(_ notification: Notification) {
+        guard let closing = notification.object as? NSWindow, closing === window else { return }
+        // Release after AppKit finishes closing it.
+        DispatchQueue.main.async { [weak self] in
+            closing.contentViewController = nil
+            if self?.window === closing { self?.window = nil }
+        }
     }
 
     public func show() {
@@ -223,11 +250,17 @@ public final class SettingsWindowController {
             window.styleMask = [.titled, .closable, .miniaturizable]
             window.toolbarStyle = .preference
             window.isReleasedWhenClosed = false
+            window.delegate = self
             window.setContentSize(SettingsPane.general.size)
-            window.center()
+            if !window.setFrameUsingName("PulseSettings") { window.center() }
+            window.setFrameAutosaveName("PulseSettings")
             self.window = window
         }
         NSApp.activate()
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    public func close() {
+        window?.performClose(nil)
     }
 }

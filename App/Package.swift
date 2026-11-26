@@ -40,6 +40,12 @@ let package = Package(
             name: "PulseSnapshots",
             dependencies: ["PulseUI"]
         ),
+        // Measures the app's CPU and memory with the real status item, popover
+        // and settings window: swift run -c release PulseBench [seconds]
+        .executableTarget(
+            name: "PulseBench",
+            dependencies: ["PulseUI"]
+        ),
         .testTarget(
             name: "PulseUITests",
             dependencies: ["PulseUI"]

@@ -282,3 +282,24 @@ struct ServiceInstallerTests {
         #expect(ServiceInstaller.appleScriptLiteral(#"say "hi" \ there"#) == #""say \"hi\" \\ there""#)
     }
 }
+
+struct MenuBarPreviewScheduleTests {
+    @Test func firesOnlyAtBeatBoundaries() {
+        let period = 1.0
+        let start = Date(timeIntervalSinceReferenceDate: 100.5)
+        let dates = Array(MenuBarPreview.BeatSchedule(period: period, paused: false)
+            .entries(from: start, mode: .normal).prefix(5)).map(\.timeIntervalSinceReferenceDate)
+        #expect(dates.count == 5)
+        #expect(abs(dates[0] - 100.5) < 1e-9)
+        #expect(abs(dates[1] - 101) < 1e-9)
+        #expect(abs(dates[2] - 101.16) < 1e-9)
+        #expect(abs(dates[3] - 102) < 1e-9)
+        #expect(MenuBarPreview.isPeak(at: Date(timeIntervalSinceReferenceDate: 101.05), period: period))
+        #expect(!MenuBarPreview.isPeak(at: Date(timeIntervalSinceReferenceDate: 101.16), period: period))
+    }
+
+    @Test func pausedScheduleFiresOnce() {
+        let dates = Array(MenuBarPreview.BeatSchedule(period: 1, paused: true).entries(from: Date(), mode: .normal).prefix(3))
+        #expect(dates.count == 1)
+    }
+}

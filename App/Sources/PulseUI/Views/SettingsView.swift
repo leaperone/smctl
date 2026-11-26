@@ -179,10 +179,14 @@ public struct MenuBarPreview: View {
         )
         // The preview beats whenever the mode is not off, so the effect is visible.
         let beats = animated && configuration.heartbeat != .off && base.icon.canAnimate
+        // Two frames per beat, drawn once: the timeline only fires when the
+        // frame changes (a 12 fps timeline measured ~11% CPU).
+        let rest = MenuBarRenderer.image(base)
+        let peak = beats ? MenuBarRenderer.image(Self.frame(base, beat: 1)) : rest
         HStack {
             Spacer()
-            TimelineView(.animation(minimumInterval: 1.0 / 12, paused: !beats)) { context in
-                Image(nsImage: MenuBarRenderer.image(Self.frame(base, at: context.date, beating: beats)))
+            TimelineView(BeatSchedule(period: Self.period(base), paused: !beats)) { context in
+                Image(nsImage: beats && Self.isPeak(at: context.date, period: Self.period(base)) ? peak : rest)
                     .renderingMode(base.isTemplate ? .template : .original)
             }
             .foregroundStyle(.primary)
@@ -194,14 +198,49 @@ public struct MenuBarPreview: View {
         .accessibilityLabel("Menu bar preview")
     }
 
-    /// The status item's beat envelope, evaluated at `date`.
-    static func frame(_ base: MenuBarDrawing, at date: Date, beating: Bool) -> MenuBarDrawing {
-        guard beating else { return base }
+    /// Length of the peak frame, as in `StatusItemController.beatFrames`.
+    static let peakDuration: TimeInterval = 0.16
+
+    static func period(_ base: MenuBarDrawing) -> TimeInterval {
+        60 / MenuBarState.beatsPerMinute(celsius: base.heatCelsius)
+    }
+
+    static func frame(_ base: MenuBarDrawing, beat: Double) -> MenuBarDrawing {
         var frame = base
-        let period = 60 / MenuBarState.beatsPerMinute(celsius: base.heatCelsius)
-        let phase = date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period)
-        frame.beat = phase < 0.16 ? 1 : 0
+        frame.beat = beat
         return frame
+    }
+
+    /// Whether `date` falls in the peak frame of a beat.
+    static func isPeak(at date: Date, period: TimeInterval) -> Bool {
+        date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period) < peakDuration - 0.001
+    }
+
+    /// Fires at the start and end of each beat's peak, nothing in between.
+    struct BeatSchedule: TimelineSchedule {
+        let period: TimeInterval
+        let paused: Bool
+
+        func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+            guard !paused, period > MenuBarPreview.peakDuration else {
+                var once = Optional(startDate)
+                return AnyIterator { defer { once = nil }; return once }
+            }
+            let start = startDate.timeIntervalSinceReferenceDate
+            var beat = (start / period).rounded(.down)
+            var peakEnded = start - beat * period >= MenuBarPreview.peakDuration
+            var first = Optional(startDate)
+            return AnyIterator {
+                if let date = first { first = nil; return date }
+                if peakEnded {
+                    beat += 1
+                    peakEnded = false
+                    return Date(timeIntervalSinceReferenceDate: beat * period)
+                }
+                peakEnded = true
+                return Date(timeIntervalSinceReferenceDate: beat * period + MenuBarPreview.peakDuration)
+            }
+        }
     }
 }
 
