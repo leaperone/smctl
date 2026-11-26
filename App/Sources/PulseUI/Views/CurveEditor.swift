@@ -351,12 +351,17 @@ struct EditableCurveChart: View {
         handle == model.dragging || handle == hovered ? 200 : 110
     }
 
-    /// Multiples of 1000 RPM (500 for narrow ranges) inside the range, as %.
+    /// The fan's minimum and maximum (the bottom and top of the chart), and
+    /// the multiples of 1000 RPM (500 for narrow ranges) between them, as %.
+    /// A multiple too close to either end is left out, so labels don't overlap.
     static func rpmTicks(_ range: FanSpeedRange) -> [Double] {
         guard range.spanRPM > 0 else { return [0, 100] }
         let step: Double = range.spanRPM < 2000 ? 500 : 1000
         let first = (range.minimumRPM / step).rounded(.up) * step
-        return stride(from: first, through: range.maximumRPM, by: step).map { range.fraction(forRPM: $0) * 100 }
+        let inner = stride(from: first, through: range.maximumRPM, by: step).filter {
+            $0 - range.minimumRPM >= step * 0.4 && range.maximumRPM - $0 >= step * 0.4
+        }
+        return ([range.minimumRPM] + inner + [range.maximumRPM]).map { range.fraction(forRPM: $0) * 100 }
     }
 
     /// "67.5 °C · 40 %" (half degrees are shown: drags snap to 0.5 °C).

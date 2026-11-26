@@ -100,11 +100,14 @@ struct CurveEditorModelTests {
         #expect(CurveEditorModel.nearest(to: CGPoint(x: 20, y: 40), in: positions) == nil)
     }
 
-    @Test func rpmTicksAreRoundThousands() {
+    @Test func rpmTicksAreTheRangeEndsAndRoundThousands() {
         let ticks = EditableCurveChart.rpmTicks(FanSpeedRange(minimumRPM: 1000, maximumRPM: 4900))
         let rpm = ticks.map { (1000 + 3900 * $0 / 100).rounded() }
-        #expect(rpm == [1000, 2000, 3000, 4000])
-        #expect(EditableCurveChart.rpmTicks(FanSpeedRange(minimumRPM: 1200, maximumRPM: 2800)).count == 3, "500 RPM steps when narrow")
+        #expect(rpm == [1000, 2000, 3000, 4000, 4900], "the maximum labels the top of the chart")
+        let narrow = EditableCurveChart.rpmTicks(FanSpeedRange(minimumRPM: 1200, maximumRPM: 2800))
+        #expect(narrow.map { (1200 + 1600 * $0 / 100).rounded() } == [1200, 1500, 2000, 2500, 2800], "500 RPM steps when narrow")
+        let close = EditableCurveChart.rpmTicks(FanSpeedRange(minimumRPM: 1200, maximumRPM: 5100))
+        #expect(close.map { (1200 + 3900 * $0 / 100).rounded() } == [1200, 2000, 3000, 4000, 5100], "5000 is too close to the top")
     }
 
     @Test func aSliderGestureIsOneUndoStep() {
