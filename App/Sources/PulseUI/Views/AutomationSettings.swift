@@ -175,7 +175,7 @@ extension String {
     /// "Low Power Mode is on" stays; "On battery" → "on battery".
     var lowercasedFirst: String {
         guard let first, first.isUppercase, !hasPrefix("Low Power") else { return self }
-        // App names keep their capital ("War Thunder is open").
+        // App names keep their capital ("Chess is open").
         if contains(" is open") { return self }
         return first.lowercased() + dropFirst()
     }

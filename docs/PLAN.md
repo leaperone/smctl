@@ -460,7 +460,7 @@ macOS n'offre donc **aucun signal fiable**, et sa propre heuristique ne reconna�
 - **Réglages > Automation** :
   - règles « When ‹condition›, use ‹profile› » ;
   - activation règle par règle, ordre via « Move Up / Down » ;
-  - ligne d'état (« Now: Performance, because War Thunder is open », ou « Paused after the temperature limit… »).
+  - ligne d'état (« Now: Performance, because Chess is open », ou « Paused after the temperature limit… »).
 - **Conditions** : app ou jeu ouvert ; économie d'énergie ; sur batterie / sur secteur (proposées seulement sur un Mac avec batterie).
   - Toutes sont observées par notifications système (`NSWorkspace`, `NSProcessInfoPowerStateDidChange`, `IOPSNotificationCreateRunLoopSource`). **Aucun sondage.**
   - Les règles sont évaluées au rythme du sondage existant du store (2 s), via un crochet `onRefresh`.

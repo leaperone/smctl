@@ -68,7 +68,7 @@ public struct AutomationEngine: Sendable {
     public var rules: [AutomationRule]
     public private(set) var baseProfile: String?
     public private(set) var suspendedForSafety = false
-    /// The rule currently applied, for display ("Performance · War Thunder").
+    /// The rule currently applied, for display ("Performance · Chess").
     public private(set) var activeRule: AutomationRule?
 
     private var heldSince: [UUID: Date] = [:]
