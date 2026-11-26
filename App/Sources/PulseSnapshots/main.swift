@@ -110,6 +110,9 @@ func main() async {
     for scheme in [ColorScheme.light, .dark] {
         await render(SettingsView(store: normal, pane: .general), scheme: scheme, to: output.appendingPathComponent("settings-\(scheme == .dark ? "dark" : "light").png"))
     }
+    for scheme in [ColorScheme.light, .dark] {
+        await render(SettingsView(store: normal, pane: .help), scheme: scheme, to: output.appendingPathComponent("settings-help-\(scheme == .dark ? "dark" : "light").png"))
+    }
     // Sensors section on a MacBook, with a slower pace on battery.
     let batteryService = SampleService(fanRanges: SampleService.macBookProFans)
     batteryService.samplingInterval = 1
