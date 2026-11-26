@@ -370,7 +370,9 @@ public enum FanCurvePresets {
     public static let balanced = preset(
         name: "balanced", label: "Balanced",
         shape: (.sigmoid, 70, 100, 0, 1, 8),
-        hysteresis: 3, rise: 8, fall: 3, smoothing: 6
+        // Gentle on purpose: ~35 s from 0 to 100 %, ~100 s back down, so the
+        // fans neither surge on a burst nor stop right after it.
+        hysteresis: 3, rise: 3, fall: 1, smoothing: 6
     )
 
     /// Follows the CPU *average* rather than the hottest hot-spot: a single

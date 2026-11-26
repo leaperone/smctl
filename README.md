@@ -88,7 +88,7 @@ The 15 s delay keeps a temperature hovering at the ramp start from toggling the 
 | Preset | Shape | Ramp | Speed | Smoothing | Hysteresis | Rise / fall |
 |---|---|---|---|---|---|---|
 | **Silent** | exponential (steepness 3): stays low, then accelerates | 80 → 105 °C | 0 → 100% | 10 s | 3 °C | 5 / 2 %/s |
-| **Balanced** | sigmoid (steepness 8): calm, then a decisive climb | 70 → 100 °C | 0 → 100% | 6 s | 3 °C | 8 / 3 %/s |
+| **Balanced** | sigmoid (steepness 8): calm, then a decisive climb | 70 → 100 °C | 0 → 100% | 6 s | 3 °C | 3 / 1 %/s |
 | **Performance** | linear, on the **CPU average** (not the hottest sensor): steady and predictable | 55 → 90 °C | 10 → 100% | 5 s | 2 °C | 10 / 4 %/s |
 
 Each curve runs through the same pipeline once per second:

@@ -36,7 +36,7 @@ struct CurvePreviewTests {
     @Test func responseText() {
         let range = FanSpeedRange(minimumRPM: 1000, maximumRPM: 5000)
         #expect(ResponseSummary.text(FanCurvePresets.balanced, range: range)
-                == "Minimum to full speed in 13 s, back to minimum in 33 s. Slows down only once 3 °C cooler. Ignores spikes shorter than about 6 s.")
+                == "Minimum to full speed in 33 s, back to minimum in 100 s. Slows down only once 3 °C cooler. Ignores spikes shorter than about 6 s.")
         let bare = FanCurveSpec(name: "b", shape: FanCurvePresets.balanced.shape)
         #expect(ResponseSummary.text(bare, range: range) == "The fan follows the curve immediately.")
         let rpm = FanCurveSpec(name: "r", shape: FanCurvePresets.balanced.shape, riseRate: .rpmPerSecond(400))

@@ -43,7 +43,7 @@ struct CurveSummaryTests {
         #expect(CurveSummary.shape(FanCurvePresets.balanced) == "S-curve, 70–100 °C, 0–100 %, steepness 8")
         #expect(CurveSummary.shape(FanCurvePresets.performance) == "Linear, 55–90 °C, 10–100 %")
         #expect(CurveSummary.sensors(FanCurvePresets.performance) == "CPU, average")
-        #expect(CurveSummary.response(FanCurvePresets.balanced) == "up 8 %/s, down 3 %/s")
+        #expect(CurveSummary.response(FanCurvePresets.balanced) == "up 3 %/s, down 1 %/s")
         #expect(CurveSummary.smoothing(FanCurvePresets.balanced) == "6 s")
         #expect(CurveSummary.sensors(FanCurvePresets.balanced) == "All sensors, hottest")
         let points = FanCurveSpec(name: "p", sensors: ["Tp*", "Tg*"], weights: ["Tp*": 1], points: [.init(40, .percent(0)), .init(90, .maximum)])
