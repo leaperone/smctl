@@ -376,6 +376,7 @@ struct CurveDetail: View {
     let rename: () -> Void
     let delete: () -> Void
     @AppStorage(SettingsKey.fanSpeedUnit) private var unit: FanSpeedUnit = .rpm
+    @State private var stressTest: StressTestModel?
 
     private var spec: FanCurveSpec { editor?.draft.spec ?? entry.spec }
     private var isActive: Bool { store.activeProfile == entry.spec.name }
@@ -410,6 +411,9 @@ struct CurveDetail: View {
             }
         }
         .padding(20)
+        .sheet(item: $stressTest) { model in
+            StressTestSheet(model: model, fanRange: fanRange.map { $0.minimumRPM...$0.maximumRPM })
+        }
     }
 
     private func saveBar(_ editor: CurveEditorModel) -> some View {
@@ -464,7 +468,17 @@ struct CurveDetail: View {
                 .fixedSize()
                 .disabled(!store.canEditCurves)
             }
+            Button("Stress Test…", action: openStressTest)
+                .help(isDirty ? "Save your changes first: the test runs the saved curve." : "Heat the Mac and see how this curve responds.")
+                .disabled(isDirty || !store.canControlFans)
             activateButton
+        }
+    }
+
+    private func openStressTest() {
+        let store = self.store
+        stressTest = StressTestModel(profile: entry.spec.name, title: spec.label ?? spec.name.capitalized, service: store.service) {
+            Task { await store.refresh(forceLists: true) }
         }
     }
 

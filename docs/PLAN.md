@@ -201,6 +201,13 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 - Version 1.0, notes de version, archive de `Pulse.app`. Signature : ad hoc ou compte développeur, à décider.
 - PR des améliorations génériques vers smctl (courbes en %, formes, zone morte) : à décider (« on verra »). Le fork rend ces PR triviales.
 
+### 4g. Stress test pour régler les courbes (ta demande)
+
+> ✅ **Terminée le 26/11/2026** (voir le journal). Lancer la charge du test 8 sur une courbe et voir comment elle réagit, pour la régler. Dans l'app, et en CLI pour le SSH.
+- **Moteur partagé** (`SMCtlClient/PulseStress.swift`) : charge CPU + GPU dans le processus (arrêtable), relevés toutes les 2 s (CPU et GPU max, entrée et sortie de la courbe, vitesse, puissance, garde-fou), attente que le Mac revienne à sa température de départ, phases charge puis refroidissement, synthèse (CPU stable, vitesse stable et écart, accélération, temps jusqu'à 90 % du pic, retour au repos). Le profil d'avant est restauré à la fin. Tests unitaires de la synthèse.
+- **CLI** : `pulse fan stress <profil>… [--load] [--cool] [--settle] [--cpu-only] [--json] [--csv]`, relevés en direct puis tableau comparatif. Remplace le script shell écrit d'abord (jamais commité).
+- **App** : bouton « Stress Test » dans Réglages › Courbes. Une feuille avec durée et type de charge, graphique en direct (températures, entrée de la courbe, vitesse), synthèse à la fin, et l'essai précédent de la même courbe en transparence pour comparer après un réglage.
+
 ---
 
 ## Journal de réévaluation
@@ -614,3 +621,11 @@ macOS n'offre donc **aucun signal fiable**, et sa propre heuristique ne reconna�
 - **Mac mini M4** : le test 1 échouait. **Bug réel**, hérité de smctl : sans batterie, le daemon enregistrait une erreur toutes les 10 s, que `pulse doctor` remontait en avertissement. Corrigé : pas d'erreur sans batterie, sauf si une limite de charge est configurée. Le script a été revu pour chaque type de Mac : sans ventilateur, capteurs CPU `TC*`, app hors de `dist/`, CLI hors du PATH sous sudo, recherche exacte du daemon, prérequis vérifiés.
 - **Balanced plus calme** (ta demande) : montée 3 %/s, descente 1 %/s (environ 33 s jusqu'à pleine vitesse et 100 s pour redescendre, contre 13 s et 33 s). Silent reste plus rapide (5 / 2 %/s) : il démarre tard, à 80 °C, et doit rattraper.
 - **Pour appliquer** : réinstaller le service sur les deux Mac (nouveau daemon et preset). Sur le Mac mini : `git pull`, `scripts/build-app.sh`, relancer Pulse, Reinstall, puis relancer la campagne.
+
+### 26/11/2026 : étape 4g, stress test pour régler les courbes (ta demande)
+- **Ton retour** : le test 10 de la campagne ne déclenchait rien sur le Mac mini. Ce n'était pas `sudo` : le plafond fixe de 45 °C était au-dessus de tous les capteurs au repos (41 °C au plus, sur un hot-spot Tp* qui a 10 °C de marge). Corrigé (`8f91b57`) : plafond 3 °C sous la température du moment.
+- **Moteur partagé** (`SMCtlClient/PulseStress.swift`) : la charge CPU + GPU du test 8, portée en Swift dans le processus (threads arrêtables, noyau Metal) ; relevés toutes les 2 s ; attente du retour à la température de départ avant chaque profil ; synthèse (CPU stable, vitesse stable et écart type, accélération à +300 RPM, 90 % de la montée, retour au repos à 100 RPM près, garde-fou). Le profil d'avant est restauré même après un arrêt. 7 tests, dont le runner sur un faux Mac (charge injectée).
+- **CLI** : `pulse fan stress`, relevés en direct, tableau comparatif (une colonne par profil), `--csv`, `--json`, Ctrl-C arrête proprement. Essayé sur le Mac mini : 32 W, CPU de 40 à 80 °C en 20 s, profil restauré, aucun processus restant.
+- **App** : bouton « Stress Test… » dans l'en-tête d'une courbe (désactivé tant que des modifications ne sont pas enregistrées : le test lance la courbe enregistrée). Feuille avec durée (1, 2, 5 min) et type de charge, graphiques en direct alignés (températures et entrée lissée de la courbe, vitesse), relevé du moment, synthèse à côté de l'essai précédent de la même courbe, tracé en pointillés. Capture ajoutée à `PulseSnapshots`.
+- **Au passage** (ta demande) : en RPM, le haut du graphique de l'éditeur n'avait pas d'étiquette (graduations à 1000, 2000, 3000, 4000 pour un maximum à 4900). Les vitesses minimale et maximale sont maintenant toujours graduées.
+- **À essayer** : un vrai stress test depuis l'app (je n'ai validé que les captures et la CLI), et lancer l'app avec le nouveau binaire (`scripts/build-app.sh`).

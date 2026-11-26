@@ -65,6 +65,18 @@ The live marker shows the current temperature and the speed the curve asks for. 
 - **Minimum speed**: Pulse holds the lowest speed itself.
 - **Stopped**: the fan stops completely. Experimental, and only allowed when `allow_below_minimum` is set in the configuration.
 
+## Stress test
+
+To tune a curve, click **Stress Test…** next to it. Pulse heats every CPU core (and the GPU, unless you pick *CPU*) for 1, 2 or 5 minutes, then records the cool-down. The charts show the CPU and GPU temperatures, the temperature the curve acts on after smoothing, and the fan speed. At the end, a summary gives:
+
+- **CPU, steady** and **Fan, steady**: averages over the last 30 s of heating. A large ± after the fan speed means it hunts: add smoothing or hysteresis, or slow its fall.
+- **Speeds up**: when the fan got 300 RPM above where it started, and the CPU temperature then. Late means the ramp starts too high, or smoothing is long.
+- **Back to rest**: how long after the heat stopped the fan returned to its starting speed.
+
+Change the curve, save it, and run the test again: the previous run is drawn faded and listed next to the new one. The test runs the saved curve, and your current profile comes back at the end, even if you stop early.
+
+From Terminal (over SSH, for example): `pulse fan stress night`, or `pulse fan stress balanced night` to compare two curves under the same load. Each one waits for the Mac to cool back to the starting temperature first. Options: `--load` and `--cool` (seconds), `--cpu-only`, `--csv <file>` for every sample, `--json`.
+
 ## Sensor refresh
 
 **Settings › General › Sensors** sets how often the service reads the sensors, from 1 to 5 seconds (2 s by default). Shorter reacts faster to heat; longer uses less energy. Readings and charts in Pulse update at the same pace.

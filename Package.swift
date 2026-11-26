@@ -37,7 +37,11 @@ let package = Package(
         ),
         .target(
             name: "SMCtlClient",
-            dependencies: ["ProductIdentity", "SMCtlProtocol", "PolicyEngine"]
+            dependencies: ["ProductIdentity", "SMCtlProtocol", "PolicyEngine"],
+            linkerSettings: [
+                // The stress test's GPU load (PulseStress.swift).
+                .linkedFramework("Metal")
+            ]
         ),
         .target(
             name: "DisplayDDC",

@@ -246,6 +246,170 @@ private func rpm(_ value: Double?) -> String {
     value.map { "\(Int($0.rounded())) RPM" } ?? "—"
 }
 
+// MARK: - pulse fan stress
+
+struct FanStress: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "stress",
+        abstract: "Heat the Mac under one or more profiles and measure how the fans respond, to tune a curve.",
+        discussion: """
+        Loads every CPU core and the GPU, records temperatures, the curve's input and the fan speed every 2 s, \
+        then keeps recording while the Mac cools down. With several profiles, each starts once the CPU is back \
+        near its starting temperature, and a table compares them. Tune with '\(ProductIdentity.cliName) fan curve set' \
+        between runs. The profile active before is restored at the end, even after Ctrl-C.
+        """
+    )
+
+    @Argument(help: "Profiles to test, in order (a curve name or auto).")
+    var profiles: [String]
+
+    @Option(name: .long, help: "Seconds of load.")
+    var load: Int = 120
+
+    @Option(name: .long, help: "Seconds recorded after the load stops.")
+    var cool: Int = 120
+
+    @Option(name: .long, help: "Before each profile, seconds to wait at most for the CPU to cool to its starting temperature (0: don't wait).")
+    var settle: Int = 300
+
+    @Flag(name: .long, help: "Load the CPU only, not the GPU.")
+    var cpuOnly = false
+
+    @Option(name: .long, help: "Also write every sample to this CSV file.")
+    var csv: String?
+
+    @Flag(name: .long, help: "Print machine-readable JSON (summaries and samples) instead of the live readings.")
+    var json = false
+
+    func validate() throws {
+        guard (10...3600).contains(load) else { throw ValidationError("--load must be between 10 and 3600 seconds.") }
+        guard (0...3600).contains(cool) else { throw ValidationError("--cool must be between 0 and 3600 seconds.") }
+        guard (0...3600).contains(settle) else { throw ValidationError("--settle must be between 0 and 3600 seconds.") }
+    }
+
+    private struct Report: Encodable {
+        var profile: String
+        var completed: Bool
+        var plan: StressPlan
+        var summary: StressSummary?
+        var samples: [StressSample]
+    }
+
+    func run() throws {
+        nonisolated(unsafe) let client = DaemonClient()
+        let list = try withDaemon { try client.listFanCurves() }
+        let known = ["auto"] + list.curves.map(\.spec.name)
+        for profile in profiles where !known.contains(profile) {
+            throw ValidationError("No profile named '\(profile)'. Profiles: \(known.joined(separator: ", ")).")
+        }
+        let initial = try withDaemon { try client.getTelemetry() }
+        guard !initial.fans.isEmpty else { throw ValidationError("This Mac has no fan: there is nothing to tune.") }
+
+        let plan = StressPlan(loadSeconds: load, coolSeconds: cool, settleSeconds: settle, load: cpuOnly ? .cpu : .cpuAndGPU)
+        let runner = StressRunner(telemetry: { try client.getTelemetry() }, activate: { try client.setFanProfile($0) })
+        // Ctrl-C stops the run; the runner then stops the load and restores the profile.
+        signal(SIGINT, SIG_IGN)
+        let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
+        interrupt.setEventHandler {
+            if !json { print("\nStopping…") }
+            runner.cancel()
+        }
+        interrupt.resume()
+        defer {
+            interrupt.cancel()
+            signal(SIGINT, SIG_DFL)
+        }
+
+        if !json {
+            let kind = cpuOnly ? "CPU" : "CPU + GPU"
+            print("Stress test: \(profiles.joined(separator: ", ")) · \(kind) load \(load) s, then \(cool) s cool-down")
+            print("Starting CPU \(StressSample.hottestCPU(initial).map(celsius) ?? "—"). Ctrl-C stops and restores \(initial.profile).")
+        }
+        var midLine = false
+        let results = try withDaemon {
+            try runner.run(profiles: profiles, plan: plan) { event in
+                guard !json else { return }
+                switch event {
+                case .settling(_, let cpu, let target, let elapsed):
+                    midLine = true
+                    print("\r  cooling down before the start: CPU \(cpu.map(celsius) ?? "—"), target \(celsius(target)), \(elapsed) s…", terminator: "")
+                    fflush(stdout)
+                case .started(let profile, let index, let count):
+                    print("\(midLine ? "\n" : "")\n\(profile)\(count > 1 ? " (\(index + 1)/\(count))" : "")")
+                case .sample(_, let sample):
+                    midLine = false
+                    print(Self.line(sample))
+                    fflush(stdout)
+                case .finished, .restored:
+                    break
+                }
+            }
+        }
+
+        if let csv {
+            try StressResult.csv(results).write(toFile: csv, atomically: true, encoding: .utf8)
+        }
+        if json {
+            print(try CLIJSON.encodeString(results.map {
+                Report(profile: $0.profile, completed: $0.completed, plan: $0.plan, summary: $0.summary, samples: $0.samples)
+            }))
+            return
+        }
+        if !results.isEmpty {
+            print("\n" + Self.table(results), terminator: "")
+        }
+        print("\nProfile \(initial.profile) restored.\(csv.map { " Samples: \($0)" } ?? "")")
+    }
+
+    static func line(_ s: StressSample) -> String {
+        let curve = s.curveInput.map { input in "\(String(format: "%.1f", input)) → \(s.curveEffective.map { String(format: "%.1f °C", $0) } ?? "—")" } ?? "—"
+        let fan = s.handedToSystem ? "macOS \(rpm(s.fanRPM))" : "\(s.fanPercent.map { "\(Int($0.rounded())) %" } ?? "—") \(rpm(s.fanRPM))"
+        return "  " + [
+            pad(String(format: "%4.0f s", s.seconds), 8),
+            pad(s.phase.rawValue, 6),
+            pad("CPU \(s.cpuMaximum.map(celsius) ?? "—")", 13),
+            pad("GPU \(s.gpuMaximum.map(celsius) ?? "—")", 13),
+            pad("curve \(curve)", 23),
+            pad(fan, 18),
+            s.packageWatts.map { String(format: "%.1f W", $0) } ?? "",
+            s.latched ? "  SAFETY GUARD" : ""
+        ].joined()
+    }
+
+    /// Metrics as rows, one column per profile.
+    static func table(_ results: [StressResult]) -> String {
+        let summaries = results.map(\.summary)
+        func row(_ title: String, _ value: (StressSummary) -> String) -> [String] {
+            [title] + summaries.map { $0.map(value) ?? "—" }
+        }
+        let rows: [[String]] = [
+            ["Summary"] + results.map { $0.completed ? $0.profile : "\($0.profile) (stopped)" },
+            row("CPU peak") { $0.peakCPU.map(celsius) ?? "—" },
+            row("CPU steady") { $0.steadyCPU.map(celsius) ?? "—" },
+            row("GPU peak") { $0.peakGPU.map(celsius) ?? "—" },
+            row("Fan peak") { "\(rpm($0.peakRPM))\($0.peakPercent.map { " (\(Int($0.rounded())) %)" } ?? "")" },
+            row("Fan steady") { s in s.steadyRPM.map { "\(rpm($0))\(s.steadySpreadRPM.map { " ± \(Int($0.rounded()))" } ?? "")" } ?? "—" },
+            row("Speeds up") { s in s.rampSeconds.map { "at \(Int($0)) s\(s.rampCPU.map { ", CPU \(celsius($0))" } ?? "")" } ?? "never" },
+            row("90 % of its rise") { $0.nearPeakSeconds.map { "at \(Int($0)) s" } ?? "—" },
+            row("Back to rest") { s in s.restSeconds.map { "\(Int($0)) s after" } ?? (s.returnedToRest ? "—" : "not in the cool-down") },
+            row("CPU at the end") { $0.endCPU.map(celsius) ?? "—" },
+            row("Power peak") { $0.peakWatts.map { String(format: "%.1f W", $0) } ?? "—" },
+            row("Safety guard") { $0.tripped ? "tripped" : "ok" }
+        ]
+        let widths = (0..<rows[0].count).map { column in rows.map { $0[column].count }.max()! + 3 }
+        return rows.map { cells in
+            "  " + cells.enumerated().map { pad($0.element, widths[$0.offset]) }.joined().trimmingCharacters(in: .whitespaces)
+        }.joined(separator: "\n") + "\n\n" + legend
+    }
+
+    static let legend = """
+      Steady: the last 30 s of load. ± is how much the speed moves there: a large value means the fan hunts
+      (more smoothing or hysteresis, or a slower fall). Speeds up: 300 RPM above the start. Back to rest: within
+      100 RPM of the start.
+
+    """
+}
+
 // MARK: - pulse fan curve
 
 struct FanCurveCommand: ParsableCommand {

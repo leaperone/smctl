@@ -74,7 +74,7 @@ public final class PulseStore {
     }
     @ObservationIgnored private var safetyTracker = SafetyAlertTracker()
 
-    @ObservationIgnored private let service: any PulseService
+    @ObservationIgnored let service: any PulseService
     @ObservationIgnored private let fallback: DirectSensorService?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
     @ObservationIgnored private var isPopoverOpen = false

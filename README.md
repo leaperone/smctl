@@ -120,6 +120,7 @@ $ pulse fan curve set work --from balanced --start 65          # copy a preset a
 $ pulse fan curve set custom --points 60:10%,80:45%,95:max --sensors 'Tp*'
 $ pulse fan curve show night                                   # table and bars: °C → % → RPM
 $ pulse fan curve set night --end 95 --dry-run                 # preview without saving
+$ pulse fan stress balanced night                              # heat the Mac under each, compare
 ```
 
 Curves live in `/etc/pulse/config.toml`. The file is readable and versionable, and you can also edit it by hand:
@@ -169,6 +170,7 @@ Safety  ok · ceiling 100.0 °C (hot-spots 110.0 °C)
 | `pulse fan interval [1-5] [--on-battery]` | Show or set how often the daemon reads the sensors (default 2 s), optionally a slower pace on battery (`same` removes it). Shorter reacts faster, longer uses less energy; near the safety ceiling it reads every second anyway |
 | `pulse fan profile auto\|silent\|balanced\|performance\|<curve>` | Switch profile |
 | `pulse fan curve list\|show\|set\|delete` | Manage curves |
+| `pulse fan stress <profile>… [--load s] [--cool s] [--cpu-only] [--csv file] [--json]` | Heat the Mac (every CPU core and the GPU) under each profile, record temperatures, the curve's input and fan speed, and compare: steady CPU and fan speed, when the fan speeds up, how long it takes to come back to rest. Also in the app: **Stress Test…** next to a curve |
 | `pulse fan set <rpm>` / `pulse fan auto` | Manual target / back to macOS |
 | `pulse sensors`, `pulse power status` | Raw sensors, thermal pressure and power |
 | `pulse battery …`, `pulse display …`, `pulse alert …` | Inherited from smctl (see [docs/smctl-README.md](docs/smctl-README.md)) |

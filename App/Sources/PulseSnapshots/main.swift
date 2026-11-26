@@ -85,6 +85,14 @@ func main() async {
                          to: output.appendingPathComponent("settings-\(name)-\(scheme == .dark ? "dark" : "light").png"))
         }
     }
+    // Stress test sheet: a finished run over the previous one.
+    let stress = StressTestModel.preview(profile: "night", title: "Night",
+                                         samples: StressTestModel.simulatedSamples(peakCPU: 84, peakRPM: 2900, rampAt: 22),
+                                         previous: StressTestModel.simulatedSamples(peakCPU: 88, peakRPM: 2300, rampAt: 34))
+    for scheme in [ColorScheme.light, .dark] {
+        await render(StressTestSheet(model: stress, fanRange: 1000...4900), scheme: scheme,
+                     to: output.appendingPathComponent("stress-test-\(scheme == .dark ? "dark" : "light").png"))
+    }
     // Automation pane with example rules.
     let automationDefaults = UserDefaults(suiteName: "pulse.snapshots.automation")!
     automationDefaults.removePersistentDomain(forName: "pulse.snapshots.automation")

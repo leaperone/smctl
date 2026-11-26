@@ -196,7 +196,7 @@ struct Fan: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "fan",
         abstract: "Inspect and control fans through \(ProductIdentity.daemonName).",
-        subcommands: [FanStatus.self, FanSet.self, FanAuto.self, FanProfile.self, FanCurveCommand.self, FanInterval.self]
+        subcommands: [FanStatus.self, FanSet.self, FanAuto.self, FanProfile.self, FanCurveCommand.self, FanInterval.self, FanStress.self]
     )
 }
 
