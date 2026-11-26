@@ -34,17 +34,17 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 
 ## Étape A : faire de `fstormacq/pulse` un vrai fork de `leaperone/smctl`
 
-**Constat.** Le dépôt GitHub est privé et n'est pas un fork. L'historique git est pourtant correct : `main` contient tout `upstream/main`, avec 34 commits d'avance et 0 de retard. GitHub ne permet pas de transformer un dépôt existant en fork, et un fork d'un dépôt public est forcément public.
+**Constat.** Le dépôt GitHub est privé et n'est pas un fork. L'historique git est pourtant correct : `main` contient tout `upstream/main`, avec 35 commits d'avance et 0 de retard. GitHub ne permet pas de transformer un dépôt existant en fork, et un fork d'un dépôt public est forcément public.
 
 **Pré-vérifications (déjà faites) :**
 - aucun secret dans les fichiers suivis : le DSN Sentry ne sert que dans des tests, avec `example.invalid` ;
 - aucune issue, PR, release ni secret GitHub sur le dépôt actuel : rien à migrer ;
 - le fichier non suivi « Apps Swift contrôle ventilateurs Mac.md » reste local ;
 - les tags `v0.2.0`…`v0.2.4` sont ceux d'upstream et existeront déjà dans le fork ;
-- **point de confidentialité** : 30 commits Pulse portent l'adresse e-mail iCloud personnelle. Un fork public la rendrait visible.
+- **point de confidentialité** : 32 des 35 commits Pulse portent l'adresse e-mail iCloud personnelle. Un fork public la rendrait visible.
 
 **Déroulé :**
-1. **Décision e-mail** (à prendre par toi). L'option recommandée réécrit l'auteur des commits Pulse uniquement (`git filter-repo --mailmap`) vers `126812667+fstormacq@users.noreply.github.com`. Les commits d'upstream restent intacts, donc l'ascendance avec smctl est conservée. Seuls les hashs des 34 commits Pulse changent, et personne d'autre n'en dépend. Avant la réécriture, on pose un tag local `backup/pre-fork`. On règle ensuite `git config user.email` sur l'adresse noreply et tu peux activer « Block command line pushes that expose my email » dans les réglages GitHub.
+1. **Décision e-mail** (à prendre par toi). L'option recommandée réécrit l'auteur des commits Pulse uniquement (`git filter-repo --mailmap`) vers `126812667+fstormacq@users.noreply.github.com`. Les commits d'upstream restent intacts, donc l'ascendance avec smctl est conservée. Seuls les hashs des 35 commits Pulse changent, et personne d'autre n'en dépend. Avant la réécriture, on pose un tag local `backup/pre-fork`. On règle ensuite `git config user.email` sur l'adresse noreply et tu peux activer « Block command line pushes that expose my email » dans les réglages GitHub.
 2. `gh repo rename pulse-archive -R fstormacq/pulse` : l'ancien dépôt reste privé et sert de filet de sécurité.
 3. `gh repo fork leaperone/smctl --fork-name pulse --clone=false`, puis vérifier `isFork: true` et `parent: leaperone/smctl`.
 4. `git remote set-url origin git@github.com:fstormacq/pulse.git`, puis `git push origin main`. C'est une avance rapide : notre `main` descend de `upstream/main`.
