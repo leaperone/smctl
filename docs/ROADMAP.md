@@ -92,7 +92,13 @@ Le déroulé détaillé de chaque étape restante, réévalué entre deux étape
 - [x] **Phase 1c, CLI** : `pulse status`, `pulse fan curve …`, détection des conflits
 - [x] **Phase 2, app de barre des menus** : package `App/`, libellé, popover, sélecteur de profil, installation du service, réglages, option monochrome pour la barre des menus (au repos : environ 0,2 % de CPU, 19 Mo)
 - [x] **Phase 3, éditeur** : onglet Courbes, graphique interactif (formes, poignées, raideur, points), aperçu live, bascule %/RPM, réglages d'entrée et de réponse, annuler/rétablir, protection des modifications non enregistrées (au repos : environ 0,1 % de CPU, 18 Mo ; détail dans [PLAN.md](PLAN.md))
-- [ ] **Phase 4, finitions** : notification quand le garde-fou se déclenche, lancement au login, déclencheurs (horaire de nuit), validation sur MacBook
+- [ ] **Phase 4, finitions** (détail et état dans [PLAN.md](PLAN.md)) :
+  - [x] 4a : notification quand le garde-fou se déclenche et quand il se relâche
+  - [x] 4b : lancement au login (le test après redémarrage est rattaché à la 4e)
+  - [x] 4c : déclencheurs selon l'état du système (app ou jeu ouvert, mode économie d'énergie, batterie ou secteur)
+  - [x] 4d : validation sur MacBook Pro M1 Pro, `pulse doctor`, interface pour les Mac sans ventilateur et à deux ventilateurs
+  - [ ] 4e : campagne de tests matériels, sur le MacBook et le Mac mini
+  - [ ] 4f : 1.0 — fait : profilage, intervalle de collecte de 1 à 5 s (avec un rythme sur batterie), fenêtre gardée au premier plan après le mot de passe ; reste : CI pour `App/`, section Aide, publication
 
 ## 4. Tests
 
@@ -130,6 +136,7 @@ On rejoue des traces enregistrées (repos, compilation, pics) avec chaque preset
 ### Performance
 - **Objectifs** : app au repos sous 0,1 % de CPU et sous 30 Mo de mémoire ; `pulsed` sous 0,2 % de CPU ; tick sous 50 ms hors écriture.
 - **Mesure** : avant et après la zone morte d'écriture.
+- **Résultats (MacBook Pro M1 Pro, 26/11/2026)** : app au repos à 0,15 % de CPU et 20 Mo réels ; daemon avec une courbe active à 0,62 % (1 s), 0,30 % (2 s, défaut) et 0,14 % (5 s). En profil auto, le daemon ne lit les capteurs qu'à la demande de l'app. Détail dans [PLAN.md](PLAN.md).
 
 ## 5. Risques
 

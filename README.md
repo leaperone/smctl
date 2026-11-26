@@ -25,7 +25,7 @@ Pulse is a lightweight, native Swift app for Apple silicon Macs. It shows your M
   </picture>
 </p>
 
-> 🚧 **Work in progress.** Tested on a Mac mini M4 (macOS 27). Finishing touches (safety notifications, schedules, MacBook validation) are next. See the [roadmap](docs/ROADMAP.md).
+> 🚧 **Work in progress, close to 1.0.** Tested on a Mac mini M4 and a 14" MacBook Pro M1 Pro (macOS 27). A hardware test campaign and the 1.0 release are next. See the [roadmap](docs/ROADMAP.md).
 
 ## What works today
 
@@ -36,8 +36,11 @@ Pulse is a lightweight, native Swift app for Apple silicon Macs. It shows your M
 | **Profiles** | *Auto* (macOS), *Silent*, *Balanced*, *Performance*, and your own curves. |
 | **Custom curves** | Percent-based shapes (linear, sigmoid, exponential, logarithmic, steps) that you stretch with start/end temperatures, a floor, a ceiling and a steepness. You can also use explicit points. |
 | **Curve editor** | In Settings › Curves: drag the ramp's ends or free points on a chart, pick a shape and its steepness, choose sensors and how fast the fan may speed up or slow down. A live marker shows the current temperature and what the curve would ask for, with the presets drawn faintly for reference. Undo, % or RPM axis, and unsaved changes are never lost silently. |
+| **Automation** | In Settings › Automation, rules switch the profile on their own: *Performance* while a game or app is open, *Silent* in Low Power Mode, on battery or on the power adapter. The first rule that applies wins; a profile you pick by hand always wins until the rule's condition goes away. |
+| **Sensor refresh** | In Settings › General › Sensors, a slider sets how often the sensors are read, from 1 to 5 s (2 s by default). On a MacBook, an optional slower pace applies on battery; the service switches the moment you unplug, even with Pulse closed. |
+| **Every Apple silicon Mac** | Two-fan MacBook Pros run each fan on its own range from the same curve. Fanless MacBook Airs get temperatures only: no fan readings, no profiles. |
 | **`pulse` CLI** | `pulse status` gives an overview for SSH. `pulse fan curve …` creates, previews, edits and deletes curves. Every command supports `--json`. |
-| **Footprint** | The app uses ~0.1% CPU and ~18 MB at idle (closed windows release their views; the beating icon costs ~2% while it beats). The daemon reads the SMC once per second, skips redundant fan writes and caches SMC key metadata. |
+| **Footprint** | The app uses ~0.1% CPU and ~20 MB at idle (closed windows release their views; the beating icon costs ~2–4% while it beats). With a curve active, the daemon uses ~0.3% CPU at the default 2 s pace (0.14% at 5 s); on *Auto* it reads the sensors only when the app asks. It skips redundant fan writes and caches SMC key metadata. |
 
 ### The heartbeat
 
@@ -142,7 +145,7 @@ idle = "minimum"        # at 0%: "system" (default), "minimum" or "off"
 
 ```console
 $ pulse status
-pulse · daemon 0.2.4 · profile balanced
+pulse · daemon 0.2.4 · profile balanced · every 2 s
 
 Temperatures
   CPU     avg 55.5 °C  max 75.0 °C  (Tp3P) · 12 sensors
@@ -200,7 +203,7 @@ The build is ad-hoc signed for personal use. Writes to the fan service are allow
 Fan writes happen in one small root daemon (`pulsed`). The app and the CLI are unprivileged clients over XPC. From smctl, Pulse inherits:
 
 - **Never leave a brick.** Quitting, killing, uninstalling or crashing hands the fans back to macOS: termination hooks, startup reconciliation and launchd restart.
-- **Thermal safety guard.** It cannot be disabled. A sustained reading above 100 °C (hot-spots 110 °C) returns the fans to macOS until things cool down. Losing every sensor also trips it.
+- **Thermal safety guard.** It cannot be disabled. A sustained reading above 100 °C (hot-spots 110 °C) returns the fans to macOS until things cool down. Losing every sensor also trips it. Pulse reads the sensors every second near the limit, whatever the refresh setting, and notifies you when the guard engages and when it releases.
 - **Verified writes and graceful degradation.** If a macOS update changes the SMC, fan control turns read-only and says so.
 
 Pulse adds input validation for curves, refuses to rewrite a config file that fails to parse, ignores powered-down sensors, and warns when another fan app (TG Pro, Macs Fan Control, Stats, smcFanControl, smctl) is installed or running.

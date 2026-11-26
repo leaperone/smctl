@@ -188,10 +188,14 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 - Commande de diagnostic `pulse doctor` à créer : elle produira un rapport à me transmettre.
 
 ### 4e. Campagne de tests matériels (§4 de la feuille de route)
+
+> ⬜ **À faire**, sur le MacBook Pro M1 Pro **et** sur le Mac mini M4.
 - Installation et désinstallation, changement de profil (app et SSH), veille et réveil, `kill -9 pulsed`, fermeture de l'app, charge soutenue, garde-fou provoqué, outil concurrent, redémarrage.
 - Je prépare un script qui guide chaque test et enregistre les résultats. Les étapes avec `sudo` ou une action physique sont faites par toi.
 
 ### 4f. Préparation de la version 1.0
+
+> 🟡 **En cours.** Fait : profilage, intervalle de collecte (1 à 5 s, rythme sur batterie), fenêtre gardée au premier plan après le mot de passe. Reste : CI pour `App/`, section Aide, version 1.0 et ses décisions.
 - Profiler `pulsed` (objectif < 0,2 %) et viser < 0,1 % pour l'app au repos.
 - CI : ajout de la compilation et des tests de `App/` si les runners proposent Xcode 26.
 - Version 1.0, notes de version, archive de `Pulse.app`. Signature : ad hoc ou compte développeur, à décider.
@@ -572,3 +576,16 @@ macOS n'offre donc **aucun signal fiable**, et sa propre heuristique ne reconna�
 - L'objectif de 0,2 % est atteint à partir de 3 s avec une courbe active, et dès 2 s en profil auto (aucune lecture hors demande de l'app).
 - PulseBench : phases fermées entre 0,4 et 0,8 %, aucune vue SwiftUI restante, glisser à 11,4 ms par image.
 - **Reste de la 4f** : CI pour `App/`, section Aide, version 1.0. **Puis 4e**, sur le MacBook et le Mac mini (le script devra tester la bascule d'intervalle au débranchement).
+
+### 26/11/2026 : correctif de la fenêtre après le mot de passe (`ee450a3`)
+- **Symptôme** : à « Reinstall… », une fois le mot de passe saisi, une autre app passait au premier plan et la fenêtre Réglages restait derrière.
+- **Cause** : la fenêtre de mot de passe appartient à un autre processus. Quand elle se ferme, macOS active l'app classique précédente, pas Pulse (app de barre des menus, sans icône dans le Dock). Le `NSApp.activate()` de fin est coopératif : il est refusé, puisque l'utilisateur n'a pas demandé ce changement et que personne ne cède la place. Reproduit avec une app d'essai : `activate()` et `NSRunningApplication.activate(options:)` échouent, `activate(from:)` et `activate(ignoringOtherApps:)` (dépréciée) réussissent.
+- **Correctif** : un `ActivationGuard`, armé pendant les actions qui demandent le mot de passe (installation, réinstallation, lien CLI), annule aussitôt toute activation d'une app classique avec `activate(from:)`. Les hôtes de la fenêtre de mot de passe (SecurityAgent, osascript) ne sont pas des apps classiques et ne sont pas concernés. Chaque activation est journalisée (catégorie `activation`). **Validé par toi.**
+- **Règle** : pour reprendre le premier plan après une action système, utiliser `activate(from:)`, jamais `NSApp.activate()` seul.
+
+### 26/11/2026 : où on en est, et la suite
+- **Terminé** : A (sauf la suppression de `pulse-archive`), phases 0 à 3, 4a à 4d, et dans la 4f : profilage, intervalle de collecte, correctif de fenêtre.
+- **Suite proposée, dans l'ordre** :
+  1. **Fin de la 4f, partie code** : CI pour `App/` (si les runners GitHub ont Xcode 26), section Aide dans les Réglages.
+  2. **4e, campagne de tests matériels** : un script guidé, à lancer sur le MacBook puis sur le Mac mini. Il commence par `pulse doctor --test-fans`, puis couvre installation, changement de profil, veille, `kill -9`, redémarrage, garde-fou (`scripts/test-safety-notification.sh`), outil concurrent, bascule d'intervalle au débranchement (MacBook) et essai prolongé ventilateurs arrêtés (Mac mini).
+  3. **Dépôt et publication**, à décider ensemble : signature (ad hoc ou compte développeur), version 1.0 et notes, archive de `Pulse.app`, PR vers smctl, suppression de `pulse-archive`.
