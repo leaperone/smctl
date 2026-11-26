@@ -435,7 +435,9 @@ struct CurveAxes: View, Equatable {
         .chartXAxis {
             AxisMarks(values: .stride(by: 10)) { value in
                 AxisGridLine().foregroundStyle(.quaternary)
-                AxisValueLabel { Text("\(value.as(Int.self) ?? 0)°C") }
+                // Centred under its grid line: the default anchor starts the
+                // label at the line, so "60°C" read as about 63 °C.
+                AxisValueLabel(anchor: .top) { Text("\(value.as(Int.self) ?? 0)°C") }
             }
         }
         .chartYAxis {
