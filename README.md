@@ -91,7 +91,7 @@ The 15 s delay keeps a temperature hovering at the ramp start from toggling the 
 | **Balanced** | sigmoid (steepness 8): calm, then a decisive climb | 70 → 100 °C | 0 → 100% | 6 s | 3 °C | 3 / 1 %/s |
 | **Performance** | linear, on the **CPU average** (not the hottest sensor): steady and predictable | 55 → 90 °C | 10 → 100% | 5 s | 2 °C | 10 / 4 %/s |
 
-Each curve runs through the same pipeline once per second:
+Each curve runs through the same pipeline at every sensor read (every 2 s by default, 1 to 5 s in Settings › General › Sensors):
 
 1. Take the **max** of all temperature sensors, or of the curve's sensors. Sensors of powered-down blocks are ignored: an idle GPU reads ~0 °C.
 2. **Smooth** it with an exponential moving average, so a one-second spike does not rev the fan.
