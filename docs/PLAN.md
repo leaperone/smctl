@@ -182,6 +182,8 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 **Risque :** l'accès complet au disque est accordé à une signature précise. Avec une signature ad hoc, chaque build peut le perdre. Ça gêne le développement, pas l'usage quotidien. Si Concentration reste inaccessible, on garde les autres signaux et on documente.
 
 ### 4d. Validation sur MacBook (nécessite ton MacBook)
+
+> 🟡 **En cours depuis le 26/11/2026** sur MacBook Pro M1 Pro (voir le journal). Restent tes vérifications : icône à côté de l'encoche, règle « On Battery », réinstallation du daemon.
 - Chemin `Ftst` (les MacBook Pro M-series ont besoin du déblocage d'écriture), fonctions batterie de smctl, modèle sans ventilateur (MacBook Air : surveillance seule, éléments liés au ventilateur masqués).
 - Commande de diagnostic `pulse doctor` à créer : elle produira un rapport à me transmettre.
 
@@ -490,3 +492,55 @@ macOS n'offre donc **aucun signal fiable**, et sa propre heuristique ne reconna�
 - Avec ton réglage de battement « toujours » : 2,8 %, conforme au coût connu du battement (environ 2,5 %).
 - La mémoire reste à 80 Mo : point toujours ouvert pour la 4f.
 - **Règle** : toujours mesurer avec `--args -menuBarHeartbeat off`. Une mesure lancée par un simple `open` hérite de ton réglage « toujours ».
+
+### 26/11/2026 : étape 4d sur MacBook Pro M1 Pro (MacBookPro18,3, macOS 27.2.1)
+**Matériel constaté** (`pulse doctor`) :
+- **2 ventilateurs** avec des plages différentes : 1200–5779 et 1200–6241 RPM ;
+- **pas de clé `Ftst`** : le déblocage passe par le **chemin direct** (`F0Md = 1` accepté tel quel) ;
+- capteurs Tp×14, TC×12, Tg×4, Ts×8 ;
+- batterie lisible, mais **aucune clé de contrôle de charge** (ni `CHTE` ni `CH0B`/`CH0C`). Seul le contrôle de l'adaptateur (`CHIE`) existe.
+
+**Écriture sur les ventilateurs : validée.** Une consigne manuelle de 2 500 RPM, puis le test `pulse doctor --test-fans` à 40 % : les deux ventilateurs atteignent la cible en environ 5 s. Avec une courbe à 0 %, ils reviennent à macOS après 15 s (`auto`, 0 RPM). Le journal du daemon indique « via direct ». **Le chemin `Ftst` reste non validé** : il concerne les MacBook M3/M4, qu'on n'a pas.
+
+**Livré :**
+- `6550c21` **correctif hérité de smctl** : sans clés de contrôle de charge, l'état « charge autorisée » était lu comme faux. La politique voulait réactiver la charge, échouait, et journalisait l'erreur (avec un envoi Sentry) toutes les 10 s. L'évaluation ne fait plus rien dans ce cas ; une limite configurée est signalée une seule fois dans le statut du daemon. Correctif générique, candidat à une PR vers smctl.
+- `dbc184e` : `pulse battery status` affichait « charging: disabled » sur ce Mac. Sans clés de contrôle, l'état de charge vient maintenant d'IOKit (`IsCharging`).
+- `593ba6b` **`pulse doctor`** (texte ou `--json`) :
+  - modèle, puce, macOS ;
+  - ventilateurs (plage, clé de mode), présence de `Ftst` et chemin de déblocage attendu ;
+  - contrôle de charge et d'adaptateur, groupes de capteurs ;
+  - version du daemon et de la CLI, dernière erreur, garde-fou, outils concurrents ;
+  - une liste de vérifications ✓ / · / ! / ✗ ;
+  - `--test-fans` : 40 % sur chaque ventilateur, attente de la stabilisation, retour au profil d'origine (même après Ctrl-C).
+  - 8 tests.
+- `5423d89` **interface** :
+  - **Mac sans ventilateur** (MacBook Air) : le popover masque les profils et la légende « Fan », son état affiche « No fan » ; les onglets Courbes et Automation expliquent qu'il n'y a rien à piloter ;
+  - **MacBook Pro** : l'axe RPM de l'éditeur suit le ventilateur 1, avec une note quand les autres ont une autre plage (« Fan 2 runs the same % on 1200–6241 RPM ») ;
+  - `SampleService` accepte une plage par ventilateur ; captures MacBook Pro et sans ventilateur ajoutées ;
+  - 4 tests (90 côté app au total).
+- `001725c` (agent séparé) : les libellés de température de l'éditeur sont centrés sous leur graduation.
+
+**Mesures (M1 Pro) :**
+- PulseBench (2 passages) :
+  - toutes les phases « fermé » entre 0,5 et 0,8 % ;
+  - aucune vue SwiftUI ne survit à la fermeture ;
+  - « réglages ouverts » à 8 % puis 3,2 % (bruit) ;
+  - **glisser à 11,6 ms par image** (sous 16 ms) : la limite à 30 Hz est inutile.
+- App réelle au repos, battement coupé : **0,37 % de CPU, 78 Mo** (M4 : 0,10 %).
+- Daemon : **0,52 %, 15 Mo** (M4 : 0,22 %). Mesuré avec l'ancien daemon, qui journalisait encore l'erreur batterie toutes les 10 s.
+- Le M1 Pro est plus lent par cœur que le M4, mais l'écart dépasse ce qu'explique la puce. **Pour la 4f**, à profiler sur ce MacBook.
+
+**Ce qui n'a pas marché, et ce qu'on en retient :**
+1. `pulse debug keys --prefix …` énumère toutes les clés SMC, ce qui prend plus de 20 s sur ce Mac. **Règle** : sonder des clés précises avec `pulse debug read`.
+2. Refuser une limite de charge sans clés de contrôle cassait 4 tests d'upstream (la config doit pouvoir la stocker). On la signale au lieu de la refuser.
+3. Sans l'autorisation d'enregistrement d'écran, la liste des fenêtres ne montre pas les éléments de la barre des menus. Impossible de vérifier l'encoche automatiquement.
+4. `zsh` a un `log` intégré : appeler `/usr/bin/log`.
+
+**À faire de ton côté :**
+1. **Réinstaller le daemon** (Réglages > Service) : le build 127 contient les correctifs batterie. Je vérifierai ensuite que l'erreur a disparu des journaux et je referai la mesure du daemon.
+2. **Encoche** : l'icône Pulse est-elle visible ? Si trop d'icônes sont présentes, macOS masque celles qui tombent sous l'encoche.
+3. **Règle batterie** : Réglages > Automation > « On Battery → Silent », débrancher le chargeur, vérifier la bascule (environ 7 s), rebrancher et vérifier le retour.
+
+**Ajustements :**
+- **4e** : `pulse doctor --test-fans` devient la première étape de la campagne, sur chaque Mac.
+- **4f** : profiler l'app (0,37 %) et le daemon (0,52 %) sur le M1 Pro, après la réinstallation ; la mémoire de l'app (78 Mo) reste ouverte.

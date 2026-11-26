@@ -138,5 +138,5 @@ On rejoue des traces enregistrées (repos, compilation, pics) avec chaque preset
 | Une mise à jour de macOS modifie le SMC | Dégradation en lecture seule, suivi d'upstream |
 | Le sérialiseur TOML casse la config | Tests aller-retour, écriture atomique |
 | Conflits de merge dans `Daemon.swift` | Ajouts regroupés dans des extensions de fichiers séparés |
-| Chemin `Ftst` (MacBook) non validé | Validation en phase 4 |
+| Chemin `Ftst` (MacBook M3/M4) non validé | Le MacBook Pro M1 Pro n'a pas de `Ftst` (chemin direct, validé). `pulse doctor --test-fans` permettra de valider `Ftst` sur un M3/M4 |
 | Signature ad hoc refusée par un futur macOS | Passage à un compte développeur |
