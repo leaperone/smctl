@@ -126,6 +126,14 @@ final class SmctlDaemonTests: XCTestCase {
         XCTAssertNil(daemon.daemonStatus().lastError)
     }
 
+    func testDesktopMacWithoutBatteryHasNoDaemonError() {
+        // Mac mini: no BUIC at all. The 10 s battery evaluation must not leave
+        // an error behind (pulse doctor reported it as a fault).
+        let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
+        daemon.evaluateLocked()
+        XCTAssertNil(daemon.daemonStatus().lastError)
+    }
+
     func testChargeLimitWithoutChargingControlKeysIsReportedNotWritten() throws {
         let backend = RecordingBackend()
         backend.values["BUIC"] = [80]
@@ -489,6 +497,9 @@ final class SmctlDaemonTests: XCTestCase {
     func testWriteErrorAlertIgnoresGeneralDaemonError() {
         let daemon = makeDaemon(backend: RecordingBackend(), capabilities: .oneFan)
         daemon.config.alerts = [AlertConfig(name: "writes", on: "write-error", cooldown: 0, action: "log")]
+        // A charge limit on a Mac without a readable battery is a general
+        // (non-write) daemon error.
+        daemon.config.battery.limit = "80"
 
         daemon.evaluateLocked()
         XCTAssertNotNil(daemon.daemonStatus().lastError, "test setup should create a general daemon error")

@@ -14,13 +14,17 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PULSE="$(command -v pulse || echo "$ROOT/dist/Pulse.app/Contents/Helpers/pulse")"
-APP="$ROOT/dist/Pulse.app"
+# The running app (it may live in /Applications rather than dist/), and its
+# CLI unless `pulse` is on the PATH.
+APP="$(ps -o comm= -p "$(pgrep -x Pulse | head -1)" 2>/dev/null | sed -n 's|\(.*\.app\)/Contents/MacOS/Pulse$|\1|p')"
+[[ -n "$APP" ]] || APP="$ROOT/dist/Pulse.app"
+PULSE="$(command -v pulse || echo "$APP/Contents/Helpers/pulse")"
 MODEL="$(sysctl -n hw.model)"
 CHIP="$(sysctl -n machdep.cpu.brand_string)"
 MACOS="$(sw_vers -productVersion)"
 HAS_BATTERY=false
 pmset -g batt | grep -q InternalBattery && HAS_BATTERY=true
+HAS_FANS=true   # set from the daemon at start (MacBook Air: no fan)
 RESULTS_DIR="$ROOT/docs/campaign"
 RESULTS="${RESULTS:-$RESULTS_DIR/$MODEL-$(date +%Y-%m-%d).md}"
 STATE="$HOME/Library/Caches/pulse-campaign-state"
@@ -39,17 +43,25 @@ yesno() { local a; read -r -p "  $1 [y/n] " a; [[ "$a" == y* ]]; }
 # `pulse status --json` (d is the decoded object).
 status() { "$PULSE" status --json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print($1)" 2>/dev/null; }
 profile() { status 'd.get("profile")'; }
-daemon_pid() { pgrep -f com.stormacq.pulse.daemon | head -1; }
+DAEMON_PATH=/Library/PrivilegedHelperTools/com.stormacq.pulse.daemon
+daemon_pid() { pgrep -f "^$DAEMON_PATH" | head -1; }
 app_running() { pgrep -x Pulse >/dev/null; }
 fan_modes() { status '",".join(f["mode"] for f in d["fans"])'; }
 fan_rpms() { status '",".join(str(round(f.get("actualRPM") or 0)) for f in d["fans"])'; }
-cpu_max() { status 'round(next(g["maximumCelsius"] for g in d["groups"] if g["group"]=="Tp"),1)'; }
+cpu_max() { status 'round(max([g["maximumCelsius"] for g in d["groups"] if g["label"]=="CPU"] or [0]),1)'; }
 daemon_running() { [[ "$(status 'd["daemon"]["running"]')" == True ]]; }
 latched() { status 'd["safety"]["latched"] if d.get("safety") else False'; }
 
 # Wait up to $1 seconds for `$2` (a command) to succeed.
 wait_for() { local t=$1; shift; for _ in $(seq 1 "$t"); do "$@" && return 0; sleep 1; done; return 1; }
 is_profile() { [[ "$(profile)" == "$1" ]]; }
+
+# Tests that drive fans are skipped on fanless Macs: `needs_fans 5 || return`.
+needs_fans() {
+    $HAS_FANS && return 0
+    record "$1" "${TITLES[$(($1 - 1))]}" skip "Mac sans ventilateur"
+    return 1
+}
 
 # MARK: Results
 
@@ -59,7 +71,7 @@ init_results() {
         cat > "$RESULTS" <<EOF
 # Campagne de tests matériels : $MODEL
 
-- **Mac** : $MODEL, $CHIP, macOS $MACOS, batterie : $HAS_BATTERY
+- **Mac** : $MODEL, $CHIP, macOS $MACOS, batterie : $HAS_BATTERY, ventilateurs : $(status 'len(d["fans"])')
 - **Pulse** : $("$PULSE" --version 2>/dev/null || echo "?"), daemon $(status 'd["daemon"].get("version")')
 - **Début** : $CAMPAIGN_START
 
@@ -122,14 +134,19 @@ TITLES=(
     "Outil concurrent"
     "Garde-fou provoqué et notifications"
     "Désinstallation et réinstallation du service"
-    "Ventilateurs arrêtés, essai prolongé (Mac mini)"
+    "Ventilateurs arrêtés, essai prolongé (Mac de bureau)"
     "Redémarrage du Mac"
 )
 
 t_doctor() {
-    info "pulse doctor --test-fans: each fan to 40 %, then the profile is restored."
     local json problems
-    json="$("$PULSE" doctor --test-fans --json 2>/dev/null)"
+    if $HAS_FANS; then
+        info "pulse doctor --test-fans: each fan to 40 %, then the profile is restored."
+        json="$("$PULSE" doctor --test-fans --json 2>/dev/null)"
+    else
+        info "pulse doctor (no fan: no write test)."
+        json="$("$PULSE" doctor --json 2>/dev/null)"
+    fi
     problems="$(echo "$json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("; ".join(c["name"]+": "+c["detail"] for c in d["checks"] if c["level"] in ("problem","warning")))')"
     local fans
     fans="$(echo "$json" | python3 -c 'import json,sys; d=json.load(sys.stdin); t=d.get("fanTest") or {}; print(", ".join("ventilateur %d : %d → %d RPM en %s s" % (f["index"], f["targetRPM"], f["reachedRPM"] or 0, round(f["secondsToSettle"], 1) if f.get("secondsToSettle") is not None else "—") for f in t.get("fans", [])) or "aucun ventilateur")')"
@@ -140,6 +157,7 @@ t_doctor() {
 }
 
 t_profile_cli() {
+    needs_fans 2 || return
     "$PULSE" fan profile "$CURVE" >/dev/null 2>&1
     if wait_for 10 is_profile "$CURVE"; then
         sleep 4
@@ -150,6 +168,7 @@ t_profile_cli() {
 }
 
 t_profile_app() {
+    needs_fans 3 || return
     "$PULSE" fan profile "$CURVE" >/dev/null 2>&1
     if ask "Dans le popover de Pulse, clique sur le profil Silent."; then
         if wait_for 30 is_profile silent; then local app=ok; else local app="profil lu : $(profile)"; fi
@@ -197,6 +216,7 @@ t_interval() {
 }
 
 t_app_quit() {
+    needs_fans 5 || return
     "$PULSE" fan profile "$CURVE" >/dev/null 2>&1
     osascript -e 'quit app "Pulse"' >/dev/null 2>&1
     wait_for 10 sh -c '! pgrep -x Pulse >/dev/null'
@@ -213,6 +233,7 @@ t_app_quit() {
 }
 
 t_kill9() {
+    needs_fans 6 || return
     "$PULSE" fan profile "$CURVE" >/dev/null 2>&1
     local before; before="$(daemon_pid)"
     info "sudo kill -9 $before (mot de passe demandé)…"
@@ -230,6 +251,7 @@ t_kill9() {
 }
 
 t_sleep_wake() {
+    needs_fans 7 || return
     "$PULSE" fan profile "$CURVE" >/dev/null 2>&1
     local before; before="$(daemon_pid)"
     local since; since="$(date '+%Y-%m-%d %H:%M:%S')"
@@ -249,6 +271,7 @@ t_sleep_wake() {
 }
 
 t_load() {
+    needs_fans 8 || return
     "$PULSE" fan profile "$CURVE" >/dev/null 2>&1
     info "Compiling the heat load (CPU + GPU)…"
     LOAD_DIR="$(mktemp -d)"
@@ -263,7 +286,7 @@ t_load() {
     for step in $(seq 1 $((LOAD_SECONDS / 5))); do
         sleep 5
         local line t g r w
-        line="$(status '"%s %s %s %s" % (round(max(x["maximumCelsius"] for x in d["groups"] if x["group"]=="Tp"),1), round(max([x["maximumCelsius"] for x in d["groups"] if x["group"]=="Tg"] or [0]),1), max([round(f.get("actualRPM") or 0) for f in d["fans"]] or [0]), round(next((p["value"] for p in d["power"] if p["key"]=="PDTR"), 0),1))')"
+        line="$(status '"%s %s %s %s" % (round(max([x["maximumCelsius"] for x in d["groups"] if x["label"]=="CPU"] or [0]),1), round(max([x["maximumCelsius"] for x in d["groups"] if x["label"]=="GPU"] or [0]),1), max([round(f.get("actualRPM") or 0) for f in d["fans"]] or [0]), round(next((p["value"] for p in d["power"] if p["key"]=="PDTR"), 0),1))')"
         read -r t g r w <<< "$line"
         printf '  %3d s  CPU %s °C  GPU %s °C  fan %s RPM  %s W\n' $((step * 5)) "$t" "$g" "$r" "$w"
         python3 -c "import sys; sys.exit(0 if float('$t') > float('$peak_temp') else 1)" && peak_temp="$t"
@@ -304,8 +327,9 @@ t_conflict() {
 }
 
 t_safety() {
+    needs_fans 10 || return
     info "Le plafond passe à 45 °C pour déclencher le garde-fou, puis la config est restaurée."
-    sudo "$ROOT/scripts/test-safety-notification.sh" "$CURVE" || { record 10 "${TITLES[9]}" skip "script interrompu"; return; }
+    sudo "$ROOT/scripts/test-safety-notification.sh" "$CURVE" "$PULSE" || { record 10 "${TITLES[9]}" skip "script interrompu"; return; }
     local engaged released
     yesno "As-tu vu la notification « Temperature limit reached » ?" && engaged=yes || engaged=no
     sleep 5
@@ -319,7 +343,8 @@ t_install() {
     # Two paths: "Reinstall" (install over a running service, as the app's
     # button does) keeps the profile; uninstall hands the fans back to macOS
     # for good and saves "auto", so a later install starts on Auto.
-    "$PULSE" fan profile "$CURVE" >/dev/null 2>&1
+    local keep="$CURVE"; $HAS_FANS || keep=auto
+    $HAS_FANS && "$PULSE" fan profile "$CURVE" >/dev/null 2>&1
     sleep 3
     info "1/2 Réinstallation par-dessus le service (sudo pulse daemon install)…"
     local install_error
@@ -341,10 +366,10 @@ t_install() {
     fi
     sleep 2
     local p_after; p_after="$(profile)"
-    "$PULSE" fan profile "$CURVE" >/dev/null 2>&1
+    $HAS_FANS && "$PULSE" fan profile "$CURVE" >/dev/null 2>&1
 
     local notes="réinstallation : relancé $over, profil $p_over conservé ; désinstallation : arrêté $stopped, ventilateurs $modes ; installation : relancé $back, profil $p_after"
-    if [[ $over == yes && $p_over == "$CURVE" && $stopped == yes && $modes != *manual* && $back == yes && $p_after == auto ]]; then
+    if [[ $over == yes && $p_over == "$keep" && $stopped == yes && $modes != *manual* && $back == yes && $p_after == auto ]]; then
         record 11 "${TITLES[10]}" pass "$notes"
     else
         record 11 "${TITLES[10]}" fail "$notes ; erreur : ${install_error:-aucune}"
@@ -352,7 +377,8 @@ t_install() {
 }
 
 t_idle_off() {
-    if $HAS_BATTERY; then record 12 "${TITLES[11]}" skip "Mac mini seulement"; return; fi
+    needs_fans 12 || return
+    if $HAS_BATTERY; then record 12 "${TITLES[11]}" skip "Mac de bureau seulement"; return; fi
     if ! yesno "Lancer l'essai ventilateurs arrêtés pendant $IDLE_OFF_MINUTES min ? (config modifiée puis restaurée, sudo)"; then
         record 12 "${TITLES[11]}" skip ""; return
     fi
@@ -421,13 +447,19 @@ case "${1:-}" in
         sed -n '2,13p' "$0"; exit 0;;
 esac
 
+python3 -c 'import json' 2>/dev/null || { echo "python3 is required (xcode-select --install)." >&2; exit 1; }
+[[ -x "$PULSE" ]] || { echo "pulse CLI not found (looked on the PATH and in $APP)." >&2; exit 1; }
 [[ -n "$(daemon_pid)" ]] || { echo "The Pulse service is not running: install it first (Settings › Service)." >&2; exit 1; }
 app_running || { echo "Open Pulse.app first." >&2; exit 1; }
+
+[[ "$(status 'len(d["fans"])')" == 0 ]] && HAS_FANS=false
+command -v swiftc >/dev/null || info "swiftc not found: test 8 (heat load) will be skipped."
+command -v clang >/dev/null || info "clang not found: test 9 (competing tool) will be skipped."
 
 SELECTED=("$@")
 [[ ${#SELECTED[@]} -gt 0 ]] || SELECTED=($(seq 1 ${#TESTS[@]}))
 
-bold "Pulse hardware campaign on $MODEL ($CHIP, macOS $MACOS)"
+bold "Pulse hardware campaign on $MODEL ($CHIP, macOS $MACOS, battery: $HAS_BATTERY, fans: $HAS_FANS)"
 info "Curve under test: $CURVE · results: $RESULTS"
 init_results
 save_state

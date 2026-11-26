@@ -783,8 +783,12 @@ public final class SmctlDaemon: @unchecked Sendable {
 
     func evaluateLocked() {
         guard let observation = currentObservationLocked() else {
+            // Desktop Macs have no battery: that is not an error, unless the
+            // user configured a charge limit that cannot apply.
             lastEvaluation = Date()
-            lastError = "No readable battery charge/charging state was found on this Mac."
+            lastError = currentChargeLimitLocked().isLimiting
+                ? "Charge limit \(config.battery.limit) is set, but no readable battery charge/charging state was found on this Mac."
+                : nil
             return
         }
         // Some Macs (e.g. M1 Pro on macOS 27) expose no charging-control keys.
