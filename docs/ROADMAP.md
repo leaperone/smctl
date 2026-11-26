@@ -62,7 +62,7 @@ On accepte des motifs (`"Tp*"` pour les hotspots CPU, `"Tg*"` pour le GPU, `"Ts*
 
 ### 2.7 Communication app ↔ daemon
 - Nouvelles méthodes XPC : `getTelemetry` (instantané en cache, un seul appel), `listFanCurves`, `upsertFanCurve`, `deleteFanCurve`, `previewFanCurve`.
-- Le daemon lit les capteurs toutes les `[fan] interval` secondes (1 à 5, 2 par défaut, réglable par un slider dans l'app et par `pulse fan interval`), et chaque seconde près du plafond du garde-fou. L'app l'interroge au même rythme. On n'utilise pas de push XPC : la complexité n'en vaut pas la peine.
+- Le daemon lit les capteurs toutes les `[fan] interval` secondes (1 à 5, 2 par défaut, réglable par un slider dans l'app et par `pulse fan interval`), avec un rythme optionnel sur batterie (`battery_interval`) que le daemon applique seul au branchement ou débranchement, et chaque seconde près du plafond du garde-fou. L'app l'interroge au même rythme. On n'utilise pas de push XPC : la complexité n'en vaut pas la peine.
 - Sans daemon, l'app lit les capteurs directement via SMCCore, en mode surveillance seule.
 
 ### 2.8 CLI `pulse`

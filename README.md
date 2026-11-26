@@ -124,6 +124,7 @@ Curves live in `/etc/pulse/config.toml`. The file is readable and versionable, a
 [fan]
 profile = "night"
 interval = 2            # seconds between sensor reads, 1 to 5 (Settings › General › Sensors)
+battery_interval = 4    # optional: slower pace on battery
 
 [[fan.curves]]
 name = "night"
@@ -161,7 +162,7 @@ Safety  ok · ceiling 100.0 °C (hot-spots 110.0 °C)
 |---|---|
 | `pulse status [--watch] [--json]` | Overview: temperatures, fans, profile, curve, power, safety, other fan controllers |
 | `pulse doctor [--test-fans] [--json]` | Diagnostic report for bug reports: model, chip, fans and their unlock path (direct or Ftst), charging control, sensors, daemon, conflicts. `--test-fans` drives each fan to 40 % for a few seconds and restores the profile |
-| `pulse fan interval [1-5]` | Show or set how often the daemon reads the sensors (default 2 s). Shorter reacts faster, longer uses less energy; near the safety ceiling it reads every second anyway |
+| `pulse fan interval [1-5] [--on-battery]` | Show or set how often the daemon reads the sensors (default 2 s), optionally a slower pace on battery (`same` removes it). Shorter reacts faster, longer uses less energy; near the safety ceiling it reads every second anyway |
 | `pulse fan profile auto\|silent\|balanced\|performance\|<curve>` | Switch profile |
 | `pulse fan curve list\|show\|set\|delete` | Manage curves |
 | `pulse fan set <rpm>` / `pulse fan auto` | Manual target / back to macOS |

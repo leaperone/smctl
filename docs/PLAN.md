@@ -555,3 +555,20 @@ macOS n'offre donc **aucun signal fiable**, et sa propre heuristique ne reconna�
 - Avec une courbe active : **0,60 %** de CPU, 14 réveils par seconde. Correction : les 82 réveils par seconde de la première mesure ne venaient pas des lectures SMC (le daemon n'en fait plus que 14 avec le même nombre de lectures).
 
 **Conséquence** : à 1 s, le coût suit le nombre de lectures. Pour approcher 0,2 % avec une courbe, il faut lire moins souvent (proposition de l'utilisateur : intervalle de collecte réglable de 1 à 5 s) ou lire moins de clés (batterie et puissance à la demande, environ −16 %).
+
+### 26/11/2026 : étape 4f, intervalle de collecte (ta proposition)
+- `c26ec25` : `[fan] interval`, de 1 à 5 s, 2 par défaut. Le minuteur reste à 1 s, mais les lectures SMC ne se font qu'au rythme choisi. À moins de 20 °C du plafond d'un capteur, ou quand le garde-fou est verrouillé, lecture chaque seconde : il se déclenche donc aussi vite qu'avant. Vitesses de variation, lissage et délai de passage à macOS sont calculés en temps écoulé, donc les courbes gardent leur comportement. Batterie et puissance ne sont plus lues à chaque tick (puissance lue à la demande pour la télémétrie).
+- `80d578c` : slider à 5 crans dans Réglages > Général > Sensors ; l'app interroge le daemon au même rythme, popover ouvert compris.
+- `c607f26` et suivant : `[fan] battery_interval`, optionnel. Le daemon suit la source d'alimentation par notification IOKit : la bascule est immédiate et fonctionne app fermée, ce qui explique ce choix plutôt qu'une règle d'automatisation (elles ne tournent qu'app ouverte). Dans l'app, un second slider « On battery » sur les Mac à batterie ; l'onglet Automation y renvoie. CLI : `pulse fan interval 5 --on-battery`, `same` pour le retirer.
+
+**Mesures, daemon avec courbe active (M1 Pro, 2 min par palier) :**
+
+| Intervalle | CPU du daemon |
+|---|---|
+| 1 s | 0,62 % |
+| 2 s (défaut) | 0,30 % |
+| 5 s | **0,14 %** |
+
+- L'objectif de 0,2 % est atteint à partir de 3 s avec une courbe active, et dès 2 s en profil auto (aucune lecture hors demande de l'app).
+- PulseBench : phases fermées entre 0,4 et 0,8 %, aucune vue SwiftUI restante, glisser à 11,4 ms par image.
+- **Reste de la 4f** : CI pour `App/`, section Aide, version 1.0. **Puis 4e**, sur le MacBook et le Mac mini (le script devra tester la bascule d'intervalle au débranchement).
