@@ -141,11 +141,37 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 ### 4b. Lancement au login (déjà livré en phase 2)
 - Il ne reste qu'à vérifier après un vrai redémarrage (test matériel 9) que l'app et le daemon reviennent et que le profil actif est conservé.
 
-### 4c. Déclencheurs (horaire de nuit, etc.)
-- **Décision à prendre à cette étape**. Recommandation : dans le **daemon** (`[[fan.schedules]]` dans le TOML), pour que les déclencheurs fonctionnent sans l'app et soient visibles en SSH. Par exemple `{ profile = "silent", from = "22:00", to = "07:00", days = "all" }`.
-- Règles : un choix manuel l'emporte jusqu'au prochain changement d'horaire ; le garde-fou l'emporte toujours ; passage à l'heure d'été et réveil de veille testés.
-- Autres déclencheurs possibles, à valider avec toi : sur batterie ou sur secteur (MacBook), écran éteint.
-- CLI (`pulse fan schedule list|set|delete`), XPC et une section « Horaires » dans l'onglet Courbes.
+### 4c. Déclencheurs selon l'état du système (révisé le 26/11/2026)
+
+**Ta décision :** pas d'horaires fixes dans le daemon. Le profil suit ce que fait le Mac : un mode Concentration actif, Night Shift, un jeu, la charge, l'économie d'énergie…
+
+**Ce que macOS permet de lire** (testé sur le Mac mini) :
+
+| Signal | Comment | Statut |
+|---|---|---|
+| Économie d'énergie | `ProcessInfo.isLowPowerModeEnabled` et sa notification | API publique |
+| Secteur, batterie, en charge | `IOPSCopyPowerSourcesInfo`, notification `IOPSNotificationCreateRunLoopSource` | API publique (MacBook surtout) |
+| Mode Concentration actif, **et lequel** | `~/Library/DoNotDisturb/DB/Assertions.json` et `ModeConfigurations.json` (noms : « Repos », « Jeu vidéo », « Work »…) | Lisible ; **probablement soumis à l'accès complet au disque** (à vérifier depuis l'app) |
+| Night Shift | `CBBlueLightClient` (CoreBrightness, **API privée**) | Lisible depuis le terminal ; le sens des champs reste à confirmer |
+| Mode Jeu de macOS | aucune API ; macOS l'active quand un jeu (`LSApplicationCategoryType` = jeux) est **en plein écran au premier plan**, et on peut détecter la même chose | Heuristique |
+| Écran éteint, session verrouillée | notifications `NSWorkspace` / distribuées | API publique |
+
+**Conception :**
+- **Les règles vivent dans l'app**, pas dans le daemon. Ces signaux appartiennent à la session de l'utilisateur, que le daemon (root) ne voit pas. Conséquence : elles ne s'appliquent que si l'app tourne (elle démarre au login). Le profil choisi reste visible en SSH (`pulse status`).
+- **Une règle** : « Quand ‹condition›, utiliser ‹profil› ». Les règles sont ordonnées, et la première qui correspond l'emporte. Si aucune ne correspond, on revient au **profil de base**, c'est-à-dire le dernier profil choisi à la main.
+- **Choix manuel pendant qu'une règle est active** : il devient le nouveau profil de base, et la règle est suspendue jusqu'à ce que sa condition disparaisse puis revienne. Pulse ne reprend donc jamais un choix que tu viens de faire.
+- **Garde-fou** (ta décision 3) : après un déclenchement, **les règles sont suspendues** jusqu'à ce que tu choisisses toi-même un profil. Une règle ne doit pas réactiver une courbe sur un Mac qui a surchauffé.
+- **Anti-rebond** : une condition doit tenir quelques secondes avant d'agir (par exemple, une sortie de plein écran rapide ne fait pas basculer le profil).
+- **Interface** : une section « Automatic Switching » (liste de règles, ajout, ordre, interrupteur général) dans un nouvel onglet ou sous Curves. Le popover indique « Silent · Focus: Repos » quand une règle est active.
+
+**Découpage :**
+1. `SystemConditions` : lecture et observation des signaux, avec un test de faisabilité de chacun **depuis l'app** (accès complet au disque pour Concentration, Night Shift). Les signaux inaccessibles sont grisés et expliqués.
+2. `AutomationEngine` (logique pure, testée) : règles, priorité, profil de base, suspension manuelle, suspension après le garde-fou, anti-rebond.
+3. Branchement sur `PulseStore.activate` et persistance des règles (préférences de l'app).
+4. Interface, captures et mesures. Point d'attention : les observations ne doivent rien coûter au repos (notifications plutôt que sondage ; le fichier Concentration surveillé avec `DispatchSource`).
+5. Test réel : activer « Repos », vérifier la bascule, puis faire un choix manuel et vérifier qu'il est respecté.
+
+**Risque :** l'accès complet au disque est accordé à une signature précise. Avec une signature ad hoc, chaque build peut le perdre. Ça gêne le développement, pas l'usage quotidien. Si Concentration reste inaccessible, on garde les autres signaux et on documente.
 
 ### 4d. Validation sur MacBook (nécessite ton MacBook)
 - Chemin `Ftst` (les MacBook Pro M-series ont besoin du déblocage d'écriture), fonctions batterie de smctl, modèle sans ventilateur (MacBook Air : surveillance seule, éléments liés au ventilateur masqués).
@@ -398,3 +424,8 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
   - **À traiter en 4f** : arrondir ou retarder les valeurs de la barre des menus pour réduire les redessins, et chercher d'où viennent les 80 Mo au repos.
 
 **Pour 4c (déclencheurs)** : c'est le prochain point qui demande une décision de ta part (où vivent les horaires : daemon, recommandé, ou app). La 4b se limite à un test de redémarrage, déjà rattaché à la campagne 4e.
+
+### 26/11/2026 : tes décisions après la 4a
+1. **Preset Performance** (`53e1c5a`) : rampe linéaire de 55 à 90 °C, de 10 à 100 %, sur la **moyenne CPU** (`Tp*`) au lieu du capteur le plus chaud. Les résumés disent « average » quand les poids sont égaux. **Le daemon installé garde l'ancien preset** tant qu'il n'est pas réinstallé (onglet Service).
+2. **Déclencheurs** : pas d'horaires fixes. Ils suivront l'état du système. La 4c est réécrite ci-dessus, avec les résultats des tests de faisabilité.
+3. **Après le garde-fou**, le Mac reste en automatique et c'est à toi de choisir à nouveau un profil. C'est le comportement actuel, gardé volontairement : il signale un problème de refroidissement. Conséquence pour la 4c : les règles automatiques sont suspendues après un déclenchement, jusqu'à ton choix.
