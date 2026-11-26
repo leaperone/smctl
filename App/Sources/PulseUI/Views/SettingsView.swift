@@ -336,13 +336,17 @@ struct ServiceSettings: View {
         working = true
         message = nil
         Task { @MainActor in
+            // The password prompt hands activation to the previous app when it
+            // closes; the guard brings the settings window straight back.
+            let guardian = ActivationGuard {
+                NSApp.windows.first { $0.identifier == SettingsWindowController.windowIdentifier }
+            }
             do {
                 try await Task.detached { try action() }.value
             } catch {
                 message = error.localizedDescription
             }
-            NSApp.activate()
-            NSApp.windows.first { $0.identifier == SettingsWindowController.windowIdentifier }?.makeKeyAndOrderFront(nil)
+            guardian.finish()
             cliLinked = ServiceInstaller.cliLinkInstalled
             await store.refresh(forceLists: true)
             working = false
