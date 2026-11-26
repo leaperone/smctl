@@ -359,6 +359,28 @@ public struct CurveDraft: Equatable, Sendable {
         return last.percent
     }
 
+    /// The curve's vertices across `temperatureRange`, for drawing: the
+    /// shape's adaptive compilation (within 0.5% of full speed) or the points,
+    /// extended flat to both ends. About 20–40 vertices instead of a dense grid.
+    public var outline: [(celsius: Double, percent: Double)] {
+        var vertices: [(celsius: Double, percent: Double)]
+        if let shape = spec.shape {
+            vertices = shape.compiledPoints().map { (celsius: $0.celsius, percent: $0.fraction * 100) }
+        } else {
+            vertices = percentPoints
+        }
+        guard let first = vertices.first, let last = vertices.last else { return [] }
+        let range = Self.temperatureRange
+        vertices = vertices.filter { range.contains($0.celsius) }
+        if first.celsius > range.lowerBound || vertices.first?.celsius != range.lowerBound {
+            vertices.insert((range.lowerBound, percent(at: range.lowerBound)), at: 0)
+        }
+        if last.celsius < range.upperBound || vertices.last?.celsius != range.upperBound {
+            vertices.append((range.upperBound, percent(at: range.upperBound)))
+        }
+        return vertices
+    }
+
     // MARK: Helpers
 
     static func makeShape(kind: FanCurveShapeKind, start: Double, end: Double, minimum: Double, maximum: Double,

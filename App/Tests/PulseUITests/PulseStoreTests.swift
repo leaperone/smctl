@@ -16,7 +16,7 @@ struct PulseStoreTests {
         #expect(store.groups.map(\.label) == ["CPU", "GPU", "Board"])
         #expect(store.history.count == 5)
         #expect(store.canControlFans)
-        #expect(store.profileChoices.map(\.name) == ["auto", "silent", "balanced", "performance", "night"])
+        #expect(store.profileChoices.map(\.name) == ["auto", "silent", "balanced", "performance", "night", "steady"])
         #expect(store.title(forProfile: "night") == "Night")
     }
 

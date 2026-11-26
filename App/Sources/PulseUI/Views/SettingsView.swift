@@ -31,7 +31,7 @@ public enum SettingsPane: String, CaseIterable, Sendable {
     public var size: CGSize {
         switch self {
         case .general: return CGSize(width: 500, height: 720)
-        case .curves: return CGSize(width: 780, height: 560)
+        case .curves: return CGSize(width: 780, height: 600)
         case .service: return CGSize(width: 500, height: 420)
         case .about: return CGSize(width: 500, height: 300)
         }

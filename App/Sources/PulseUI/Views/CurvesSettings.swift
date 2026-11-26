@@ -220,26 +220,81 @@ struct CurvesSettings: View {
     }
 }
 
-/// The selected curve: header with actions, chart and settings summary.
+/// The selected curve: header with actions, then the editor (user curves) or
+/// a read-only chart and summary (presets).
 struct CurveDetail: View {
     let store: PulseStore
     let entry: FanCurveEntryDTO
     let duplicate: () -> Void
     let rename: () -> Void
     let delete: () -> Void
+    @AppStorage(SettingsKey.fanSpeedUnit) private var unit: FanSpeedUnit = .rpm
+    @Environment(\.undoManager) private var undoManager
+    @State private var editor: CurveEditorModel?
+    @State private var saving = false
 
     private var spec: FanCurveSpec { entry.spec }
     private var isActive: Bool { store.activeProfile == spec.name }
 
+    /// The first fan's range, for RPM labels; nil on fanless Macs or without telemetry.
+    private var fanRange: FanSpeedRange? {
+        guard let fan = store.fans.first, let low = fan.minimumRPM, let high = fan.maximumRPM, high > low else { return nil }
+        return FanSpeedRange(minimumRPM: low, maximumRPM: high)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
-            CurvesChart(specs: [(spec, .accentColor)], showsLegend: false)
-                .frame(height: 250)
-            summary
-            Spacer(minLength: 0)
+            if entry.builtin || !store.canEditCurves {
+                CurvesChart(specs: [(spec, .accentColor)], temperatures: CurveDraft.temperatureRange, showsLegend: false)
+                    .frame(height: 250)
+                summary(showsShape: true)
+                Spacer(minLength: 0)
+            } else if let editor {
+                CurveEditor(model: editor, unit: $unit, hasFanRange: fanRange != nil)
+                summary(showsShape: false)
+                Spacer(minLength: 0)
+                saveBar(editor)
+            }
         }
         .padding(20)
+        .task(id: spec.name) { loadEditor() }
+        .onChange(of: undoManager) { editor?.undoManager = undoManager }
+    }
+
+    private func loadEditor() {
+        guard !entry.builtin else {
+            editor = nil
+            return
+        }
+        let model = CurveEditorModel(spec: spec, range: fanRange ?? FanSpeedRange(minimumRPM: 0, maximumRPM: 100))
+        model.undoManager = undoManager
+        editor = model
+    }
+
+    private func saveBar(_ editor: CurveEditorModel) -> some View {
+        HStack {
+            if let error = editor.draft.validationError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            Spacer()
+            Button("Revert") { editor.revert() }
+                .disabled(!editor.draft.isDirty || saving)
+            Button("Save") {
+                Task {
+                    saving = true
+                    defer { saving = false }
+                    let draft = editor.draft.spec
+                    if await store.save(draft, activate: false) {
+                        editor.reload(spec: draft, range: editor.draft.range)
+                    }
+                }
+            }
+            .keyboardShortcut("s", modifiers: .command)
+            .disabled(!editor.draft.isDirty || editor.draft.validationError != nil || saving)
+        }
     }
 
     private var header: some View {
@@ -280,9 +335,12 @@ struct CurveDetail: View {
         }
     }
 
-    private var summary: some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 6) {
-            summaryRow("Shape", CurveSummary.shape(spec))
+    private func summary(showsShape: Bool) -> some View {
+        let spec = editor?.draft.spec ?? spec
+        return Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 6) {
+            if showsShape {
+                summaryRow("Shape", CurveSummary.shape(spec))
+            }
             summaryRow("Sensors", CurveSummary.sensors(spec))
             summaryRow("Response", CurveSummary.response(spec))
             summaryRow("Hysteresis", CurveSummary.hysteresis(spec))

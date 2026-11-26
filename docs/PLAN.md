@@ -93,6 +93,8 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 - Tests : contraintes de chaque poignée, conversion en points (écart avec la forme d'origine inférieur à 2 % sur toute la plage), mode points toujours valide, `validate()` qui ne lève jamais d'erreur sur un brouillon accepté, aller-retour avec `SampleService`.
 
 ### 3c. Graphique interactif
+
+> ✅ **Faite le 26/11/2026** (voir le journal).
 - On part de `CurvesChart`. `chartOverlay` et `ChartProxy` convertissent les coordonnées en (°C, %) ; `DragGesture` pilote les poignées (`PointMark` agrandis au survol, curseur adapté).
 - Forme : 2 poignées d'extrémité, plus une poignée de raideur au milieu de la rampe qu'on glisse verticalement (avec un curseur en complément, pour l'accessibilité).
 - Paliers : un réglage du nombre de paliers. Points : on glisse chaque point, un double-clic en ajoute un, la touche Suppr retire le point sélectionné.
@@ -204,3 +206,30 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 
 **Ajustements :**
 - 3c : la plage de température affichée passe de 40–110 à 30–110 °C pour correspondre aux bornes du modèle.
+
+### 26/11/2026 : étape 3c terminée
+**Livré :**
+- Éditeur des courbes perso dans l'onglet Courbes, avec :
+  - un menu **Forme** (Linéaire, S, Exponentielle, Logarithmique, Paliers, Points) ;
+  - un curseur de **raideur** ou un sélecteur du **nombre de paliers** ;
+  - un graphique 30–110 °C avec poignées : deux extrémités pour une forme, chaque point en mode Points ;
+  - glisser avec aimantation à 0,5 °C et 1 %, double-clic pour ajouter un point (une forme est d'abord convertie, en une seule étape annulable), clic pour sélectionner et Suppr pour retirer ;
+  - poignées agrandies au survol, avec un curseur « main » ;
+  - bascule **% / RPM** de l'axe vertical, avec graduations rondes (1000, 2000…) ;
+  - Annuler et Rétablir (⌘Z / ⇧⌘Z), un pas par glisser ;
+  - VoiceOver : une poignée = un élément ajustable (±1 °C), avec les actions « Faster » et « Slower » (±1 %).
+- Boutons Annuler les modifications et Enregistrer (⌘S) en version simple ; 3e ajoutera les protections.
+- `CurveEditorModel` (sélection, glisser, annuler) : 6 nouveaux tests. 2 autres tests pour le tracé et les graduations RPM.
+- PulseBench : phase « éditeur ouvert/fermé » et mesure d'un glisser à 60 Hz.
+
+**Ce qui n'a pas marché, et ce qu'on en retient :**
+1. **Pas de poignée de raideur au milieu de la rampe** : une courbe en S passe toujours par 50 % en son milieu, quelle que soit sa raideur, donc la poignée ne bougerait pas. On garde un curseur.
+2. Un sélecteur segmenté à six choix débordait de la fenêtre (530 points disponibles) : remplacé par un menu déroulant.
+3. **Coût d'un glisser** : environ 13,7 ms de CPU par image au départ (rendu synchrone forcé), contre 5,5 ms pour un graphique Swift Charts minimal. Les essais ont montré que ni l'aire, ni les poignées, ni l'accessibilité, ni la couche de gestes ne pesaient. Ce qui pèse : les **axes personnalisés**, que Swift Charts recalcule à chaque changement de données (environ 4 ms), et les contrôles AppKit autour (environ 3 ms). Le graphique est maintenant séparé en deux couches superposées et alignées (axes fixes derrière, courbe devant), et il est tracé à partir de ses sommets (environ 30) au lieu de 161 échantillons. Résultat : 12,2 ms par image, soit −13 %. J'ai arrêté là : le reste vient du coût de base de SwiftUI et de Swift Charts, et il ne se paie que pendant un glisser. **Parade si le MacBook saccade (4d)** : limiter les mises à jour à 30 Hz pendant le glisser.
+4. Le bench mesurait d'abord le « temps par image » en temps réel, attente de l'affichage comprise. Il affiche maintenant le CPU par image, qui est la vraie charge.
+
+**Mesures :** app au repos à 0,12 % (17,7 Mo). PulseBench : éditeur ouvert 1,5 %, refermé 0,4 %, glisser 38 % pendant le geste.
+
+**Ajustements des étapes suivantes :**
+- 3d : les réglages d'entrée et de réponse (capteurs, agrégation, hystérésis, vitesses, lissage) deviennent éditables à la place du résumé, et la marque « température actuelle » s'ajoute dans la couche de la courbe. Les courbes fantômes des presets iront dans la couche fixe des axes, pour ne rien coûter pendant un glisser.
+- 3e : brancher Enregistrer et Activer, gérer la sauvegarde d'une courbe active, protéger les modifications non enregistrées (changement de courbe, fermeture de la fenêtre).

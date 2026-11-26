@@ -223,4 +223,24 @@ struct CurveDraftTests {
             }
         }
     }
+
+    @Test func outlineMatchesTheCurveWithFewVertices() {
+        for preset in FanCurvePresets.all + [FanCurveSpec(name: "p", points: [.init(20, .percent(10)), .init(60, .percent(30)), .init(130, .percent(90))])] {
+            let draft = CurveDraft(preset)
+            let outline = draft.outline
+            #expect(outline.first?.celsius == 30)
+            #expect(outline.last?.celsius == 110)
+            #expect(outline.count < 60, "\(preset.name): \(outline.count) vertices")
+            #expect(zip(outline, outline.dropFirst()).allSatisfy { $0.celsius < $1.celsius })
+            var worst = 0.0
+            for celsius in stride(from: 30.0, through: 110.0, by: 0.25) {
+                guard let b = outline.firstIndex(where: { $0.celsius >= celsius }) else { continue }
+                let a = max(0, b - 1)
+                let (p, q) = (outline[a], outline[b])
+                let drawn = q.celsius == p.celsius ? q.percent : p.percent + (q.percent - p.percent) * (celsius - p.celsius) / (q.celsius - p.celsius)
+                worst = max(worst, abs(drawn - draft.percent(at: celsius)))
+            }
+            #expect(worst < 1, "\(preset.name): drawn line is \(worst)% off")
+        }
+    }
 }

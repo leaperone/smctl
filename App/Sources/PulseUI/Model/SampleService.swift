@@ -23,6 +23,10 @@ public final class SampleService: PulseService, @unchecked Sendable {
             name: "night", label: "Night",
             shape: try! FanCurveShape(kind: .exponential, startCelsius: 85, endCelsius: 105, maximumFraction: 0.6),
             hysteresisCelsius: 3, riseRate: .percentPerSecond(4), fallRate: .percentPerSecond(2), smoothingSeconds: 15
+        ), FanCurveSpec(
+            name: "steady", label: "Steady", sensors: ["Tp*"],
+            points: [.init(50, .percent(5)), .init(65, .percent(15)), .init(80, .percent(45)), .init(92, .percent(80)), .init(100, .percent(100))],
+            hysteresisCelsius: 2, riseRate: .percentPerSecond(6), fallRate: .percentPerSecond(3), smoothingSeconds: 8
         )]
     }
 

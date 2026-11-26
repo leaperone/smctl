@@ -44,7 +44,7 @@ let package = Package(
         // and settings window: swift run -c release PulseBench [seconds]
         .executableTarget(
             name: "PulseBench",
-            dependencies: ["PulseUI"]
+            dependencies: ["PulseUI", .product(name: "PolicyEngine", package: "pulse")]
         ),
         .testTarget(
             name: "PulseUITests",

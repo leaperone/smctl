@@ -1,6 +1,8 @@
 import AppKit
 import Darwin
+import PolicyEngine
 import PulseUI
+import SwiftUI
 
 // Measures the app's own CPU cost with the real status item, popover and
 // settings window, fed by sample data:
@@ -48,8 +50,51 @@ final class Bench: NSObject, NSApplicationDelegate {
         setvbuf(stdout, nil, _IONBF, 0); print(String(format: "%-34@ %6.2f%% CPU   %5.1f MB", name as NSString, percent, footprintMB()))
     }
 
+    /// Drags the end handle of a curve at 60 Hz in an on-screen editor and
+    /// reports CPU and the time to lay out and draw each frame.
+    func measureDrag() async {
+        var spec = FanCurvePresets.balanced
+        spec.name = "bench"
+        let model = CurveEditorModel(spec: spec, range: FanSpeedRange(minimumRPM: 1000, maximumRPM: 4900))
+        let root: AnyView = ProcessInfo.processInfo.environment["X_MIN_CHART"] != nil
+            ? AnyView(MinimalChart(model: model).frame(width: 530, height: 240).padding(20))
+            : AnyView(CurveEditor(model: model, unit: .constant(.percent), hasFanRange: true).frame(width: 530).padding(20))
+        let hosting = NSHostingView(rootView: root)
+        let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 570, height: 380), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        try? await Task.sleep(for: .seconds(1))
+        model.beginDrag(.end)
+        let start = cpuSeconds()
+        let began = Date()
+        var frameTimes: [Double] = []
+        for frame in 0..<Int(seconds * 60) {
+            let t0 = Date()
+            model.drag(to: 90 + 10 * sin(Double(frame) / 20), percent: 70 + 30 * cos(Double(frame) / 15))
+            hosting.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            frameTimes.append(Date().timeIntervalSince(t0) * 1000)
+            try? await Task.sleep(for: .milliseconds(16))
+        }
+        model.endDrag()
+        let cpu = cpuSeconds() - start
+        let percent = cpu / Date().timeIntervalSince(began) * 100
+        let sorted = frameTimes.sorted()
+        // Wall time per frame includes waiting for the display; CPU per frame
+        // is the work that has to fit in the 16.7 ms budget.
+        print(String(format: "%-34@ %6.2f%% CPU   %.1f ms CPU per frame (wall: median %.1f, p95 %.1f ms)",
+                     "dragging a handle (60 Hz)" as NSString, percent, cpu * 1000 / Double(frameTimes.count),
+                     sorted[sorted.count / 2], sorted[Int(Double(sorted.count) * 0.95)]))
+        window.orderOut(nil)
+    }
+
     func run() async {
         // A full history, as after a few minutes of running.
+        if ProcessInfo.processInfo.environment["PULSE_BENCH_DRAG_ONLY"] != nil {
+            setvbuf(stdout, nil, _IONBF, 0)
+            await measureDrag()
+            exit(0)
+        }
         store = await PulseStore.preview(samples: PulseStore.historyLength)
         settings = SettingsWindowController(store: store)
         statusItem = StatusItemController(store: store) { [settings] in settings?.show($0) }
@@ -65,10 +110,10 @@ final class Bench: NSObject, NSApplicationDelegate {
         await measure("settings open")
         settings.close()
         await measure("settings closed")
-        settings.show(.curve("balanced"))
-        await measure("curves pane open")
+        settings.show(.curve("night"))
+        await measure("curve editor open")
         settings.close()
-        await measure("curves pane closed")
+        await measure("curve editor closed")
         statusItem.showPopover()
         try? await Task.sleep(for: .seconds(1))
         statusItem.closePopover()
@@ -76,6 +121,7 @@ final class Bench: NSObject, NSApplicationDelegate {
         try? await Task.sleep(for: .seconds(1))
         settings.close()
         await measure("both opened and closed again")
+        await measureDrag()
         exit(0)
     }
 }
@@ -86,3 +132,18 @@ app.setActivationPolicy(.accessory)
 let bench = Bench(seconds: seconds)
 app.delegate = bench
 app.run()
+
+import Charts
+struct MinimalChart: View {
+    let model: CurveEditorModel
+    var body: some View {
+        let line = model.draft.outline
+        Chart {
+            ForEach(line, id: \.celsius) { point in
+                LineMark(x: .value("T", point.celsius), y: .value("S", point.percent))
+            }
+        }
+        .chartXScale(domain: 30...110)
+        .chartYScale(domain: 0...100)
+    }
+}
