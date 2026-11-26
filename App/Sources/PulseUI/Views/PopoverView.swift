@@ -2,6 +2,7 @@ import Charts
 import PolicyEngine
 import SMCtlClient
 import SMCtlProtocol
+import ProductIdentity
 import SwiftUI
 
 /// The window shown from the menu bar item.
@@ -93,6 +94,14 @@ public struct PopoverView: View {
                 Label("Settings…", systemImage: "gearshape")
             }
             .keyboardShortcut(",")
+            Spacer()
+            Button {
+                if let url = URL(string: ProductIdentity.helpURL) { NSWorkspace.shared.open(url) }
+            } label: {
+                Label("Help", systemImage: "questionmark.circle")
+            }
+            .keyboardShortcut("?")
+            .help("Open the Pulse help in your browser")
             Spacer()
             Button {
                 NSApplication.shared.terminate(nil)

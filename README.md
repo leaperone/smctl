@@ -39,7 +39,7 @@ Pulse is a lightweight, native Swift app for Apple silicon Macs. It shows your M
 | **Automation** | In Settings › Automation, rules switch the profile on their own: *Performance* while a game or app is open, *Silent* in Low Power Mode, on battery or on the power adapter. The first rule that applies wins; a profile you pick by hand always wins until the rule's condition goes away. |
 | **Sensor refresh** | In Settings › General › Sensors, a slider sets how often the sensors are read, from 1 to 5 s (2 s by default). On a MacBook, an optional slower pace applies on battery; the service switches the moment you unplug, even with Pulse closed. |
 | **Every Apple silicon Mac** | Two-fan MacBook Pros run each fan on its own range from the same curve. Fanless MacBook Airs get temperatures only: no fan readings, no profiles. |
-| **Help** | Settings › Help explains what each setting does to the fans, and what to do when something looks wrong. |
+| **Help** | [docs/HELP.md](docs/HELP.md) explains what each setting does to the fans, and what to do when something looks wrong. **Help** in the menu bar popover opens it. |
 | **`pulse` CLI** | `pulse status` gives an overview for SSH. `pulse fan curve …` creates, previews, edits and deletes curves. Every command supports `--json`. |
 | **Footprint** | The app uses ~0.1% CPU and ~20 MB at idle (closed windows release their views; the beating icon costs ~2–4% while it beats). With a curve active, the daemon uses ~0.3% CPU at the default 2 s pace (0.14% at 5 s); on *Auto* it reads the sensors only when the app asks. It skips redundant fan writes and caches SMC key metadata. |
 

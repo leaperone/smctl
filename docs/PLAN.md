@@ -195,7 +195,7 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 
 ### 4f. Préparation de la version 1.0
 
-> 🟡 **Partie code terminée le 26/11/2026** : profilage, intervalle de collecte (1 à 5 s, rythme sur batterie), fenêtre gardée au premier plan après le mot de passe, CI pour `App/`, onglet Aide. **Reste la publication**, qui attend la 4e et tes décisions (signature, version 1.0, PR vers smctl, `pulse-archive`).
+> 🟡 **Partie code terminée le 26/11/2026** : profilage, intervalle de collecte (1 à 5 s, rythme sur batterie), fenêtre gardée au premier plan après le mot de passe, CI pour `App/`, aide utilisateur (`docs/HELP.md`). **Reste la publication**, qui attend la 4e et tes décisions (signature, version 1.0, PR vers smctl, `pulse-archive`).
 - Profiler `pulsed` (objectif < 0,2 %) et viser < 0,1 % pour l'app au repos.
 - CI : ajout de la compilation et des tests de `App/` si les runners proposent Xcode 26.
 - Version 1.0, notes de version, archive de `Pulse.app`. Signature : ad hoc ou compte développeur, à décider.
@@ -595,3 +595,9 @@ macOS n'offre donc **aucun signal fiable**, et sa propre heuristique ne reconna�
 - **Aide** (`76ae361`) : onglet « Help » dans les Réglages, huit sujets (fonctionnement, profils, lecture d'une courbe, réglages de réponse, rythme des capteurs, automatisation, limite de température, dépannage avec `pulse doctor`). Les plages des presets, les plafonds du garde-fou et la plage du rythme sont lus dans le code ; les réglages de réponse reprennent les textes des boutons ⓘ. Rien ne peut donc diverger de l'app. 4 tests, captures vérifiées en clair et en sombre.
 - **Porte de validation** : 98 tests app, tous les tests du package, PulseBench (phases fermées entre 0,4 et 0,8 %, aucune vue restante, glisser à 11,5 ms par image).
 - **Ensuite** : la 4e ensemble, sur le MacBook puis le Mac mini. La publication suivra, avec tes décisions.
+
+### 26/11/2026 : l'aide sort des Réglages (ta demande)
+- Un onglet Help à côté de About n'avait pas sa place. L'aide devient un document, [`docs/HELP.md`](HELP.md), avec le même contenu (tableau des profils, réglages de réponse, rythme des capteurs, automatisation, limite de température, dépannage).
+- Pulse est une app de barre des menus, sans menu Help macOS : le lien « Help » est dans le pied du popover, entre Settings… et Quit (raccourci ⌘?). Il ouvre la page GitHub du document.
+- L'onglet est retiré. Le document est écrit à la main, mais 2 tests (`HelpDocumentTests`) vérifient que ses chiffres suivent le code : plages des presets, capteur suivi, plancher de Performance, plafonds du garde-fou, plage du rythme.
+- **Ensuite** : le script de la campagne 4e, qu'on lance ensemble, puis la réflexion sur la publication.

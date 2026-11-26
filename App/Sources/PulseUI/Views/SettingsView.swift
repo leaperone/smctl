@@ -6,7 +6,7 @@ import SwiftUI
 /// Settings panes, hosted by `SettingsWindowController` in a toolbar-style tab
 /// view, like the Settings windows of Apple's apps.
 public enum SettingsPane: String, CaseIterable, Sendable {
-    case general, curves, automation, service, help, about
+    case general, curves, automation, service, about
 
     public var title: String {
         switch self {
@@ -14,7 +14,6 @@ public enum SettingsPane: String, CaseIterable, Sendable {
         case .curves: return "Curves"
         case .automation: return "Automation"
         case .service: return "Service"
-        case .help: return "Help"
         case .about: return "About"
         }
     }
@@ -25,7 +24,6 @@ public enum SettingsPane: String, CaseIterable, Sendable {
         case .curves: return "chart.xyaxis.line"
         case .automation: return "wand.and.stars"
         case .service: return "lock.shield"
-        case .help: return "questionmark.circle"
         case .about: return "info.circle"
         }
     }
@@ -62,7 +60,6 @@ public struct SettingsView: View {
                     ContentUnavailableView("Automation Unavailable", systemImage: "wand.and.stars")
                 }
             case .service: ServiceSettings(store: store)
-            case .help: HelpView()
             case .about: AboutView()
             }
         }
