@@ -156,6 +156,12 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 | Mode Jeu de macOS | aucune API ; macOS l'active quand un jeu (`LSApplicationCategoryType` = jeux) est **en plein écran au premier plan**, et on peut détecter la même chose | Heuristique |
 | Écran éteint, session verrouillée | notifications `NSWorkspace` / distribuées | API publique |
 
+**Priorités décidées avec toi (26/11/2026) :**
+1. **Mode Jeu** → Performance ou une courbe « gaming ». C'est ce qui t'intéresse le plus. Piste trouvée dans `gamepolicyd` : des notifications Darwin (`com.apple.gamepolicy.game-mode-session`, `fullscreenStateChanged`, `GameExited`) et un service `scdynamicstore`. **À confirmer** avec `scripts/gamemode-probe.sh` pendant une vraie partie. Si rien d'exploitable n'en sort, on se rabat sur la même heuristique que macOS (un jeu en plein écran au premier plan).
+2. **Économie d'énergie**, **secteur / batterie**.
+3. **Concentration** (« Repos » en particulier) : en option. Ce sera « à voir » quand le reste marchera, de peur que ce soit un gadget.
+4. **Night Shift : abandonné** (tu entendais « Repos » ; on évite ainsi l'API privée).
+
 **Conception :**
 - **Les règles vivent dans l'app**, pas dans le daemon. Ces signaux appartiennent à la session de l'utilisateur, que le daemon (root) ne voit pas. Conséquence : elles ne s'appliquent que si l'app tourne (elle démarre au login). Le profil choisi reste visible en SSH (`pulse status`).
 - **Une règle** : « Quand ‹condition›, utiliser ‹profil› ». Les règles sont ordonnées, et la première qui correspond l'emporte. Si aucune ne correspond, on revient au **profil de base**, c'est-à-dire le dernier profil choisi à la main.
@@ -429,3 +435,12 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 1. **Preset Performance** (`53e1c5a`) : rampe linéaire de 55 à 90 °C, de 10 à 100 %, sur la **moyenne CPU** (`Tp*`) au lieu du capteur le plus chaud. Les résumés disent « average » quand les poids sont égaux. **Le daemon installé garde l'ancien preset** tant qu'il n'est pas réinstallé (onglet Service).
 2. **Déclencheurs** : pas d'horaires fixes. Ils suivront l'état du système. La 4c est réécrite ci-dessus, avec les résultats des tests de faisabilité.
 3. **Après le garde-fou**, le Mac reste en automatique et c'est à toi de choisir à nouveau un profil. C'est le comportement actuel, gardé volontairement : il signale un problème de refroidissement. Conséquence pour la 4c : les règles automatiques sont suspendues après un déclenchement, jusqu'à ton choix.
+
+### 26/11/2026 : bug de réinstallation du daemon, CI
+- **Bug** : « Reinstall… » semblait faire planter l'app et fermer la fenêtre. En réalité, l'app tournait toujours (aucun rapport de plantage, processus vivant).
+  - La demande de mot de passe passait par `NSAppleScript` sur le fil principal, ce qui gelait l'app tant qu'elle était ouverte.
+  - Une fois la demande fermée, macOS réactivait l'app précédente, et la fenêtre de Pulse (pas d'icône dans le Dock) restait cachée derrière.
+  - **Correctif** (`6fa175c`) : `osascript` dans un processus séparé, hors du fil principal, puis retour de la fenêtre au premier plan. Les messages d'erreur sont nettoyés (testé).
+  - **Règle** : rien de bloquant sur le fil principal, même quand on attend l'utilisateur.
+- **CI** (`106f9ec`) : la compilation macOS n'est plus lancée pour les changements de documentation seule (`*.md`, `docs/`, `assets/`, `LICENSE`).
+- **4c recadrée** : Mode Jeu en priorité, puis économie d'énergie et secteur/batterie. Concentration en option, Night Shift abandonné.
