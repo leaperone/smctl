@@ -23,8 +23,9 @@ extension DaemonClient {
         }
     }
 
-    public func setSamplingInterval(seconds: Int) throws {
-        let data = try SMCtlProtocolCoding.encode(SetSamplingIntervalRequestDTO(seconds: seconds))
+    /// `onBattery` sets the battery interval; `nil` there means "same as on the adapter".
+    public func setSamplingInterval(seconds: Int?, onBattery: Bool = false) throws {
+        let data = try SMCtlProtocolCoding.encode(SetSamplingIntervalRequestDTO(seconds: seconds, onBattery: onBattery))
         let _: EmptyResponseDTO = try call { proxy, reply in
             proxy.setSamplingInterval(data, withReply: reply)
         }

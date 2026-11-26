@@ -572,6 +572,38 @@ final class PulseFanCurveTests: XCTestCase {
         XCTAssertEqual(makeDaemon(celsius: 55).daemon.config.fan.interval, 5, "out-of-range values are clamped, not rejected")
     }
 
+    func testBatteryIntervalAppliesOnlyOnBattery() throws {
+        let (backend, daemon) = makeDaemon(celsius: 55)
+        try daemon.upsertFanCurve(linearSpec(name: "test"), activate: true)
+        try daemon.setSamplingInterval(1)
+        try daemon.setSamplingInterval(4, onBattery: true)
+        XCTAssertThrowsError(try daemon.setSamplingInterval(nil), "the adapter interval cannot be cleared")
+        XCTAssertEqual(makeDaemon(celsius: 55).daemon.config.fan.battery_interval, 4, "written to [fan] battery_interval")
+
+        func sampledSeconds() -> [Int] {
+            daemon.lastSampledTick = nil
+            let start = Date()
+            return (0..<5).filter { second in
+                backend.reads = []
+                daemon.samplingTickLocked(now: start + TimeInterval(second))
+                return backend.reads.contains("Tp01")
+            }
+        }
+        daemon.onBattery = false
+        XCTAssertEqual(sampledSeconds(), [0, 1, 2, 3, 4])
+        XCTAssertEqual(daemon.telemetry().currentSamplingInterval, 1)
+        daemon.onBattery = true
+        XCTAssertEqual(sampledSeconds(), [0, 4])
+        let telemetry = daemon.telemetry()
+        XCTAssertEqual(telemetry.samplingInterval, 1)
+        XCTAssertEqual(telemetry.batterySamplingInterval, 4)
+        XCTAssertEqual(telemetry.currentSamplingInterval, 4)
+
+        try daemon.setSamplingInterval(nil, onBattery: true)
+        XCTAssertNil(daemon.config.fan.battery_interval)
+        XCTAssertEqual(sampledSeconds(), [0, 1, 2, 3, 4], "cleared: same pace as on the adapter")
+    }
+
     func testTicksFollowTheSamplingInterval() throws {
         let (backend, daemon) = makeDaemon(celsius: 55)
         try daemon.upsertFanCurve(linearSpec(name: "test"), activate: true)

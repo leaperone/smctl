@@ -272,31 +272,54 @@ struct FanInterval: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "interval",
         abstract: "Show or set the seconds between sensor reads (1 to 5).",
-        discussion: "Shorter reacts faster to heat; longer uses less energy. Near the safety ceiling the daemon reads every second regardless."
+        discussion: """
+        Shorter reacts faster to heat; longer uses less energy. Near the safety ceiling the daemon reads every second regardless.
+        With --on-battery the value applies only while on battery; "same" removes it.
+        """
     )
 
-    @Argument(help: "Seconds between sensor reads, 1 to 5. Omit to show the current value.")
-    var seconds: Int?
+    @Argument(help: "Seconds between sensor reads, 1 to 5 (\"same\" with --on-battery). Omit to show the current values.")
+    var seconds: String?
+
+    @Flag(name: .long, help: "Set the interval used while on battery.")
+    var onBattery = false
+
+    var parsed: Int?? {
+        guard let seconds else { return nil }
+        if onBattery, seconds.lowercased() == "same" { return .some(nil) }
+        return Int(seconds).map { .some($0) }
+    }
 
     func validate() throws {
-        if let seconds, !(1...5).contains(seconds) {
-            throw ValidationError("The interval must be between 1 and 5 seconds.")
+        guard seconds != nil else { return }
+        guard let parsed, (parsed.map { (1...5).contains($0) } ?? true) else {
+            throw ValidationError(onBattery ? "Use 1 to 5 seconds, or \"same\" to follow the adapter interval." : "The interval must be between 1 and 5 seconds.")
         }
     }
 
     func run() throws {
         let client = DaemonClient()
-        if let seconds {
-            try mapDaemonClient { try client.setSamplingInterval(seconds: seconds) }
-            print("Sensors are now read every \(seconds) s.")
-        } else {
-            let telemetry: TelemetryDTO = try mapDaemonClient { try client.getTelemetry() }
-            if let interval = telemetry.samplingInterval {
-                print("Sensors are read every \(interval) s.")
+        if let parsed {
+            try mapDaemonClient { try client.setSamplingInterval(seconds: parsed, onBattery: onBattery) }
+            if let value = parsed {
+                print("Sensors are now read every \(value) s\(onBattery ? " on battery" : "").")
             } else {
-                print("This \(ProductIdentity.daemonName) predates the interval setting (it reads every second). Reinstall it to change it.")
+                print("On battery, sensors are now read at the same pace as on the adapter.")
             }
+            return
         }
+        let telemetry: TelemetryDTO = try mapDaemonClient { try client.getTelemetry() }
+        guard let interval = telemetry.samplingInterval else {
+            print("This \(ProductIdentity.daemonName) predates the interval setting (it reads every second). Reinstall it to change it.")
+            return
+        }
+        print(FanInterval.describe(adapter: interval, battery: telemetry.batterySamplingInterval, onBattery: telemetry.onBattery))
+    }
+
+    static func describe(adapter: Int, battery: Int?, onBattery: Bool?) -> String {
+        guard let battery else { return "Sensors are read every \(adapter) s." }
+        let now = onBattery == true ? " (on battery now)" : onBattery == false ? " (on the adapter now)" : ""
+        return "Sensors are read every \(adapter) s on the adapter and every \(battery) s on battery\(now)."
     }
 }
 

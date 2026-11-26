@@ -131,11 +131,15 @@ struct FanConfig: Codable, Equatable, Sendable {
     /// Seconds between sensor reads (Pulse): 1 to 5. Longer saves energy, shorter
     /// reacts faster. The safety guard samples every second near the ceiling.
     var interval: Int
+    /// Interval while on battery (Pulse); nil uses `interval` everywhere.
+    var battery_interval: Int?
 
-    init(profile: String = "auto", curves: [FanCurveConfig] = [], interval: Int = SmctlDaemon.defaultSamplingInterval) {
+    init(profile: String = "auto", curves: [FanCurveConfig] = [], interval: Int = SmctlDaemon.defaultSamplingInterval,
+         battery_interval: Int? = nil) {
         self.profile = profile
         self.curves = curves
         self.interval = SmctlDaemon.clampedSamplingInterval(interval)
+        self.battery_interval = battery_interval.map(SmctlDaemon.clampedSamplingInterval)
     }
 
     // Defensive decoding — see BatteryConfig. The config file written by the daemon
@@ -149,6 +153,8 @@ struct FanConfig: Codable, Equatable, Sendable {
             (try container.decodeLenientDoubleIfPresent(forKey: .interval)).map { Int($0.rounded()) }
                 ?? SmctlDaemon.defaultSamplingInterval
         )
+        battery_interval = (try container.decodeLenientDoubleIfPresent(forKey: .battery_interval))
+            .map { SmctlDaemon.clampedSamplingInterval(Int($0.rounded())) }
     }
 }
 
@@ -360,6 +366,9 @@ public final class SmctlDaemon: @unchecked Sendable {
     var lastSnapshot: SensorSnapshot?
     /// When the timer last ran a full tick (see `samplingTickLocked`).
     var lastSampledTick: Date?
+    /// Running on battery (nil: unknown or no battery), kept current by a power
+    /// source notification; selects `[fan] battery_interval`.
+    var onBattery: Bool?
     var lastCurveEvaluations: [Int: FanCurveEvaluation] = [:]
     // Pulse: idle handoff state (PulseFanCurves.swift).
     var curveIdleSince: [Int: Date] = [:]
@@ -428,6 +437,7 @@ public final class SmctlDaemon: @unchecked Sendable {
 
     public func start() {
         registerPowerNotifications()
+        observePowerSource()
         let source = DispatchSource.makeTimerSource(queue: queue)
         source.schedule(deadline: .now() + .seconds(1), repeating: SmctlDaemon.period)
         source.setEventHandler { [weak self] in
@@ -1407,7 +1417,7 @@ public final class SmctlDaemon: @unchecked Sendable {
         [fan]
         profile = "\(config.fan.profile)"
         interval = \(config.fan.interval)
-
+        \(config.fan.battery_interval.map { "battery_interval = \($0)\n" } ?? "")
         [safety]
         temp_ceiling = \(FanSafetyGuard(configuredCeilingCelsius: config.safety.temp_ceiling).configuredCeilingCelsius)
         allow_below_minimum = \(config.safety.allow_below_minimum ? "true" : "false")

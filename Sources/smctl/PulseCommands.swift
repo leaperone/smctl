@@ -130,7 +130,7 @@ struct StatusReport: Codable, Equatable {
             temperatures: telemetry.temperatures, fans: telemetry.fans, curve: telemetry.curve,
             power: telemetry.power, safety: telemetry.safety, conflicts: conflicts
         )
-        samplingInterval = telemetry.samplingInterval
+        samplingInterval = telemetry.currentSamplingInterval
     }
 
     init(

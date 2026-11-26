@@ -461,7 +461,9 @@ extension SmctlDaemon {
                     allowsStoppingFans: config.safety.allow_below_minimum
                 ),
                 lastError: lastError,
-                samplingInterval: config.fan.interval
+                samplingInterval: config.fan.interval,
+                batterySamplingInterval: config.fan.battery_interval,
+                onBattery: onBattery
             )
         }
     }

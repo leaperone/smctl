@@ -117,8 +117,18 @@ public struct TelemetryDTO: Codable, Equatable, Sendable {
     public var power: [PowerReadingDTO]
     public var safety: SafetyStateDTO
     public var lastError: String?
-    /// Seconds between the daemon's sensor reads; nil from daemons that predate it.
+    /// Seconds between the daemon's sensor reads on the power adapter (and on
+    /// desktop Macs); nil from daemons that predate it.
     public var samplingInterval: Int?
+    /// Seconds between reads on battery; nil means the same as `samplingInterval`.
+    public var batterySamplingInterval: Int?
+    /// The daemon's view of the power source; nil when unknown.
+    public var onBattery: Bool?
+
+    /// The interval in effect right now.
+    public var currentSamplingInterval: Int? {
+        (onBattery == true ? batterySamplingInterval : nil) ?? samplingInterval
+    }
 
     public init(
         timestamp: Date,
@@ -130,7 +140,9 @@ public struct TelemetryDTO: Codable, Equatable, Sendable {
         power: [PowerReadingDTO],
         safety: SafetyStateDTO,
         lastError: String?,
-        samplingInterval: Int? = nil
+        samplingInterval: Int? = nil,
+        batterySamplingInterval: Int? = nil,
+        onBattery: Bool? = nil
     ) {
         self.timestamp = timestamp
         self.daemonVersion = daemonVersion
@@ -142,6 +154,8 @@ public struct TelemetryDTO: Codable, Equatable, Sendable {
         self.safety = safety
         self.lastError = lastError
         self.samplingInterval = samplingInterval
+        self.batterySamplingInterval = batterySamplingInterval
+        self.onBattery = onBattery
     }
 }
 
@@ -189,9 +203,13 @@ public struct DeleteFanCurveRequestDTO: Codable, Equatable, Sendable {
 }
 
 public struct SetSamplingIntervalRequestDTO: Codable, Equatable, Sendable {
-    public var seconds: Int
+    /// nil with `onBattery` clears the battery interval (same as the adapter).
+    public var seconds: Int?
+    /// Sets `[fan] battery_interval` instead of `interval`.
+    public var onBattery: Bool
 
-    public init(seconds: Int) {
+    public init(seconds: Int?, onBattery: Bool = false) {
         self.seconds = seconds
+        self.onBattery = onBattery
     }
 }
