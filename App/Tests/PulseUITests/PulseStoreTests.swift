@@ -78,6 +78,21 @@ struct PulseStoreTests {
         #expect(quiet.profileChoices.last?.name == "quiet")
     }
 
+    @Test func popoverHidesTCWhenTpHotSpotsExist() async {
+        let store = PulseStore(service: SensorsService(groups: ["Tp", "TC", "Tg"]), fallback: nil)
+        await store.refresh()
+        #expect(store.groups.map(\.group) == ["Tp", "TC", "Tg"])
+        #expect(store.displayGroups.map(\.group) == ["Tp", "Tg"])
+        #expect(store.cpu?.group == "Tp")
+    }
+
+    @Test func popoverKeepsTCWithoutTp() async {
+        let store = PulseStore(service: SensorsService(groups: ["TC", "TG"]), fallback: nil)
+        await store.refresh()
+        #expect(store.displayGroups.map(\.group) == ["TC", "TG"])
+        #expect(store.cpu?.group == "TC")
+    }
+
     @Test func conflictsAreReported() async {
         let conflict = FanControlConflict(product: "TG Pro", evidence: "process TG Pro", running: true)
         let store = PulseStore(service: SampleService(conflicts: [conflict]), fallback: nil)
@@ -92,6 +107,23 @@ private final class QuietService: PulseService, @unchecked Sendable {
     func telemetry() throws -> TelemetryDTO {
         var telemetry = try base.telemetry()
         telemetry.profile = "quiet"
+        return telemetry
+    }
+    func curves() throws -> FanCurveListDTO { try base.curves() }
+    func activate(profile: String) throws {}
+    func upsert(_ spec: FanCurveSpec, activate: Bool) throws {}
+    func delete(curve name: String) throws {}
+    func conflicts() -> [FanControlConflict] { [] }
+}
+
+/// Reports one 50 °C sensor per group, e.g. an M1 Pro's `Tp` and `TC`.
+private final class SensorsService: PulseService, @unchecked Sendable {
+    let base = SampleService(profile: "auto")
+    let groups: [String]
+    init(groups: [String]) { self.groups = groups }
+    func telemetry() throws -> TelemetryDTO {
+        var telemetry = try base.telemetry()
+        telemetry.temperatures = groups.map { TemperatureDTO(key: "\($0)01", group: $0, celsius: 50) }
         return telemetry
     }
     func curves() throws -> FanCurveListDTO { try base.curves() }

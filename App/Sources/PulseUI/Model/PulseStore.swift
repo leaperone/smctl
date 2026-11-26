@@ -262,6 +262,15 @@ public final class PulseStore {
         TemperatureGroupSummary.summarize(telemetry?.temperatures ?? [])
     }
 
+    /// Groups for the popover. Some Apple silicon Macs (M1 Pro) expose `TC*`
+    /// sensors next to the `Tp*` hot-spots; both are labelled CPU, so the `TC`
+    /// row is hidden when `Tp` exists, matching `cpu` and the menu bar.
+    public var displayGroups: [TemperatureGroupSummary] {
+        let all = groups
+        guard all.contains(where: { $0.group == "Tp" }) else { return all }
+        return all.filter { $0.group != "TC" }
+    }
+
     /// CPU hot-spots on Apple Silicon (`Tp*`), Intel CPU sensors (`TC*`) otherwise.
     public var cpu: TemperatureGroupSummary? {
         groups.first { $0.group == "Tp" } ?? groups.first { $0.group == "TC" }

@@ -19,7 +19,7 @@ public struct PopoverView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             notices
-            TemperaturesCard(groups: store.groups)
+            TemperaturesCard(groups: store.displayGroups)
             if !store.fans.isEmpty {
                 FansCard(fans: store.fans, curve: store.telemetry?.curve ?? [], unit: unit)
             }
