@@ -546,3 +546,12 @@ macOS n'offre donc **aucun signal fiable**, et sa propre heuristique ne reconna�
 - **4f** : profiler l'app (0,37 %) et le daemon (0,52 %) sur le M1 Pro, après la réinstallation ; la mémoire de l'app (78 Mo) reste ouverte.
 
 **Clôture (même jour) :** tes trois vérifications sont bonnes : icône visible à côté de l'encoche, bascule « On Battery → Silent » puis retour, daemon réinstallé. Le daemon réinstallé à 18 h 07 contient le correctif : plus aucune erreur « Battery policy evaluation failed » depuis. CPU du daemon au repos : environ 0,4 % sur 30 s, encore au-dessus de l'objectif ; c'est l'objet de la 4f.
+
+### 26/11/2026 : étape 4f, profilage sur le MacBook Pro M1 Pro
+**App** (battement coupé, fenêtres fermées) : 0,14 à 0,15 % de CPU. Il ne reste que l'interrogation du daemon toutes les 2 s ; aucun redessin de la barre des menus au repos. Mémoire : les 78 Mo mesurés en 4d étaient le RSS, qui compte les frameworks partagés. L'empreinte réelle (`phys_footprint`) est de **20 Mo**, sous l'objectif. Le battement « Always » coûte environ 4 % sur ce Mac (redessin de chaque réplique de l'élément de barre des menus) : c'est un choix de l'utilisateur, hors objectif.
+
+**Daemon** : la capture (`sudo sample`, 60 s, courbe active) montre que **97 % du travail sont des lectures SMC**, à raison d'environ 57 clés par tick d'une seconde : 38 températures (67 %), 10 clés ventilateur (17 %), 11 clés batterie et puissance (16 %). Le moteur de courbe et l'encodage XPC sont négligeables. Banc d'essai hors daemon : un snapshot coûte 1,6 ms de CPU, une lecture 26 µs de CPU pour 230 µs d'attente.
+- `5548dbd` : en profil auto, sans alerte ni garde-fou verrouillé, le tick ne lit plus les capteurs ; `getTelemetry` relit à la demande quand le snapshot a plus de 1,5 s. Courbes, consignes manuelles, alertes et garde-fou lisent toujours chaque seconde.
+- Avec une courbe active : **0,60 %** de CPU, 14 réveils par seconde. Correction : les 82 réveils par seconde de la première mesure ne venaient pas des lectures SMC (le daemon n'en fait plus que 14 avec le même nombre de lectures).
+
+**Conséquence** : à 1 s, le coût suit le nombre de lectures. Pour approcher 0,2 % avec une courbe, il faut lire moins souvent (proposition de l'utilisateur : intervalle de collecte réglable de 1 à 5 s) ou lire moins de clés (batterie et puissance à la demande, environ −16 %).
