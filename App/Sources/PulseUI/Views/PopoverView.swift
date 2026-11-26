@@ -88,13 +88,15 @@ public struct PopoverView: View {
         }
     }
 
+    /// Settings and Quit take equal widths, so Help sits exactly in the
+    /// middle whatever the label lengths.
     private var footer: some View {
-        HStack {
+        HStack(spacing: 0) {
             Button { openSettings(.pane(.general)) } label: {
                 Label("Settings…", systemImage: "gearshape")
             }
             .keyboardShortcut(",")
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
             Button {
                 if let url = URL(string: ProductIdentity.helpURL) { NSWorkspace.shared.open(url) }
             } label: {
@@ -102,13 +104,13 @@ public struct PopoverView: View {
             }
             .keyboardShortcut("?")
             .help("Open the Pulse help in your browser")
-            Spacer()
             Button {
                 NSApplication.shared.terminate(nil)
             } label: {
                 Label("Quit", systemImage: "power")
             }
             .keyboardShortcut("q")
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .buttonStyle(.plain)
         .labelStyle(.titleAndIcon)
