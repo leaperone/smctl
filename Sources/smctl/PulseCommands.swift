@@ -548,7 +548,7 @@ struct FanCurveSet: ParsableCommand {
     var smoothing: Double?
 
     @Option(name: .customLong("at-zero"), help: """
-        What the fan does while the curve is at 0%: system (macOS runs it, default), minimum (hold the minimum RPM)         or off (stop it — possibly harmful; needs allow_below_minimum = true under [safety]).
+        What the fan does while the curve is at 0%: system (macOS runs it, default), minimum (hold the minimum RPM) or off (stop it — possibly harmful; needs allow_below_minimum = true under [safety]).
         """)
     var atZero: String?
 
