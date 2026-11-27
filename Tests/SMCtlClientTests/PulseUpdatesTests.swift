@@ -6,7 +6,8 @@ final class PulseUpdatesTests: XCTestCase {
         InstallChannel.detect(
             executablePath: path,
             resolve: { _ in resolved ?? path },
-            fileExists: { caskroom && $0 == "/opt/homebrew/Caskroom/pulse" }
+            fileExists: { caskroom && $0 == "/opt/homebrew/Caskroom/pulse" },
+            home: "/Users/me"
         )
     }
 
@@ -17,11 +18,14 @@ final class PulseUpdatesTests: XCTestCase {
         XCTAssertEqual(channel("/Applications/Pulse.app/Contents/MacOS/Pulse"), .download)
         XCTAssertEqual(channel("/usr/local/bin/pulse", resolvedTo: "/Users/me/Downloads/Pulse.app/Contents/Helpers/pulse"), .download)
         XCTAssertEqual(channel("/Users/me/pulse/.build/release/pulse"), .source)
+        XCTAssertEqual(channel("/Users/me/Applications/Pulse.app/Contents/MacOS/Pulse", caskroom: true), .cask)
+        XCTAssertEqual(channel("/Users/me/Downloads/Pulse.app/Contents/MacOS/Pulse", caskroom: true), .download,
+                       "a \"pulse\" Caskroom entry with Pulse outside Applications is Homebrew's other pulse")
     }
 
     func testUpgradeHints() {
-        XCTAssertEqual(InstallChannel.cask.upgradeCommand, "brew upgrade --cask pulse")
-        XCTAssertEqual(InstallChannel.formula.upgradeCommand, "brew upgrade pulse-cli")
+        XCTAssertEqual(InstallChannel.cask.upgradeCommand, "brew upgrade --cask fstormacq/tap/pulse")
+        XCTAssertEqual(InstallChannel.formula.upgradeCommand, "brew upgrade fstormacq/tap/pulse-cli")
         XCTAssertNil(InstallChannel.download.upgradeCommand)
         XCTAssertTrue(InstallChannel.download.upgradeHint.contains("github.com/fstormacq/pulse/releases"))
     }

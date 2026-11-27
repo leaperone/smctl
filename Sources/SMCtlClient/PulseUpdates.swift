@@ -4,9 +4,9 @@ import SMCtlProtocol
 
 /// How this copy of Pulse was installed, which decides how to upgrade it.
 public enum InstallChannel: Equatable, Sendable {
-    /// `brew install --cask pulse`: the app, with the CLI inside it.
+    /// `brew install --cask fstormacq/tap/pulse`: the app, with the CLI inside it.
     case cask
-    /// `brew install pulse-cli`: the CLI and the daemon only.
+    /// `brew install fstormacq/tap/pulse-cli`: the CLI and the daemon only.
     case formula
     /// Pulse.app downloaded from the GitHub releases.
     case download
@@ -15,23 +15,30 @@ public enum InstallChannel: Equatable, Sendable {
 
     /// The channel of the executable at `executablePath`: the `pulse` CLI, or
     /// the app's own executable. Symbolic links (Homebrew's `bin`) are resolved.
+    ///
+    /// The cask installs Pulse.app in Applications. Homebrew's own "pulse" cask (an
+    /// unrelated app) would install there too, so the two cannot coexist: Pulse in
+    /// Applications with a "pulse" Caskroom entry is ours.
     public static func detect(
         executablePath: String,
         resolve: (String) -> String = { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path },
-        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+        home: String = NSHomeDirectory()
     ) -> InstallChannel {
         let path = resolve(executablePath)
         if path.contains("/Cellar/\(ProductIdentity.homebrewFormula)/") { return .formula }
         guard path.contains(".app/Contents/") else { return .source }
+        let inApplications = ["/Applications/Pulse.app/", "\(home)/Applications/Pulse.app/"].contains { path.hasPrefix($0) }
         let caskrooms = ["/opt/homebrew/Caskroom", "/usr/local/Caskroom"]
-        return caskrooms.contains { fileExists("\($0)/\(ProductIdentity.homebrewCask)") } ? .cask : .download
+        let caskInstalled = caskrooms.contains { fileExists("\($0)/\(ProductIdentity.homebrewCask)") }
+        return inApplications && caskInstalled ? .cask : .download
     }
 
     /// The shell command that upgrades Pulse, or nil when the upgrade is a download.
     public var upgradeCommand: String? {
         switch self {
-        case .cask: "brew upgrade --cask \(ProductIdentity.homebrewCask)"
-        case .formula: "brew upgrade \(ProductIdentity.homebrewFormula)"
+        case .cask: "brew upgrade --cask \(ProductIdentity.homebrewCaskFullName)"
+        case .formula: "brew upgrade \(ProductIdentity.homebrewFormulaFullName)"
         case .download: nil
         case .source: "git pull && make app"
         }

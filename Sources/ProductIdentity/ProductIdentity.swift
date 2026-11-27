@@ -32,6 +32,10 @@ public enum ProductIdentity {
     public static let homebrewCask = "pulse"
     public static let homebrewFormula = "pulse-cli"
     public static let homebrewTap = "fstormacq/tap"
+    /// Always the full names in commands: Homebrew's own repository has an unrelated
+    /// cask also called "pulse", which a bare `brew … --cask pulse` would pick.
+    public static let homebrewCaskFullName = "\(homebrewTap)/\(homebrewCask)"
+    public static let homebrewFormulaFullName = "\(homebrewTap)/\(homebrewFormula)"
     /// Prefix of environment variables read by the daemon and passed to alert commands.
     public static let environmentPrefix = "PULSE"
 }

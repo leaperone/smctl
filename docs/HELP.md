@@ -104,9 +104,9 @@ The Mac then stays on Auto and Pulse notifies you. It means the cooling could no
 
 ## Updates
 
-When a new version is out, the menu bar popover says so, with the command to run in Terminal (`brew upgrade --cask pulse`) or a link to download it. *Later* hides the notice until the next version; **Settings › About** still shows it.
+When a new version is out, the menu bar popover says so, with the command to run in Terminal (`brew upgrade --cask fstormacq/tap/pulse`) or a link to download it. *Later* hides the notice until the next version; **Settings › About** still shows it.
 
-After an update, Pulse replaces the fan control service with its own version the next time it starts. macOS asks for your password once. If you cancel, the popover shows *The fan control service is out of date* with an *Update…* button. Your profile, curves and settings are kept. With the command line only (`brew upgrade pulse-cli`), the next `pulse` command in Terminal does the same through `sudo`.
+After an update, Pulse replaces the fan control service with its own version the next time it starts. macOS asks for your password once. If you cancel, the popover shows *The fan control service is out of date* with an *Update…* button. Your profile, curves and settings are kept. With the command line only (`brew upgrade fstormacq/tap/pulse-cli`), the next `pulse` command in Terminal does the same through `sudo`.
 
 ## If something looks wrong
 

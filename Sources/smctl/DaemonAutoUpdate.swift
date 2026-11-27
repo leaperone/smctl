@@ -3,7 +3,7 @@ import ProductIdentity
 import SMCtlClient
 import SMCtlProtocol
 
-/// After `brew upgrade pulse-cli`, the running daemon is still the old release:
+/// After `brew upgrade fstormacq/tap/pulse-cli`, the running daemon is still the old release:
 /// `pulse daemon install` copies `pulsed` into a root-owned location that no
 /// upgrade touches. The first command that notices replaces it with the copy next
 /// to this CLI, through sudo, then goes on.

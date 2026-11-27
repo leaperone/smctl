@@ -29,8 +29,10 @@ You need an **Apple silicon Mac** (M1 or later) with **macOS 26** or later for t
 
 ```console
 $ brew tap fstormacq/tap && brew trust fstormacq/tap
-$ brew install --cask pulse
+$ brew install --cask fstormacq/tap/pulse
 ```
+
+Use the full name `fstormacq/tap/pulse`: Homebrew already has an unrelated app called `pulse`, which a plain `brew install --cask pulse` would install instead.
 
 No Homebrew? Download `Pulse-<version>.zip` from the [latest release](https://github.com/fstormacq/pulse/releases/latest) and drag Pulse to Applications. Pulse isn't notarized by Apple, so the first time macOS refuses to open it: go to **System Settings › Privacy & Security** and click **Open Anyway**. With Homebrew, there is nothing to do.
 
@@ -48,7 +50,7 @@ For a Mac you reach over SSH, or if you prefer Terminal (macOS 14 or later):
 
 ```console
 $ brew tap fstormacq/tap && brew trust fstormacq/tap
-$ brew install pulse-cli
+$ brew install fstormacq/tap/pulse-cli
 $ sudo pulse daemon install
 ```
 
@@ -153,7 +155,7 @@ Every command accepts `--json`. The [full list](#command-reference) is below.
 Pulse tells you when a new version is out, in the popover and in `pulse`. To update:
 
 ```console
-$ brew upgrade --cask pulse        # or: brew upgrade pulse-cli
+$ brew upgrade --cask fstormacq/tap/pulse        # or: brew upgrade fstormacq/tap/pulse-cli
 ```
 
 The fan service updates itself: the next time Pulse starts, it asks for your password once and installs its new version. Your profiles and curves are kept. With the command line only, the next `pulse` command does the same through `sudo`.
@@ -170,7 +172,7 @@ The fan service updates itself: the next time Pulse starts, it asks for your pas
 
 ```console
 $ sudo pulse daemon uninstall      # stops the service and hands the fans back to macOS
-$ brew uninstall --cask pulse      # or: brew uninstall pulse-cli
+$ brew uninstall --cask fstormacq/tap/pulse      # or: brew uninstall fstormacq/tap/pulse-cli
 ```
 
 Without Homebrew: **Settings › Service › Uninstall…**, then drag Pulse to the Trash.

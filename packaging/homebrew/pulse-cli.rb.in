@@ -24,10 +24,10 @@ class PulseCli < Formula
     <<~EOS
       Install the fan control service once:
         sudo pulse daemon install
-      After `brew upgrade pulse-cli`, the next pulse command updates the service
+      After `brew upgrade fstormacq/tap/pulse-cli`, the next pulse command updates the service
       (it asks for your password).
 
-      The Pulse app (brew install --cask pulse) includes this CLI: install one or the other.
+      The Pulse app (brew install --cask fstormacq/tap/pulse) includes this CLI: install one or the other.
     EOS
   end
 
