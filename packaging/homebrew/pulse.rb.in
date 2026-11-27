@@ -43,6 +43,6 @@ cask "pulse" do
 
     To remove the fan control service with the app:
       sudo pulse daemon uninstall
-      brew uninstall --cask pulse
+      brew uninstall --cask fstormacq/tap/pulse
   EOS
 end

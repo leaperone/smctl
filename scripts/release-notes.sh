@@ -37,8 +37,8 @@ cat <<NOTES
 
 \`\`\`sh
 brew tap fstormacq/tap && brew trust fstormacq/tap
-brew install --cask pulse     # the menu bar app, with the pulse CLI
-brew install pulse-cli        # or: the pulse CLI and its daemon only (SSH, headless Macs)
+brew install --cask fstormacq/tap/pulse     # the menu bar app, with the pulse CLI
+brew install fstormacq/tap/pulse-cli        # or: the pulse CLI and its daemon only (SSH, headless Macs)
 \`\`\`
 
 Or download \`Pulse-$VERSION.zip\` below and move Pulse to Applications. Pulse is not notarized:
@@ -46,7 +46,7 @@ the first time, open it from **System Settings › Privacy & Security › Open A
 
 ## Update
 
-\`brew upgrade --cask pulse\` or \`brew upgrade pulse-cli\`. The fan control service updates itself:
+\`brew upgrade --cask fstormacq/tap/pulse\` or \`brew upgrade fstormacq/tap/pulse-cli\`. The fan control service updates itself:
 Pulse asks for your password once when it starts, or \`pulse\` does on its next command.
 
 Requires an Apple silicon Mac; the app needs macOS 26 or later, the CLI macOS 14 or later.
