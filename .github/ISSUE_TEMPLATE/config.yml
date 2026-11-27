@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Help with a setting
+    url: https://github.com/fstormacq/pulse/blob/main/docs/HELP.md
+    about: What each setting does to the fans, and what to try first.

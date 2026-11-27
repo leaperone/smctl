@@ -1,6 +1,8 @@
 name: CI
 
-# Documentation-only changes don't need a macOS build.
+# Documentation-only pushes don't need a macOS build. Pull requests always run:
+# these jobs are required checks on main and dev, and a check that never runs
+# would block a documentation-only pull request forever.
 on:
   push:
     branches: [main, dev]
@@ -11,11 +13,6 @@ on:
       - "LICENSE"
   pull_request:
     branches: [main, dev]
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "assets/**"
-      - "LICENSE"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
