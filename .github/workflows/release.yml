@@ -2,10 +2,12 @@ name: Release
 
 # Every push to main publishes a release when a feat, fix or perf commit landed
 # since the last vX.Y.Z tag (scripts/next-version.sh); the version is never
-# committed. Run it by hand (Actions › Release › Run workflow) to build the
-# assets without publishing anything.
+# committed. On a pull request to main, and when run by hand (Actions › Release
+# › Run workflow), it only builds the assets: a preview of the next release.
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
   workflow_dispatch:
     inputs:
