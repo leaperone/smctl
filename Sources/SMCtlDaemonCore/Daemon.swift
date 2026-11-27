@@ -391,7 +391,8 @@ public final class SmctlDaemon: @unchecked Sendable {
     private var timer: DispatchSourceTimer?
     private var fanTimer: DispatchSourceTimer?
     private var updateTimer: DispatchSourceTimer?
-    private var latestKnownVersion: String?
+    /// Read on `queue` (ping and telemetry).
+    var latestKnownVersion: String?
     private var powerConnection: io_connect_t = 0
     private var powerNotificationPort: IONotificationPortRef?
     private var powerNotifier: io_object_t = 0

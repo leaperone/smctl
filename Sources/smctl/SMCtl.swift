@@ -71,6 +71,11 @@ struct SMCtl: ParsableCommand {
         version: SMCtlProtocolInfo.version,
         subcommands: [Status.self, Doctor.self, Sensors.self, Fan.self, Battery.self, Power.self, Display.self, Alert.self, Daemon.self, Debug.self]
     )
+
+    static func main() {
+        DaemonClient.outdatedDaemonHandler = DaemonAutoUpdate.update(installed:)
+        main(nil)
+    }
 }
 
 struct Sensors: ParsableCommand {

@@ -52,9 +52,18 @@ func main() async {
 
     let macBookPro = await PulseStore.preview(SampleService(profile: "performance", fanRanges: SampleService.macBookProFans))
     let fanless = await PulseStore.preview(SampleService(fanRanges: []))
+    // After an upgrade to 1.0.0: the password prompt was cancelled (daemon 0.2.4
+    // still runs), and the daemon has seen 1.1.0 on GitHub.
+    let upgradeService = SampleService()
+    upgradeService.latestVersion = "v1.1.0"
+    let upgraded = UpdateCenter(appVersion: "1.0.0", channel: .cask, defaults: UserDefaults(suiteName: "pulse.snapshots.updates")!,
+                                installer: { _ in false }, fetchLatest: { nil })
+    UserDefaults(suiteName: "pulse.snapshots.updates")!.removePersistentDomain(forName: "pulse.snapshots.updates")
+    let updates = await PulseStore.preview(upgradeService, samples: 3, updates: upgraded)
+    try? await Task.sleep(for: .milliseconds(200))
 
     for (name, store) in [("popover", normal), ("popover-readonly", readOnly), ("popover-alerts", alerts),
-                          ("popover-macbookpro", macBookPro), ("popover-fanless", fanless)] {
+                          ("popover-macbookpro", macBookPro), ("popover-fanless", fanless), ("popover-updates", updates)] {
         for scheme in [ColorScheme.light, .dark] {
             await render(PopoverView(store: store), scheme: scheme, to: output.appendingPathComponent("\(name)-\(scheme == .dark ? "dark" : "light").png"))
         }
@@ -117,6 +126,7 @@ func main() async {
     }
     for scheme in [ColorScheme.light, .dark] {
         await render(SettingsView(store: normal, pane: .general), scheme: scheme, to: output.appendingPathComponent("settings-\(scheme == .dark ? "dark" : "light").png"))
+        await render(SettingsView(store: updates, pane: .about), scheme: scheme, to: output.appendingPathComponent("settings-about-\(scheme == .dark ? "dark" : "light").png"))
     }
     // Sensors section on a MacBook, with a slower pace on battery.
     let batteryService = SampleService(fanRanges: SampleService.macBookProFans)

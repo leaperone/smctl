@@ -124,6 +124,9 @@ public struct TelemetryDTO: Codable, Equatable, Sendable {
     public var batterySamplingInterval: Int?
     /// The daemon's view of the power source; nil when unknown.
     public var onBattery: Bool?
+    /// Latest release seen by the daemon's daily check; nil before the first
+    /// check, when it is disabled, or from daemons that predate it.
+    public var latestVersion: String?
 
     /// The interval in effect right now.
     public var currentSamplingInterval: Int? {
@@ -142,7 +145,8 @@ public struct TelemetryDTO: Codable, Equatable, Sendable {
         lastError: String?,
         samplingInterval: Int? = nil,
         batterySamplingInterval: Int? = nil,
-        onBattery: Bool? = nil
+        onBattery: Bool? = nil,
+        latestVersion: String? = nil
     ) {
         self.timestamp = timestamp
         self.daemonVersion = daemonVersion
@@ -156,6 +160,7 @@ public struct TelemetryDTO: Codable, Equatable, Sendable {
         self.samplingInterval = samplingInterval
         self.batterySamplingInterval = batterySamplingInterval
         self.onBattery = onBattery
+        self.latestVersion = latestVersion
     }
 }
 

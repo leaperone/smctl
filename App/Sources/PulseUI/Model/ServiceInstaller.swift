@@ -30,8 +30,11 @@ public enum ServiceInstaller {
         (try? FileManager.default.destinationOfSymbolicLink(atPath: cliLinkPath)) == bundledCLI.path
     }
 
-    public static func installDaemon() throws {
-        try runAsAdministrator(shellCommand([bundledCLI.path, "daemon", "install"]))
+    /// Returns false when the user cancelled the password prompt. `prompt`
+    /// replaces the first line of the macOS dialog.
+    @discardableResult
+    public static func installDaemon(prompt: String? = nil) throws -> Bool {
+        try runAsAdministrator(shellCommand([bundledCLI.path, "daemon", "install"]), prompt: prompt)
     }
 
     public static func uninstallDaemon() throws {
@@ -75,23 +78,25 @@ public enum ServiceInstaller {
     /// Runs `command` as root after the standard administrator prompt. Runs
     /// osascript in a child process: NSAppleScript had to run on the main
     /// thread, which froze the app for as long as the prompt was open.
-    private static func runAsAdministrator(_ command: String) throws {
+    @discardableResult
+    private static func runAsAdministrator(_ command: String, prompt: String? = nil) throws -> Bool {
         guard helpersAvailable else {
             throw InstallerError("The bundled \(ProductIdentity.cliName) helpers were not found in \(helpersDirectory.path).")
         }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", "do shell script \(appleScriptLiteral(command)) with administrator privileges"]
+        let promptClause = prompt.map { " with prompt \(appleScriptLiteral($0))" } ?? ""
+        process.arguments = ["-e", "do shell script \(appleScriptLiteral(command))\(promptClause) with administrator privileges"]
         let errors = Pipe()
         process.standardError = errors
         process.standardOutput = FileHandle.nullDevice
         try process.run()
         process.waitUntilExit()
-        guard process.terminationStatus != 0 else { return }
+        guard process.terminationStatus != 0 else { return true }
         let message = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         // -128: the user cancelled the password prompt.
-        if message.hasSuffix("(-128)") { return }
+        if message.hasSuffix("(-128)") { return false }
         throw InstallerError(cleanMessage(message))
     }
 

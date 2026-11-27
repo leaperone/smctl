@@ -463,7 +463,8 @@ extension SmctlDaemon {
                 lastError: lastError,
                 samplingInterval: config.fan.interval,
                 batterySamplingInterval: config.fan.battery_interval,
-                onBattery: onBattery
+                onBattery: onBattery,
+                latestVersion: latestKnownVersion
             )
         }
     }

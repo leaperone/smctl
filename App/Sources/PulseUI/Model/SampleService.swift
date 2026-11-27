@@ -18,6 +18,8 @@ public final class SampleService: PulseService, @unchecked Sendable {
     public var samplingInterval = 2
     public var batterySamplingInterval: Int?
     public var onBattery: Bool?
+    /// Latest release reported by the daemon's update check.
+    public var latestVersion: String?
 
     public static let macMiniFans = [FanSpeedRange(minimumRPM: 1000, maximumRPM: 4900)]
     /// MacBook Pro M1 Pro (14"/16"): two fans with different maxima.
@@ -73,7 +75,8 @@ public final class SampleService: PulseService, @unchecked Sendable {
                 lastError: nil,
                 samplingInterval: samplingInterval,
                 batterySamplingInterval: batterySamplingInterval,
-                onBattery: onBattery
+                onBattery: onBattery,
+                latestVersion: latestVersion
             )
         }
     }
@@ -130,8 +133,9 @@ public final class SampleService: PulseService, @unchecked Sendable {
 extension PulseStore {
     /// A store filled with `samples` ticks of sample data, for previews and snapshots.
     @MainActor
-    public static func preview(_ service: SampleService = SampleService(), samples: Int = 60) async -> PulseStore {
-        let store = PulseStore(service: service, fallback: nil)
+    public static func preview(_ service: SampleService = SampleService(), samples: Int = 60,
+                               updates: UpdateCenter? = nil) async -> PulseStore {
+        let store = PulseStore(service: service, fallback: nil, updates: updates)
         let start = Date().addingTimeInterval(-Double(samples) * 2)
         for index in 0..<samples {
             await store.refresh(forceLists: index == 0, now: start.addingTimeInterval(Double(index) * 2))
