@@ -12,6 +12,9 @@ func render<V: View>(_ view: V, scheme: ColorScheme, to url: URL) async {
     // A real (off-screen) window, so AppKit-backed controls and glass draw as in the app.
     let hosting = NSHostingView(rootView: view
         .environment(\.colorScheme, scheme)
+        .environment(\.rendersWithoutGlass, true)
+        // The render window is never key, which would grey out prominent buttons.
+        .environment(\.controlActiveState, .key)
         .background(scheme == .dark ? Color(white: 0.13) : Color(white: 0.96)))
     hosting.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
     let size = hosting.fittingSize

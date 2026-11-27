@@ -208,7 +208,7 @@ struct Notice: View {
                 if let actionTitle, let action {
                     HStack(spacing: 6) {
                         Button(actionTitle, action: action)
-                            .buttonStyle(.glass)
+                            .modifier(GlassButtonStyle())
                         if let secondaryTitle, let secondaryAction {
                             Button(secondaryTitle, action: secondaryAction)
                                 .buttonStyle(.borderless)
@@ -488,10 +488,29 @@ private struct ProfileButtonStyle: ViewModifier {
     let selected: Bool
 
     func body(content: Content) -> some View {
-        if selected {
-            content.buttonStyle(.glassProminent)
-        } else {
-            content.buttonStyle(.glass)
+        content.modifier(GlassButtonStyle(prominent: selected))
+    }
+}
+
+extension EnvironmentValues {
+    /// True when the view is drawn off screen (PulseSnapshots): Liquid Glass is
+    /// composited by the window server, so an off-screen render drops the glass
+    /// and draws the buttons' symbols white, even in light mode.
+    @Entry public var rendersWithoutGlass = false
+}
+
+/// `.glass` / `.glassProminent`, or their bordered equivalents when the view is
+/// rendered off screen (see `rendersWithoutGlass`).
+struct GlassButtonStyle: ViewModifier {
+    var prominent = false
+    @Environment(\.rendersWithoutGlass) private var withoutGlass
+
+    func body(content: Content) -> some View {
+        switch (prominent, withoutGlass) {
+        case (true, false): content.buttonStyle(.glassProminent)
+        case (false, false): content.buttonStyle(.glass)
+        case (true, true): content.buttonStyle(.borderedProminent)
+        case (false, true): content.buttonStyle(.bordered)
         }
     }
 }
