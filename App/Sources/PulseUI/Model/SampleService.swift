@@ -133,9 +133,13 @@ public final class SampleService: PulseService, @unchecked Sendable {
 extension PulseStore {
     /// A store filled with `samples` ticks of sample data, for previews and snapshots.
     @MainActor
+    /// `stressTest` names a curve whose stress test is shown as running (nothing runs).
     public static func preview(_ service: SampleService = SampleService(), samples: Int = 60,
-                               updates: UpdateCenter? = nil) async -> PulseStore {
+                               updates: UpdateCenter? = nil, stressTest: String? = nil) async -> PulseStore {
         let store = PulseStore(service: service, fallback: nil, updates: updates)
+        if let stressTest {
+            store.stressTestDidStart(StressTestModel(profile: stressTest.lowercased(), title: stressTest, service: nil, store: store))
+        }
         let start = Date().addingTimeInterval(-Double(samples) * 2)
         for index in 0..<samples {
             await store.refresh(forceLists: index == 0, now: start.addingTimeInterval(Double(index) * 2))

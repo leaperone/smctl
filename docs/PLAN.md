@@ -732,3 +732,10 @@ macOS n'offre donc **aucun signal fiable**, et sa propre heuristique ne reconna�
 - **CI** : les PR lancent toujours la CI, même pour de la doc seule. Avec des checks obligatoires, un check qui ne démarre jamais bloquerait la PR. Les push gardent leur filtre.
 - **Version** : ces commits sont en `docs:` et `ci:`, ils ne déclenchent pas de release à eux seuls. Ils partiront dans la 1.0.2, avec le `fix(app)` déjà sur `dev`.
 - **À régler par toi sur GitHub** (détail dans `CONTRIBUTING.md` › Repository settings) : autoriser le squash (message par défaut : titre de la PR) et la suppression automatique des branches ; un ruleset sur `dev` ; sur le ruleset de `main`, garder seulement *Merge*.
+
+### 27/11/2026 : le stress test garde la main sur le profil (ta remarque)
+- **Problème** : pendant un stress test, on pouvait changer de profil depuis le popover, et une règle d'automatisation ou une commande en SSH aussi. Le résultat était alors enregistré sous la courbe testée et servait de référence (« essai précédent ») pour les comparaisons suivantes. Et le profil choisi en cours de route était écrasé à la fin.
+- **Correctif** (PR vers `dev`) :
+  - Pendant l'essai, les profils du popover sont verrouillés, avec un avis « Stress test running » et un bouton Stop. `PulseStore.activate` refuse les changements, et l'automatisation est en pause.
+  - Chaque relevé note le profil actif (`StressSample.profile`). Si un autre profil prend la main, sans compter le garde-fou, le moteur arrête l'essai et ne lance pas les profils suivants, puis restaure le profil d'origine. Le résultat est marqué `profileChange` et n'est pas gardé comme référence. Côté CLI, un message l'indique, et le tableau comme le JSON le signalent.
+- **Pour plus tard** : comparer plusieurs courbes depuis l'app (issue GitHub). Changer de courbe en cours d'essai ne les compare pas à conditions égales.

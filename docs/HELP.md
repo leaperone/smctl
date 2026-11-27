@@ -76,6 +76,8 @@ To tune a curve, click **Stress Test…** next to it. Pulse heats every CPU core
 
 Change the curve, save it, and run the test again: the previous run is drawn faded and listed next to the new one. The test runs the saved curve, and your current profile comes back at the end, even if you stop early.
 
+While the test runs, it owns the fan profile: the popover's profiles are locked (it shows *Stress test running* with a *Stop* button) and automation rules wait. Switching curves in the middle would not compare them anyway: the fan would start from the speed the previous curve left. If the profile changes all the same (from Terminal, for example), the test stops and the run is not kept for comparison. To compare curves, use `pulse fan stress` with several of them, below.
+
 From Terminal (over SSH, for example): `pulse fan stress night`, or `pulse fan stress balanced night` to compare two curves under the same load. Each one waits for the Mac to cool back to the starting temperature first. Options: `--load` and `--cool` (seconds), `--cpu-only`, `--csv <file>` for every sample, `--json`.
 
 ## Sensor refresh

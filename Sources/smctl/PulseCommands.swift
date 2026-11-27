@@ -256,7 +256,9 @@ struct FanStress: ParsableCommand {
         Loads every CPU core and the GPU, records temperatures, the curve's input and the fan speed every 2 s, \
         then keeps recording while the Mac cools down. With several profiles, each starts once the CPU is back \
         near its starting temperature, and a table compares them. Tune with '\(ProductIdentity.cliName) fan curve set' \
-        between runs. The profile active before is restored at the end, even after Ctrl-C.
+        between runs. The profile active before is restored at the end, even after Ctrl-C. If another \
+        profile takes over during the run (the app, an automation rule, another '\(ProductIdentity.cliName) fan profile'), \
+        the test stops: its readings would no longer measure the profile under test.
         """
     )
 
@@ -290,6 +292,8 @@ struct FanStress: ParsableCommand {
     private struct Report: Encodable {
         var profile: String
         var completed: Bool
+        /// The profile that took over during the run, which stopped it.
+        var profileChange: String?
         var plan: StressPlan
         var summary: StressSummary?
         var samples: [StressSample]
@@ -340,6 +344,9 @@ struct FanStress: ParsableCommand {
                     midLine = false
                     print(Self.line(sample))
                     fflush(stdout)
+                case .profileChanged(let profile, let active):
+                    print("\n  Stopped: the profile changed to \(active) during the run, so these readings no longer measure \(profile).")
+                    print("  Something else switched it (the app, an automation rule, another \(ProductIdentity.cliName) fan profile).")
                 case .finished, .restored:
                     break
                 }
@@ -351,7 +358,8 @@ struct FanStress: ParsableCommand {
         }
         if json {
             print(try CLIJSON.encodeString(results.map {
-                Report(profile: $0.profile, completed: $0.completed, plan: $0.plan, summary: $0.summary, samples: $0.samples)
+                Report(profile: $0.profile, completed: $0.completed, profileChange: $0.profileChange, plan: $0.plan,
+                       summary: $0.summary, samples: $0.samples)
             }))
             return
         }
@@ -383,7 +391,10 @@ struct FanStress: ParsableCommand {
             [title] + summaries.map { $0.map(value) ?? "—" }
         }
         let rows: [[String]] = [
-            ["Summary"] + results.map { $0.completed ? $0.profile : "\($0.profile) (stopped)" },
+            ["Summary"] + results.map { result in
+                if let change = result.profileChange { return "\(result.profile) (stopped: \(change) took over)" }
+                return result.completed ? result.profile : "\(result.profile) (stopped)"
+            },
             row("CPU peak") { $0.peakCPU.map(celsius) ?? "—" },
             row("CPU steady") { $0.steadyCPU.map(celsius) ?? "—" },
             row("GPU peak") { $0.peakGPU.map(celsius) ?? "—" },

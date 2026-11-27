@@ -55,6 +55,7 @@ func main() async {
 
     let macBookPro = await PulseStore.preview(SampleService(profile: "performance", fanRanges: SampleService.macBookProFans))
     let fanless = await PulseStore.preview(SampleService(fanRanges: []))
+    let stressing = await PulseStore.preview(SampleService(profile: "night"), stressTest: "Night")
     // After an upgrade to 1.0.0: the password prompt was cancelled (daemon 0.2.4
     // still runs), and the daemon has seen 1.1.0 on GitHub.
     let upgradeService = SampleService()
@@ -66,7 +67,8 @@ func main() async {
     try? await Task.sleep(for: .milliseconds(200))
 
     for (name, store) in [("popover", normal), ("popover-readonly", readOnly), ("popover-alerts", alerts),
-                          ("popover-macbookpro", macBookPro), ("popover-fanless", fanless), ("popover-updates", updates)] {
+                          ("popover-macbookpro", macBookPro), ("popover-fanless", fanless), ("popover-updates", updates),
+                          ("popover-stress", stressing)] {
         for scheme in [ColorScheme.light, .dark] {
             await render(PopoverView(store: store), scheme: scheme, to: output.appendingPathComponent("\(name)-\(scheme == .dark ? "dark" : "light").png"))
         }

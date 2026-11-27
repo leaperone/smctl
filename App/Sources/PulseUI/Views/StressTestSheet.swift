@@ -110,7 +110,11 @@ public struct StressTestSheet: View {
         case .stopping:
             Text("Stopping…").font(.caption).foregroundStyle(.secondary)
         case .finished:
-            if model.summary?.tripped == true {
+            if let active = model.takenOverBy ?? model.result?.profileChange {
+                Label("Stopped: the profile changed to \(active) during the test, so this run does not measure \(model.title) and is not kept for comparison.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption).foregroundStyle(.orange).lineLimit(2)
+            } else if model.summary?.tripped == true {
                 Label("The safety guard tripped: the fans went back to macOS.", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption).foregroundStyle(.orange)
             } else {

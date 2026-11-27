@@ -77,9 +77,11 @@ public final class AutomationController {
 
     // MARK: Evaluation
 
-    /// After each poll: switch profile if the rules ask for it.
+    /// After each poll: switch profile if the rules ask for it. Paused during a
+    /// stress test, which owns the profile and restores the previous one at the
+    /// end: the rules then see the same profile as before and carry on.
     func tick(now: Date = Date()) {
-        guard enabled, !rules.isEmpty, store.canControlFans, store.busyProfile == nil else { return }
+        guard enabled, !rules.isEmpty, store.canSwitchProfile, store.busyProfile == nil else { return }
         let wanted = engine.evaluate(snapshot, activeProfile: store.activeProfile, now: now)
         if activeRule != engine.activeRule { activeRule = engine.activeRule }
         if suspendedForSafety != engine.suspendedForSafety { suspendedForSafety = engine.suspendedForSafety }

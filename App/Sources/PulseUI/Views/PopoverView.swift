@@ -66,6 +66,16 @@ public struct PopoverView: View {
             }
         }
         UpdateNotices(updates: store.updates)
+        if let test = store.stressTest {
+            Notice(
+                systemImage: "flame",
+                tint: .orange,
+                title: "Stress test running: \(test.title)",
+                message: "Profiles are locked until it ends, so its readings measure this curve. Your profile comes back afterwards.",
+                actionTitle: "Stop",
+                action: { test.stop() }
+            )
+        }
         if store.safetyLatched {
             Notice(
                 systemImage: "exclamationmark.triangle.fill",
@@ -447,7 +457,7 @@ struct ProfilesSection: View {
                             ) {
                                 Task { await store.activate(choice.name) }
                             }
-                            .disabled(!store.canControlFans || store.busyProfile != nil)
+                            .disabled(!store.canSwitchProfile || store.busyProfile != nil)
                         }
                         if row.count == 1 {
                             Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])

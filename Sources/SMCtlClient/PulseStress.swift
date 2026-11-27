@@ -65,9 +65,12 @@ public struct StressSample: Codable, Equatable, Sendable {
     /// The curve is at 0 %: macOS runs the fans.
     public var handedToSystem: Bool
     public var latched: Bool
+    /// The profile the daemon was running; nil in samples recorded before it was kept.
+    public var profile: String?
 
     public init(seconds: Double, phase: StressPhase, cpuMaximum: Double?, gpuMaximum: Double?, curveInput: Double?, curveEffective: Double?,
-                fanRPM: Double?, fanPercent: Double?, targetRPM: Double?, packageWatts: Double?, handedToSystem: Bool, latched: Bool) {
+                fanRPM: Double?, fanPercent: Double?, targetRPM: Double?, packageWatts: Double?, handedToSystem: Bool, latched: Bool,
+                profile: String? = nil) {
         self.seconds = seconds
         self.phase = phase
         self.cpuMaximum = cpuMaximum
@@ -80,6 +83,7 @@ public struct StressSample: Codable, Equatable, Sendable {
         self.packageWatts = packageWatts
         self.handedToSystem = handedToSystem
         self.latched = latched
+        self.profile = profile
     }
 
     public init(seconds: Double, phase: StressPhase, telemetry: TelemetryDTO) {
@@ -105,7 +109,8 @@ public struct StressSample: Codable, Equatable, Sendable {
             targetRPM: fan?.targetRPM,
             packageWatts: telemetry.power.first { $0.key == "PDTR" }?.value,
             handedToSystem: telemetry.curve.isEmpty || telemetry.curve.allSatisfy(\.handedToSystem),
-            latched: telemetry.safety.latched
+            latched: telemetry.safety.latched,
+            profile: telemetry.profile
         )
     }
 
@@ -206,6 +211,13 @@ public struct StressResult: Codable, Equatable, Sendable {
     }
 
     public var summary: StressSummary? { StressSummary(samples: samples) }
+
+    /// The profile that took over during the run (from the popover, an
+    /// automation rule or the command line), if any: the samples after it do not
+    /// measure `profile`. Changes while the safety guard is engaged don't count.
+    public var profileChange: String? {
+        samples.first { !$0.latched && $0.profile != nil && $0.profile != profile }?.profile
+    }
 
     /// One row per sample, every profile in one table, for a chart.
     public static func csv(_ results: [StressResult]) -> String {
@@ -315,12 +327,17 @@ public final class StressHeatLoad: StressLoad, @unchecked Sendable {
 /// cool to the starting point, load, cool down. Blocks the calling thread;
 /// `cancel()` from any thread stops it within a fraction of a second. The
 /// profile active before the run is restored at the end, even when stopped.
+/// If another profile takes over meanwhile, the run stops: its samples would no
+/// longer measure the profile under test.
 public final class StressRunner: @unchecked Sendable {
     public enum Event: Sendable {
         /// Waiting for the CPU to cool to `target` before `profile` starts.
         case settling(profile: String, cpu: Double?, target: Double, elapsed: Int)
         case started(profile: String, index: Int, count: Int)
         case sample(profile: String, StressSample)
+        /// Another profile took over during the run of `profile`: the run stops
+        /// there, and the profiles after it are not run.
+        case profileChanged(profile: String, to: String)
         case finished(StressResult)
         case restored(profile: String)
     }
@@ -353,7 +370,8 @@ public final class StressRunner: @unchecked Sendable {
             if (try? activate(original)) != nil { onEvent(.restored(profile: original)) }
         }
         var results: [StressResult] = []
-        for (index, profile) in profiles.enumerated() where !isCancelled {
+        var takenOver = false
+        for (index, profile) in profiles.enumerated() where !isCancelled && !takenOver {
             try activate(profile)
             if let baseline { settle(profile: profile, target: baseline + StressPlan.settleMarginCelsius, plan: plan, onEvent: onEvent) }
             guard wait(seconds: plan.holdSeconds) else { break }
@@ -365,24 +383,29 @@ public final class StressRunner: @unchecked Sendable {
                 let sample = StressSample(seconds: Date().timeIntervalSince(startedAt).rounded(), phase: phase, telemetry: snapshot)
                 samples.append(sample)
                 onEvent(.sample(profile: profile, sample))
+                if !takenOver, !sample.latched, let active = sample.profile, active != profile {
+                    takenOver = true
+                    onEvent(.profileChanged(profile: profile, to: active))
+                }
             }
             record(.load)
-            load.start()
+            if !takenOver { load.start() }
             var tick = 1
-            while !isCancelled, Double(tick) * plan.sampleInterval <= Double(plan.loadSeconds) {
+            while !isCancelled, !takenOver, Double(tick) * plan.sampleInterval <= Double(plan.loadSeconds) {
                 guard wait(until: startedAt.addingTimeInterval(Double(tick) * plan.sampleInterval)) else { break }
                 record(.load)
                 tick += 1
             }
             load.stop()
             let total = Double(plan.loadSeconds + plan.coolSeconds)
-            while !isCancelled, Double(tick) * plan.sampleInterval <= total {
+            while !isCancelled, !takenOver, Double(tick) * plan.sampleInterval <= total {
                 guard wait(until: startedAt.addingTimeInterval(Double(tick) * plan.sampleInterval)) else { break }
                 record(.cool)
                 tick += 1
             }
-            guard samples.count > 1 else { break }
-            let result = StressResult(profile: profile, startedAt: startedAt, plan: plan, samples: samples, completed: !isCancelled)
+            guard samples.count > 1 || takenOver else { break }
+            let result = StressResult(profile: profile, startedAt: startedAt, plan: plan, samples: samples,
+                                      completed: !isCancelled && !takenOver)
             results.append(result)
             onEvent(.finished(result))
         }
