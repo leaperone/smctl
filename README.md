@@ -2,6 +2,13 @@
   <img src="assets/img/banner.png" alt="Pulse" width="600">
 </p>
 
+<p align="center">
+  <a href="https://github.com/fstormacq/pulse/actions/workflows/ci.yml"><img src="https://github.com/fstormacq/pulse/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <img src="https://img.shields.io/badge/macOS-26%2B-000000?logo=apple&logoColor=white" alt="macOS 26 or later">
+  <img src="https://img.shields.io/badge/Apple%20silicon-M1%2B-000000?logo=apple&logoColor=white" alt="Apple silicon">
+  <a href="https://github.com/fstormacq/pulse/releases/latest"><img src="https://img.shields.io/github/v/release/fstormacq/pulse?label=release" alt="Latest release"></a>
+</p>
+
 # Pulse
 
 **Your Mac's temperatures in the menu bar, and the fans under your control.**
