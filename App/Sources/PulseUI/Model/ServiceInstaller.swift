@@ -26,9 +26,26 @@ public enum ServiceInstaller {
             && FileManager.default.isExecutableFile(atPath: helpersDirectory.appendingPathComponent(ProductIdentity.daemonName).path)
     }
 
-    public static var cliLinkInstalled: Bool {
-        (try? FileManager.default.destinationOfSymbolicLink(atPath: cliLinkPath)) == bundledCLI.path
+    /// Where a `pulse` command that runs this app's CLI is found: the link made in
+    /// Settings (/usr/local/bin) or the one the Homebrew cask makes (/opt/homebrew/bin).
+    static let cliLinkCandidates = [cliLinkPath, "/opt/homebrew/bin/\(ProductIdentity.cliName)"]
+
+    /// The first candidate that resolves to `target`, or nil.
+    static func linkedCLIPath(
+        candidates: [String] = cliLinkCandidates,
+        target: String = bundledCLI.path,
+        resolve: (String) -> String? = { path in
+            FileManager.default.fileExists(atPath: path) ? URL(fileURLWithPath: path).resolvingSymlinksInPath().path : nil
+        }
+    ) -> String? {
+        let resolvedTarget = resolve(target) ?? target
+        return candidates.first { resolve($0) == resolvedTarget }
     }
+
+    /// The `pulse` command in the PATH that runs this app's CLI, if any.
+    public static var installedCLILink: String? { linkedCLIPath() }
+
+    public static var cliLinkInstalled: Bool { installedCLILink != nil }
 
     /// Returns false when the user cancelled the password prompt. `prompt`
     /// replaces the first line of the macOS dialog.

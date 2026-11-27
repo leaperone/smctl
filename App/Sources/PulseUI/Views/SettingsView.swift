@@ -265,7 +265,7 @@ struct ServiceSettings: View {
     let store: PulseStore
     @State private var working = false
     @State private var message: String?
-    @State private var cliLinked = ServiceInstaller.cliLinkInstalled
+    @State private var cliLink = ServiceInstaller.installedCLILink
 
     var body: some View {
         Form {
@@ -299,8 +299,8 @@ struct ServiceSettings: View {
             }
             Section("Command line") {
                 LabeledContent("\(ProductIdentity.cliName) command") {
-                    if cliLinked {
-                        Label(ServiceInstaller.cliLinkPath, systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    if let cliLink {
+                        Label(cliLink, systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                     } else {
                         Button("Install in \(ServiceInstaller.cliLinkPath)…") {
                             run { try ServiceInstaller.installCLILink() }
@@ -347,7 +347,7 @@ struct ServiceSettings: View {
                 message = error.localizedDescription
             }
             guardian.finish()
-            cliLinked = ServiceInstaller.cliLinkInstalled
+            cliLink = ServiceInstaller.installedCLILink
             await store.refresh(forceLists: true)
             working = false
         }
