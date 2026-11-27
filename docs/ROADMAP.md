@@ -98,9 +98,10 @@ Le déroulé détaillé de chaque étape restante, réévalué entre deux étape
   - [x] 4b : lancement au login (le test après redémarrage est rattaché à la 4e)
   - [x] 4c : déclencheurs selon l'état du système (app ou jeu ouvert, mode économie d'énergie, batterie ou secteur)
   - [x] 4d : validation sur MacBook Pro M1 Pro, `pulse doctor`, interface pour les Mac sans ventilateur et à deux ventilateurs
-  - [ ] 4e : campagne de tests matériels, sur le MacBook et le Mac mini
+  - [x] 4e : campagne de tests matériels, sur le MacBook et le Mac mini
   - [x] 4g : stress test pour régler les courbes, dans l'app (bouton « Stress Test… », graphiques en direct, comparaison avec l'essai précédent) et en CLI (`pulse fan stress`)
-  - [ ] 4f : 1.0 — fait : profilage, intervalle de collecte de 1 à 5 s (avec un rythme sur batterie), fenêtre gardée au premier plan après le mot de passe, CI pour `App/`, aide utilisateur (`docs/HELP.md`, ouverte depuis le popover) ; reste : publication (après la 4e)
+  - [x] 4f : 1.0, partie code : profilage, intervalle de collecte de 1 à 5 s (avec un rythme sur batterie), fenêtre gardée au premier plan après le mot de passe, CI pour `App/`, aide utilisateur (`docs/HELP.md`, ouverte depuis le popover)
+  - [ ] 4h : publication de la 1.0.0 (release GitHub et tap Homebrew, version calculée à partir des commits, détection des nouvelles versions, mise à jour automatique du daemon ; détail dans [PLAN.md](PLAN.md))
 
 ## 4. Tests
 
