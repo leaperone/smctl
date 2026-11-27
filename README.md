@@ -176,9 +176,36 @@ Safety  ok · ceiling 100.0 °C (hot-spots 110.0 °C)
 | `pulse battery …`, `pulse display …`, `pulse alert …` | Inherited from smctl (see [docs/smctl-README.md](docs/smctl-README.md)) |
 | `pulse daemon install\|uninstall\|status\|logs` | Manage the privileged service |
 
-## Install (from source)
+## Install
 
-Requires Xcode 26 or later and an Apple silicon Mac. The Command Line Tools alone are not enough: SwiftUI's macros (`@State`, …) ship only with Xcode. If `xcode-select -p` prints `/Library/Developer/CommandLineTools`, `build-app.sh` uses Xcode for the build anyway. To make Xcode the default:
+Requires an Apple silicon Mac. The app needs macOS 26 or later, the command line macOS 14 or later.
+
+### Homebrew
+
+```console
+$ brew tap fstormacq/tap && brew trust fstormacq/tap
+$ brew install --cask pulse      # the menu bar app, with the pulse command
+$ brew install pulse-cli         # or: the pulse command and its daemon only (SSH, headless Macs)
+```
+
+Install one or the other: both provide `pulse`. `brew trust` is Homebrew's confirmation for taps outside its own.
+
+- **App**: open Pulse from Applications, click **Install…** in the menu bar item, and enter your administrator password. This installs the fan control service.
+- **Command line only**: `sudo pulse daemon install`.
+
+### Download
+
+Download `Pulse-<version>.zip` from the [latest release](https://github.com/fstormacq/pulse/releases/latest) and move Pulse to Applications. Pulse is signed ad hoc, not notarized by Apple: the first time, macOS refuses to open it. Open **System Settings › Privacy & Security** and click **Open Anyway** (or run `xattr -dr com.apple.quarantine /Applications/Pulse.app`). The Homebrew cask does this for you.
+
+### Updates
+
+- `brew upgrade --cask pulse` or `brew upgrade pulse-cli`, or a new download.
+- **The fan control service follows by itself.** An upgrade replaces the app or the command, but not the copy of the daemon that runs as root. When Pulse starts, it notices that the service is older and replaces it, after the macOS password prompt; `pulse` does the same through `sudo` on its next command in a terminal (`PULSE_NO_DAEMON_UPDATE=1` turns this off). Your profile and curves are kept.
+- Pulse tells you when a new release is out, in the menu bar popover and in `pulse` (the daemon checks GitHub once a day; `[update] check = false` in `/etc/pulse/config.toml` turns it off).
+
+### From source
+
+Requires Xcode 26 or later. The Command Line Tools alone are not enough: SwiftUI's macros (`@State`, …) ship only with Xcode. If `xcode-select -p` prints `/Library/Developer/CommandLineTools`, the build uses Xcode anyway. To make Xcode the default:
 
 ```console
 $ sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
@@ -186,20 +213,22 @@ $ sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
 ```console
 $ git clone https://github.com/fstormacq/pulse && cd pulse
-$ scripts/build-app.sh                 # builds dist/Pulse.app with pulse and pulsed inside
+$ make app                             # builds dist/Pulse.app with pulse and pulsed inside
 $ open dist/Pulse.app
 ```
 
-Open the menu bar item, click **Install…**, and enter your administrator password. This installs the fan control service. **Settings → Service** can also put the `pulse` command in `/usr/local/bin`.
-
-CLI only:
+**Settings → Service** can also put the `pulse` command in `/usr/local/bin`. Command line only:
 
 ```console
 $ swift build -c release
 $ sudo .build/release/pulse daemon install
 ```
 
-The build is ad-hoc signed for personal use. Writes to the fan service are allowed for administrator accounts.
+A build from source is version `0.0.0-dev`: it never offers updates and never replaces a released service. `make help` lists the other targets (tests, release packaging).
+
+### Releases
+
+Work happens on `dev`; `main` receives pull requests from it. Every merge into `main` with a `feat`, `fix` or `perf` commit publishes a release: the version follows the commit types since the last one (`feat` → minor, `fix`/`perf` → patch, `!` → major), and the workflow updates the Homebrew tap. A pull request to `main` builds the next release as a preview.
 
 ## Safety
 

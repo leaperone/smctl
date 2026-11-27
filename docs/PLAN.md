@@ -210,7 +210,7 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 
 ### 4h. Publication de la 1.0.0 (décidé le 27/11/2026)
 
-> 🟡 **Décisions prises, rien de codé.** GitHub est configuré : tap public `fstormacq/homebrew-tap`, branche `dev`, merge commits seulement (pas de squash), secret `TAP_TOKEN`, ruleset sur `main`.
+> 🟡 **Étapes 1 à 7 terminées le 27/11/2026, reste la validation (8)**, qui passe par le merge de `dev` dans `main`. GitHub est configuré : tap public `fstormacq/homebrew-tap`, branche `dev`, merge commits seulement (pas de squash), secret `TAP_TOKEN`, ruleset sur `main`.
 
 **Décisions**
 - **Branches** : on travaille sur `dev`, et `main` ne reçoit que des PR depuis `dev`. **Chaque push sur `main` publie une release**, s'il y a au moins un `feat`, `fix` ou `perf` depuis le dernier tag.
@@ -227,21 +227,21 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 
 **Étapes**
 1. ✅ **Une seule version.** Un fichier généré au build (`PulseVersion.swift`) remplace le `"0.2.4"` écrit en dur dans `SMCtlProtocolInfo`. La même valeur va dans l'`Info.plist` de l'app. Un build local s'appelle `X.Y.Z-dev+<sha>` : il ne propose aucune mise à jour et n'en déclenche aucune. Tests : comparaison de versions, version de développement.
-2. **Makefile** (`build`, `test`, `app`, `package VERSION=…`, `release VERSION=…` pour une release manuelle de secours). La CI appelle `make package`, donc une release se reproduit en local. `scripts/release.sh` (signature Developer ID de leaperone) est supprimé.
-3. **Workflow `release.yml`** : déclenché par un push sur `main`, sur un runner `macos-26`.
+2. ✅ **Makefile** (`build`, `test`, `app`, `package VERSION=…`, `release VERSION=…` pour une release manuelle de secours). La CI appelle `make package`, donc une release se reproduit en local. `scripts/release.sh` (signature Developer ID de leaperone) est supprimé.
+3. ✅ **Workflow `release.yml`** : déclenché par un push sur `main`, sur un runner `macos-26`.
    - Calcul de la version, puis `make package`, tag, release GitHub avec des notes groupées (Nouveautés, Corrections).
    - Mise à jour du cask et de la formule dans le tap avec `TAP_TOKEN`.
    - Un `workflow_dispatch` en mode d'essai construit les assets sans rien publier.
    - La CI tourne aussi sur `dev`.
-4. **Tap** :
+4. ✅ **Tap** :
    - `Casks/pulse.rb` : app, lien `binary` vers `pulse`, `uninstall quit:` puis réouverture, `conflicts_with formula: "pulse-cli"`, `postflight` pour la quarantaine, `caveats` pour la première installation du service ;
    - `Formula/pulse-cli.rb` : binaires prêts, `caveats` avec `sudo pulse daemon install` au premier usage, `test do` sur `--version`.
-5. **Détecter une version plus récente.**
+5. ✅ **Détecter une version plus récente.**
    - Le daemon fait déjà une vérification quotidienne (`latestVersion` dans le ping), et le CLI affiche déjà une note.
    - À ajouter : l'app affiche la nouvelle version dans le popover et dans À propos, avec un lien vers la release. Sans daemon (surveillance seule), elle fait sa propre vérification une fois par jour.
    - La commande proposée dépend du canal : `brew upgrade --cask pulse`, `brew upgrade pulse-cli`, ou un lien de téléchargement. Elle remplace `upgradeCommand` (`git pull && swift build`).
-6. **Mise à jour automatique du daemon**, pour l'app et pour le CLI, comme décrit plus haut. Tests : décision « mettre à jour, avertir ou ne rien faire » selon les versions, le terminal interactif et les builds de développement.
-7. **Documentation** : section d'installation du README (brew, téléchargement direct et « Ouvrir quand même », mise à jour), section « Mises à jour » de `HELP.md`, feuille de route.
+6. ✅ **Mise à jour automatique du daemon**, pour l'app et pour le CLI, comme décrit plus haut. Tests : décision « mettre à jour, avertir ou ne rien faire » selon les versions, le terminal interactif et les builds de développement.
+7. ✅ **Documentation** : section d'installation du README (brew, téléchargement direct et « Ouvrir quand même », mise à jour), section « Mises à jour » de `HELP.md`, feuille de route.
 8. **Validation** :
    - essai du workflow sans publication ;
    - merge `dev` → `main`, qui publie la **v1.0.0** ;
@@ -685,3 +685,32 @@ macOS n'offre donc **aucun signal fiable**, et sa propre heuristique ne reconna�
 - `scripts/build-app.sh` ne prend plus de version en argument. Il lit celle du fichier et met la partie numérique dans `CFBundleShortVersionString` (`0.0.0` pour un build de développement).
 - La CI tourne aussi sur `dev`.
 - **Porte** : tous les tests du package passent, ainsi que les 96 de l'app (96 aussi avant le changement : l'écart avec les 98 notés plus haut vient du retrait de l'onglet Aide). `Pulse.app` construite, et un build en 9.9.9 vérifié puis remis en développement.
+
+### 27/11/2026 : étapes 4h.2 à 4h.7 (en autonomie)
+- **Makefile et scripts** (`173d10f`) : `make build|test|app|package|next-version|notes|tap|release`.
+  - `scripts/package.sh` produit `Pulse-<v>.zip`, `pulse-cli-<v>-arm64.tar.gz` et `SHA256SUMS`. Le tar.gz contient les binaires signés de l'app.
+  - `next-version.sh` calcule la version ; vérifié sur un dépôt jetable (docs seuls, fix, perf, feat, `!`, `BREAKING CHANGE`, commit de merge).
+  - `release-notes.sh` groupe les commits et reprend `docs/release-notes/<v>.md` s'il existe (texte de la 1.0.0).
+  - `scripts/release.sh` (Developer ID de leaperone) est supprimé.
+- **Workflow** : un push sur `main` lance tests, packaging, release GitHub, puis met à jour le tap avec `TAP_TOKEN`. Une PR vers `main` (`8c84178`) et un lancement à la main construisent seulement, sans rien publier. Si on relance après une mise à jour du tap ratée, la release n'est pas refaite et le tap reprend les checksums publiés.
+- **Tap** :
+  - `packaging/homebrew/*.rb.in` → `Casks/pulse.rb` et `Formula/pulse-cli.rb`.
+  - **Homebrew 7** : `postflight` est remplacé par `postflight_steps` (étapes déclaratives) ; le retrait de quarantaine s'écrit `run "/usr/bin/xattr", args: [..., "{{appdir}}/Pulse.app"]`.
+  - Un cask ne peut déclarer de conflit qu'avec un autre cask. Brew refuse de toute façon de lier un deuxième `pulse` au même endroit.
+  - Vérifié : `brew style` sans remarque ; cask et formule chargés depuis un tap local temporaire ; **formule installée depuis le tar.gz** (`pulse --version` = 1.0.0, signature ad hoc, pas de quarantaine, `brew test` réussi), puis désinstallée et tap retiré.
+  - Le cask n'a pas été installé : cela aurait remplacé ton Pulse. C'est à faire à l'étape 8.
+- **Détection et mise à jour** (`d701399`) :
+  - `InstallChannel` (cask, formule, téléchargement, source) donne la commande de mise à jour. `DaemonUpdateDecision` ne met à jour qu'entre deux releases, vers l'avant ; les builds de développement ne sont jamais concernés.
+  - **CLI** : `DaemonClient.outdatedDaemonHandler` lance `sudo pulse daemon install`, puis rouvre la connexion XPC. Seulement dans un terminal, ni avec `--json`, ni depuis `pulse daemon …`, ni avec `PULSE_NO_DAEMON_UPDATE=1`.
+  - **App** : `UpdateCenter`.
+    - Le remplacement est automatique, une fois par version du daemon, avec un message dans la fenêtre de mot de passe.
+    - Si l'utilisateur annule, ou en cas d'échec, l'avis « service out of date » propose « Update… ».
+    - L'avis « Pulse X is available » propose « Copy Command » ou « Download… », et « Later ». À propos affiche aussi la nouvelle version.
+    - La dernière version passe par la télémétrie (`latestVersion`) ; sans daemon, l'app interroge GitHub une fois par jour.
+- **Docs** : README (installation brew, téléchargement et « Ouvrir quand même », mises à jour, sources, releases), section « Updates » de `HELP.md`, notes de la 1.0.0, feuille de route.
+- **Porte** :
+  - tests : tous ceux du package passent, et les 103 de l'app (7 nouveaux pour `UpdateCenter`, 6 pour le canal, la décision et le CLI) ;
+  - PulseBench : phases fermées entre 0,38 et 0,86 % ;
+  - captures `popover-updates` et `settings-about` relues ;
+  - avec une version de release, une commande hors terminal ne fait qu'avertir.
+- **Non testé faute de release** : le remplacement réel du daemon (mot de passe), le cask installé et le workflow publié. C'est l'objet de l'étape 8.
