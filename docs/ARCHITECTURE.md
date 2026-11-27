@@ -183,6 +183,7 @@ At every sensor read, the daemon: reads a snapshot â†’ checks the safety guard â
 | `scripts/build-app.sh` | Builds `dist/Pulse.app`: the app with `pulse` and `pulsed` in `Contents/Helpers`, signed ad hoc. |
 | `scripts/set-version.sh`, `scripts/next-version.sh`, `scripts/release-notes.sh` | The version for a build, the next version from the commits, the release notes. |
 | `scripts/package.sh` | The release assets and their checksums in `dist/release/`. |
+| `scripts/readme-images.sh` (`make readme-images`) | Regenerates the README's screenshots, light and dark, from `PulseSnapshots`, and checks that each has both versions. |
 | `scripts/update-tap.sh`, `packaging/homebrew/` | The cask and formula templates, rendered into the tap for a version. |
 | `.github/workflows/ci.yml` | Build and tests of both packages. |
 | `.github/workflows/release.yml` | The release on every push to `main` (preview only on pull requests). |

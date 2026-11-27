@@ -65,7 +65,7 @@ The dot is coloured by temperature (green → yellow → orange → red) and bea
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/img/menubar-stacked-dark.png">
-    <img src="assets/img/menubar-stacked-light.png" alt="Pulse dot with CPU 55° over FAN 1341" height="44">
+    <img src="assets/img/menubar-stacked-light.png" alt="Pulse dot with CPU 55° over FAN 1284" height="44">
   </picture>
   &nbsp;
   <picture>
@@ -106,7 +106,7 @@ In **Settings › Curves**, duplicate a profile (or click **+**) and shape it on
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/img/editor-dark.png">
-    <img src="assets/img/editor-light.png" alt="Curve editor: points on a temperature/RPM chart, live marker at 55 °C, sensors and response settings" width="568">
+    <img src="assets/img/editor-light.png" alt="Settings › Curves: the presets and your curves on the left; on the right, the editor of a curve made of points, with a live marker at 55 °C, its sensors and response settings" width="720">
   </picture>
 </p>
 

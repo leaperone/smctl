@@ -14,7 +14,7 @@ docs/ci/chore → none). See CONTRIBUTING.md.
 
 - [ ] `make test` passes (both packages)
 - [ ] Tested on real hardware: <!-- e.g. MacBook Pro M1 Pro, macOS 27.2 — or "not needed" -->
-- [ ] Screenshots of visible changes, light and dark (`PulseSnapshots`)
+- [ ] Screenshots of visible changes, light and dark (`PulseSnapshots`; `make readme-images` if the README shows it)
 - [ ] Idle CPU unchanged for app changes (`PulseBench`, every closed phase under 1 %)
 
 ## Checklist

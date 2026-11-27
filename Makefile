@@ -8,7 +8,7 @@ TAP_DIR ?= $(CURDIR)/../homebrew-tap
 REPO    := fstormacq/pulse
 
 .DEFAULT_GOAL := help
-.PHONY: help build test app package next-version notes tap release clean
+.PHONY: help build test app readme-images package next-version notes tap release clean
 
 define require-version
 	@test -n "$(VERSION)" || { echo "error: pass VERSION=x.y.z (make next-version suggests one)"; exit 1; }
@@ -27,6 +27,9 @@ test: ## Run the tests of both packages
 
 app: ## Build dist/Pulse.app (development version)
 	scripts/build-app.sh
+
+readme-images: ## Regenerate the README's screenshots, light and dark, from the current code
+	scripts/readme-images.sh
 
 package: ## Build the release assets into dist/release (VERSION=x.y.z)
 	$(require-version)
