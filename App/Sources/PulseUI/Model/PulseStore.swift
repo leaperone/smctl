@@ -89,6 +89,17 @@ public final class PulseStore {
 
     /// New releases and the service's version (see `UpdateCenter`).
     public let updates: UpdateCenter
+    /// The stress test running from Settings, if any. It owns the fan profile
+    /// until it ends: switching would make its readings measure another curve.
+    public private(set) var stressTest: StressTestModel?
+
+    func stressTestDidStart(_ model: StressTestModel) { stressTest = model }
+    func stressTestDidEnd(_ model: StressTestModel) {
+        if stressTest === model { stressTest = nil }
+    }
+
+    /// The popover's profiles: fan control, and no stress test running.
+    public var canSwitchProfile: Bool { canControlFans && stressTest == nil }
 
     public init(service: any PulseService = DaemonPulseService(), fallback: DirectSensorService? = DirectSensorService(),
                 updates: UpdateCenter? = nil) {
@@ -239,7 +250,7 @@ public final class PulseStore {
     // MARK: Actions
 
     public func activate(_ profile: String) async {
-        guard busyProfile == nil else { return }
+        guard busyProfile == nil, stressTest == nil else { return }
         busyProfile = profile
         defer { busyProfile = nil }
         await perform { try $0.activate(profile: profile) }

@@ -477,7 +477,7 @@ struct CurveDetail: View {
 
     private func openStressTest() {
         let store = self.store
-        stressTest = StressTestModel(profile: entry.spec.name, title: spec.label ?? spec.name.capitalized, service: store.service) {
+        stressTest = StressTestModel(profile: entry.spec.name, title: spec.label ?? spec.name.capitalized, service: store.service, store: store) {
             Task { await store.refresh(forceLists: true) }
         }
     }

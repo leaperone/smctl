@@ -1,0 +1,29 @@
+name: Pull request title
+
+# A pull request into dev is squash-merged: its title becomes the commit on dev,
+# which decides the next version (scripts/next-version.sh) and appears in the
+# release notes. See CONTRIBUTING.md.
+on:
+  pull_request:
+    branches: [dev]
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  title:
+    name: Pull request title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the Conventional Commit format
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          pattern='^(feat|fix|perf|docs|ci|build|test|refactor|style|chore|revert)(\([a-z0-9-]+\))?!?: [^ ].+$'
+          if [[ "$TITLE" =~ $pattern ]]; then
+            echo "OK: $TITLE"
+          else
+            echo "::error::The title must follow Conventional Commits, e.g. 'fix(app): keep the popover open after Install…'. Got: '$TITLE'. See CONTRIBUTING.md."
+            exit 1
+          fi

@@ -46,8 +46,12 @@ public final class StressTestModel {
     public private(set) var result: StressResult?
     /// The previous run of this curve, drawn behind the current one.
     public private(set) var previous: StressResult?
+    /// The profile that took over during the run, which stopped it.
+    public private(set) var takenOverBy: String?
 
     @ObservationIgnored private let service: (any PulseService)?
+    /// Told when the run starts and ends, to lock the profile meanwhile.
+    @ObservationIgnored private weak var store: PulseStore?
     @ObservationIgnored private var runner: StressRunner?
     @ObservationIgnored private let onFinish: @MainActor () -> Void
 
@@ -70,10 +74,12 @@ public final class StressTestModel {
     var summary: StressSummary? { result?.summary ?? StressSummary(samples: samples) }
     var elapsed: Double { samples.last?.seconds ?? 0 }
 
-    init(profile: String, title: String, service: (any PulseService)?, onFinish: @escaping @MainActor () -> Void = {}) {
+    init(profile: String, title: String, service: (any PulseService)?, store: PulseStore? = nil,
+         onFinish: @escaping @MainActor () -> Void = {}) {
         self.profile = profile
         self.title = title
         self.service = service
+        self.store = store
         self.onFinish = onFinish
         self.previous = StressHistory.shared.last(for: profile)
     }
@@ -91,13 +97,15 @@ public final class StressTestModel {
 
     func start() {
         guard let service, !isRunning else { return }
-        if let result { previous = result }
+        if let result, result.profileChange == nil { previous = result }
         result = nil
+        takenOverBy = nil
         samples = []
         activePlan = plan
         state = .running(.load)
         let runner = StressRunner(telemetry: { try service.telemetry() }, activate: { try service.activate(profile: $0) })
         self.runner = runner
+        store?.stressTestDidStart(self)
         let profile = self.profile
         let plan = activePlan
         Thread.detachNewThread { [weak self] in
@@ -129,9 +137,12 @@ public final class StressTestModel {
         case .sample(_, let sample):
             samples.append(sample)
             if state != .stopping { state = .running(sample.phase) }
+        case .profileChanged(_, let active):
+            takenOverBy = active
         case .finished(let result):
             self.result = result
-            StressHistory.shared.record(result)
+            // A run another profile took over doesn't measure this curve: never compare with it.
+            if result.profileChange == nil { StressHistory.shared.record(result) }
         case .restored:
             break
         }
@@ -139,6 +150,7 @@ public final class StressTestModel {
 
     private func didEnd(error: String?) {
         runner = nil
+        store?.stressTestDidEnd(self)
         if let error {
             state = .failed(error)
         } else {

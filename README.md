@@ -290,6 +290,8 @@ All commands accept `--json`.
 
 ## For developers
 
+Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains the workflow: a branch per change, a pull request into `dev` titled like a commit, and releases from `dev` into `main`. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) explains where the code of each part lives, why, and how to make common changes.
+
 <details>
 <summary><b>Build from source</b></summary>
 
@@ -308,7 +310,7 @@ Command line only: `swift build -c release && sudo .build/release/pulse daemon i
 </details>
 
 <details>
-<summary><b>Architecture</b></summary>
+<summary><b>Architecture at a glance</b></summary>
 
 ```
 Pulse.app (SwiftUI + AppKit status item) ─┐
@@ -317,17 +319,9 @@ pulse CLI ───────────────────────�
                                           │          └─ /etc/pulse/config.toml
 ```
 
-- `Sources/`: the core package (smctl, plus Pulse's additions in separate files).
+- `Sources/`: the core package (smctl, plus Pulse's additions in separate files): SMC access, policy engine, daemon, XPC protocol and client, CLI.
 - `App/`: the menu bar app, a separate SwiftPM package (open `App/Package.swift` in Xcode).
-- `swift run --package-path App PulseSnapshots <dir>` renders the UI with sample data; `swift run -c release --package-path App PulseBench` measures CPU and memory with the real windows.
-- Design notes and history: [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/PLAN.md](docs/PLAN.md) (in French).
-
-</details>
-
-<details>
-<summary><b>Releases</b></summary>
-
-Work happens on `dev`; `main` only receives pull requests from it. Every merge into `main` that contains a `feat`, `fix` or `perf` commit publishes a release. The version follows the commit types since the last one: `feat` → minor, `fix`/`perf` → patch, `!` → major. The workflow builds the app and the CLI, publishes them on GitHub and updates the Homebrew tap. A pull request to `main` builds the next release as a preview.
+- Details, tests and tools: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Design notes and history: [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/PLAN.md](docs/PLAN.md) (in French).
 
 </details>
 

@@ -720,3 +720,22 @@ macOS n'offre donc **aucun signal fiable**, et sa propre heuristique ne reconna�
 - **Piège découvert** : le dépôt officiel de Homebrew a déjà un cask `pulse`, une autre app (Pulse d'egoist, moniteur système). `brew install --cask pulse` l'installe à la place du nôtre. Installée par erreur sur le MacBook puis désinstallée ; tes réglages n'ont pas été touchés. **Décision (ta préférence)** : on garde le nom `pulse` et on écrit toujours le nom complet `fstormacq/tap/pulse` (et `fstormacq/tap/pulse-cli`) : README, aide, tap, notes de version, et commande proposée par l'app et le CLI. La détection du canal « cask » exige aussi que Pulse soit dans Applications, pour ne pas confondre avec l'autre `pulse`. Corrigé en 1.0.1.
 - **MacBook Pro M1 Pro, cask 1.0.0** : `brew install --cask fstormacq/tap/pulse` installe notre app, sans attribut de quarantaine (le `postflight_steps` marche), et lie `pulse` dans `/opt/homebrew/bin`. Au lancement, l'app a ouvert la fenêtre de mot de passe (« Pulse was updated to 1.0.0… 0.2.4 is running ») ; après saisie, le daemon est passé de 0.2.4 à 1.0.0, avec le profil (`balanced-copy`) et le rythme (5 s) conservés.
 - **Limite notée** : le daemon cherche une nouvelle version 10 s après son démarrage, puis une fois par jour. Une release peut donc mettre jusqu'à 24 h à apparaître.
+
+### 27/11/2026 : guide de contribution et flux par branches (ta demande)
+- **Flux** : une branche par changement (`feat/…`, `fix/…`, `docs/…`), PR vers `dev` **en squash** avec un titre au format Conventional Commits, puis PR `dev` → `main` **en merge commit**, qui publie la release.
+  - Le squash fait du titre de la PR le commit lu par `next-version.sh` et par les notes de version. Un workflow, **Pull request title** (`pr-title.yml`), vérifie ce titre.
+  - Le merge commit vers `main` évite que `dev` et `main` divergent.
+- **Docs** :
+  - `CONTRIBUTING.md` : flux, titres, versions, contenu d'une PR, tests sur le matériel, style, bugs, releases et réglages du dépôt ;
+  - `docs/ARCHITECTURE.md` : où se trouve le code de chaque partie, pourquoi, et comment faire les changements courants (commande CLI, méthode XPC, champ de config, preset, UI, identité, merge de smctl).
+- **GitHub** : template de PR, templates d'issues (bug avec `pulse doctor`, idée), `CODEOWNERS`.
+- **CI** : les PR lancent toujours la CI, même pour de la doc seule. Avec des checks obligatoires, un check qui ne démarre jamais bloquerait la PR. Les push gardent leur filtre.
+- **Version** : ces commits sont en `docs:` et `ci:`, ils ne déclenchent pas de release à eux seuls. Ils partiront dans la 1.0.2, avec le `fix(app)` déjà sur `dev`.
+- **À régler par toi sur GitHub** (détail dans `CONTRIBUTING.md` › Repository settings) : autoriser le squash (message par défaut : titre de la PR) et la suppression automatique des branches ; un ruleset sur `dev` ; sur le ruleset de `main`, garder seulement *Merge*.
+
+### 27/11/2026 : le stress test garde la main sur le profil (ta remarque)
+- **Problème** : pendant un stress test, on pouvait changer de profil depuis le popover, et une règle d'automatisation ou une commande en SSH aussi. Le résultat était alors enregistré sous la courbe testée et servait de référence (« essai précédent ») pour les comparaisons suivantes. Et le profil choisi en cours de route était écrasé à la fin.
+- **Correctif** (PR vers `dev`) :
+  - Pendant l'essai, les profils du popover sont verrouillés, avec un avis « Stress test running » et un bouton Stop. `PulseStore.activate` refuse les changements, et l'automatisation est en pause.
+  - Chaque relevé note le profil actif (`StressSample.profile`). Si un autre profil prend la main, sans compter le garde-fou, le moteur arrête l'essai et ne lance pas les profils suivants, puis restaure le profil d'origine. Le résultat est marqué `profileChange` et n'est pas gardé comme référence. Côté CLI, un message l'indique, et le tableau comme le JSON le signalent.
+- **Pour plus tard** : comparer plusieurs courbes depuis l'app (issue GitHub). Changer de courbe en cours d'essai ne les compare pas à conditions égales.

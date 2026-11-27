@@ -179,3 +179,49 @@ func stressRunnerWaitsForTheMacToCoolBeforeEachProfile() throws {
     #expect(settled.first == "b")
     #expect(targets == [37])
 }
+
+@Test
+func stressRunnerStopsWhenAnotherProfileTakesOver() throws {
+    let mac = FakeMac()
+    let runner = StressRunner(telemetry: { mac.telemetry() }, activate: { mac.activate($0) }, load: { _ in mac.load })
+    let plan = StressPlan(loadSeconds: 30, coolSeconds: 30, settleSeconds: 0, sampleInterval: 0.1, holdSeconds: 0)
+    let started = Date()
+    var count = 0
+    var events: [String] = []
+    let results = try runner.run(profiles: ["a", "b"], plan: plan) { event in
+        switch event {
+        case .sample:
+            count += 1
+            // Someone picks another profile in the popover (not through the runner).
+            if count == 3 { mac.state.withLock { $0.profile = "performance" } }
+        case .profileChanged(let profile, let active): events.append("\(profile) → \(active)")
+        case .started(let profile, _, _): events.append("start \(profile)")
+        case .restored(let profile): events.append("restored \(profile)")
+        default: break
+        }
+    }
+    #expect(Date().timeIntervalSince(started) < 3, "stops at once instead of measuring the wrong profile")
+    #expect(events == ["start a", "a → performance", "restored silent"], "b is not run")
+    #expect(results.map(\.profile) == ["a"])
+    #expect(results.first?.completed == false)
+    #expect(results.first?.profileChange == "performance")
+    #expect(mac.load.state.withLock { $0.running } == false)
+    #expect(mac.state.withLock { $0.activations } == ["a", "silent"])
+}
+
+@Test
+func profileChangeIgnoresTheSafetyGuardAndOldSamples() {
+    func sample(_ t: Double, profile: String?, latched: Bool = false) -> StressSample {
+        StressSample(seconds: t, phase: .load, cpuMaximum: 80, gpuMaximum: nil, curveInput: nil, curveEffective: nil, fanRPM: 2000,
+                     fanPercent: 30, targetRPM: 2000, packageWatts: nil, handedToSystem: false, latched: latched, profile: profile)
+    }
+    let plan = StressPlan()
+    #expect(StressResult(profile: "a", startedAt: Date(), plan: plan, samples: [sample(0, profile: "a"), sample(2, profile: "a")],
+                         completed: true).profileChange == nil)
+    #expect(StressResult(profile: "a", startedAt: Date(), plan: plan, samples: [sample(0, profile: nil), sample(2, profile: nil)],
+                         completed: true).profileChange == nil, "samples from before the profile was recorded")
+    #expect(StressResult(profile: "a", startedAt: Date(), plan: plan, samples: [sample(0, profile: "a"), sample(2, profile: "auto", latched: true)],
+                         completed: true).profileChange == nil, "the safety guard handing the fans to macOS is not a takeover")
+    #expect(StressResult(profile: "a", startedAt: Date(), plan: plan, samples: [sample(0, profile: "a"), sample(2, profile: "silent")],
+                         completed: false).profileChange == "silent")
+}
