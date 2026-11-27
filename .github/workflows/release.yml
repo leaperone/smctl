@@ -1,0 +1,141 @@
+name: Release
+
+# Every push to main publishes a release when a feat, fix or perf commit landed
+# since the last vX.Y.Z tag (scripts/next-version.sh); the version is never
+# committed. Run it by hand (Actions › Release › Run workflow) to build the
+# assets without publishing anything.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the release and update the tap (main only)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  release:
+    name: Release
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # the tags, for the next version and the notes
+
+      - name: Version
+        id: version
+        run: |
+          # A rerun after a failed tap update: HEAD is already released.
+          existing="$(git tag --points-at HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' | head -n 1)"
+          if [[ -n "$existing" ]]; then
+            echo "version=${existing#v}" >> "$GITHUB_OUTPUT"
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$existing already points at this commit: only the tap is updated."
+            exit 0
+          fi
+          version="$(scripts/next-version.sh)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "released=false" >> "$GITHUB_OUTPUT"
+          if [[ -z "$version" ]]; then
+            echo "::notice::No feat, fix or perf commit since the last release: nothing to publish."
+          else
+            echo "::notice::Next version: $version"
+          fi
+
+      - name: Decide
+        id: plan
+        run: |
+          publish=false
+          if [[ -n "${{ steps.version.outputs.version }}" && "$GITHUB_REF" == "refs/heads/main" ]]; then
+            if [[ "$GITHUB_EVENT_NAME" == "push" || "${{ inputs.publish }}" == "true" ]]; then
+              publish=true
+            fi
+          fi
+          build=false
+          [[ -n "${{ steps.version.outputs.version }}" && "${{ steps.version.outputs.released }}" == "false" ]] && build=true
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
+      - name: Cache SwiftPM
+        if: steps.plan.outputs.build == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            App/.build
+            ~/Library/Caches/org.swift.swiftpm
+          key: spm-release-${{ runner.os }}-${{ hashFiles('Package.resolved', 'App/Package.resolved') }}
+          restore-keys: spm-release-${{ runner.os }}-
+
+      - name: Test
+        # A merge forced past the required checks still gets tested before it ships.
+        if: steps.plan.outputs.build == 'true'
+        run: make test
+
+      - name: Package
+        if: steps.plan.outputs.build == 'true'
+        run: |
+          make package VERSION="${{ steps.version.outputs.version }}"
+          scripts/release-notes.sh "${{ steps.version.outputs.version }}" > dist/release/NOTES.md
+
+      - name: Upload the assets to the run
+        if: steps.plan.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulse-${{ steps.version.outputs.version }}
+          path: dist/release/
+
+      - name: Publish the GitHub release
+        if: steps.plan.outputs.publish == 'true' && steps.version.outputs.released == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "Pulse $VERSION" \
+            --notes-file dist/release/NOTES.md \
+            "dist/release/Pulse-$VERSION.zip" "dist/release/pulse-cli-$VERSION-arm64.tar.gz" dist/release/SHA256SUMS
+
+      - name: Fetch the published checksums
+        # On a rerun the assets are not rebuilt: a new build would not match them.
+        if: steps.plan.outputs.publish == 'true' && steps.version.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist/release
+          gh release download "v${{ steps.version.outputs.version }}" --pattern SHA256SUMS --dir dist/release --clobber
+
+      - name: Check out the tap
+        if: steps.plan.outputs.publish == 'true'
+        uses: actions/checkout@v5
+        with:
+          repository: fstormacq/homebrew-tap
+          token: ${{ secrets.TAP_TOKEN }}
+          path: tap
+
+      - name: Update the tap
+        if: steps.plan.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          scripts/update-tap.sh "$VERSION" tap
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md Casks/pulse.rb Formula/pulse-cli.rb
+          if git diff --cached --quiet; then
+            echo "The tap is already at $VERSION."
+          else
+            git commit -m "pulse $VERSION"
+            git push
+          fi
