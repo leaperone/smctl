@@ -59,7 +59,7 @@ The version is never committed. `Sources/ProductIdentity/PulseVersion.swift` hol
 
 - **One change.** A fix and an unrelated refactor are two pull requests.
 - **Tests** for any logic you add or change. Run both packages: `make test`.
-- **Screenshots** for any visible change to the app, in light and dark mode. `swift run --package-path App PulseSnapshots <dir>` renders every screen with sample data; add a case there if your screen is new.
+- **Screenshots** for any visible change to the app, in light and dark mode. `swift run --package-path App PulseSnapshots <dir>` renders every screen with sample data; add a case there if your screen is new. If the change shows in the README, run `make readme-images`: it regenerates the README's screenshots in both appearances.
 - **No regression in idle CPU.** For changes to the app's views or polling, run `swift run -c release --package-path App PulseBench 20`. Every "closed" phase must stay under 1 % CPU.
 - **Docs** that follow the change: [README.md](README.md) for what users see first, [docs/HELP.md](docs/HELP.md) for what a setting does (its numbers are checked by `HelpDocumentTests`).
 - **The hardware you tested on**, for anything that writes to the SMC (see below).
