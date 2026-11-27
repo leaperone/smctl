@@ -226,7 +226,7 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 - **Quarantaine** : le cask la retire (`postflight` avec `xattr -dr com.apple.quarantine`). Homebrew 7 met les casks en quarantaine et n'a plus de `--no-quarantine`. Sans ça, Gatekeeper bloquerait l'app ad hoc au premier lancement et à chaque mise à jour, puisque l'identité ad hoc change à chaque build. Le téléchargement direct garde l'étape « Ouvrir quand même ».
 
 **Étapes**
-1. **Une seule version.** Un fichier généré au build (`PulseVersion.swift`) remplace le `"0.2.4"` écrit en dur dans `SMCtlProtocolInfo`. La même valeur va dans l'`Info.plist` de l'app. Un build local s'appelle `X.Y.Z-dev+<sha>` : il ne propose aucune mise à jour et n'en déclenche aucune. Tests : comparaison de versions, version de développement.
+1. ✅ **Une seule version.** Un fichier généré au build (`PulseVersion.swift`) remplace le `"0.2.4"` écrit en dur dans `SMCtlProtocolInfo`. La même valeur va dans l'`Info.plist` de l'app. Un build local s'appelle `X.Y.Z-dev+<sha>` : il ne propose aucune mise à jour et n'en déclenche aucune. Tests : comparaison de versions, version de développement.
 2. **Makefile** (`build`, `test`, `app`, `package VERSION=…`, `release VERSION=…` pour une release manuelle de secours). La CI appelle `make package`, donc une release se reproduit en local. `scripts/release.sh` (signature Developer ID de leaperone) est supprimé.
 3. **Workflow `release.yml`** : déclenché par un push sur `main`, sur un runner `macos-26`.
    - Calcul de la version, puis `make package`, tag, release GitHub avec des notes groupées (Nouveautés, Corrections).
@@ -678,3 +678,10 @@ macOS n'offre donc **aucun signal fiable**, et sa propre heuristique ne reconna�
 - **Mise à jour du daemon** : par l'app et par le CLI à l'usage. Pas de `sudo` dans le cask, et pas d'auto-téléchargement par le daemon (trop sensible pour la 1.0). Détail et étapes dans la 4h.
 - **Ruleset de `main`** : 1 approbation exigée, gardée volontairement. Tu préfères forcer le merge de tes propres PR plutôt que risquer un merge sans ton accord. Le contournement ne marche que par PR, donc aucun push direct.
 - **Cask** : retire la quarantaine (`postflight`).
+
+### 27/11/2026 : étape 4h.1, une seule version
+- `Sources/ProductIdentity/PulseVersion.swift` porte la version : `0.0.0-dev` dans le dépôt. `scripts/set-version.sh x.y.z` l'écrit pour une release, et `--dev` la remet. `SMCtlProtocolInfo.version` et `PolicyEngine.version` (deux `"0.2.4"` hérités de smctl) la reprennent. `pulse --version`, le daemon, l'app (À propos) et l'`Info.plist` affichent donc tous la même valeur.
+- `SMCtlProtocolInfo.isRelease` : une version de développement ne se compare à rien. Elle ne propose aucune mise à jour et n'en déclenchera aucune pour le daemon (étape 6). 2 tests ajoutés.
+- `scripts/build-app.sh` ne prend plus de version en argument. Il lit celle du fichier et met la partie numérique dans `CFBundleShortVersionString` (`0.0.0` pour un build de développement).
+- La CI tourne aussi sur `dev`.
+- **Porte** : tous les tests du package passent, ainsi que les 96 de l'app (96 aussi avant le changement : l'écart avec les 98 notés plus haut vient du retrait de l'onglet Aide). `Pulse.app` construite, et un build en 9.9.9 vérifié puis remis en développement.

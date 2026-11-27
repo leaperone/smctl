@@ -42,4 +42,19 @@ final class VersionCompareTests: XCTestCase {
         XCTAssertNil(ping.latestVersion)
         XCTAssertEqual(ping.version, "0.1.5")
     }
+
+    func testDevelopmentBuildsNeverCompare() {
+        XCTAssertTrue(SMCtlProtocolInfo.isRelease("1.0.0"))
+        XCTAssertTrue(SMCtlProtocolInfo.isRelease("v1.2.3"))
+        XCTAssertFalse(SMCtlProtocolInfo.isRelease("0.0.0-dev"))
+        XCTAssertFalse(SMCtlProtocolInfo.isRelease(""))
+        XCTAssertFalse(SMCtlProtocolInfo.isRelease("1..0"))
+        XCTAssertFalse(SMCtlProtocolInfo.isVersion("1.0.1", newerThan: "0.0.0-dev"), "a dev build is never offered an update")
+        XCTAssertFalse(SMCtlProtocolInfo.isVersion("0.0.0-dev", newerThan: "1.0.0"), "nor seen as newer than a release")
+    }
+
+    func testProductVersionIsDevelopmentOrRelease() {
+        let version = SMCtlProtocolInfo.version
+        XCTAssertTrue(version == "0.0.0-dev" || SMCtlProtocolInfo.isRelease(version), version)
+    }
 }

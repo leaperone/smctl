@@ -361,7 +361,7 @@ struct AboutView: View {
                 .resizable()
                 .frame(width: 96, height: 96)
             Text("Pulse").font(.title2.weight(.semibold))
-            Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
+            Text("Version \(ProductIdentity.version)")
                 .foregroundStyle(.secondary)
             Text("Temperatures and fan control for Apple silicon Macs.")
                 .font(.callout)

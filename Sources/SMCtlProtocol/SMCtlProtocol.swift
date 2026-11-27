@@ -2,8 +2,18 @@ import Foundation
 import ProductIdentity
 
 public enum SMCtlProtocolInfo {
-    public static let version = "0.2.4"
+    /// The product version (see `ProductIdentity.version`).
+    public static let version = ProductIdentity.version
     public static let machServiceName = ProductIdentity.machServiceName
+
+    /// True for a release version (`1.2.3`, with or without a leading "v"); false for a
+    /// development build (`0.0.0-dev`) or anything unparsable. Updates are only offered,
+    /// and the daemon only replaced, between two release versions.
+    public static func isRelease(_ version: String) -> Bool {
+        let trimmed = version.hasPrefix("v") ? version.dropFirst() : Substring(version)
+        let comps = trimmed.split(separator: ".", omittingEmptySubsequences: false)
+        return !comps.isEmpty && comps.allSatisfy { !$0.isEmpty && $0.allSatisfy(\.isASCII) && $0.allSatisfy(\.isNumber) }
+    }
 
     /// Numeric-component semver comparison, tolerant of a leading "v".
     /// Non-numeric/garbage versions compare as not-newer (fail closed: no false alarm).
@@ -14,7 +24,8 @@ public enum SMCtlProtocolInfo {
             guard comps.allSatisfy({ $0 != nil }) else { return nil }
             return comps.map { $0! }
         }
-        guard let a = parts(candidate), let b = parts(baseline) else { return false }
+        guard isRelease(candidate), isRelease(baseline),
+              let a = parts(candidate), let b = parts(baseline) else { return false }
         for i in 0..<max(a.count, b.count) {
             let x = i < a.count ? a[i] : 0
             let y = i < b.count ? b[i] : 0
