@@ -30,7 +30,7 @@ let package = Package(
                 .linkedFramework("IOKit")
             ]
         ),
-        .target(name: "PolicyEngine"),
+        .target(name: "PolicyEngine", dependencies: ["ProductIdentity"]),
         .target(
             name: "SMCtlProtocol",
             dependencies: ["ProductIdentity", "PolicyEngine"]

@@ -65,6 +65,7 @@ public struct PopoverView: View {
                 }
             }
         }
+        UpdateNotices(updates: store.updates)
         if store.safetyLatched {
             Notice(
                 systemImage: "exclamationmark.triangle.fill",
@@ -181,14 +182,19 @@ struct Notice: View {
     var message: String
     var actionTitle: String?
     var action: (() -> Void)?
+    var secondaryTitle: String?
+    var secondaryAction: (() -> Void)?
 
-    init(systemImage: String, tint: Color, title: String, message: String, actionTitle: String? = nil, action: (() -> Void)? = nil) {
+    init(systemImage: String, tint: Color, title: String, message: String, actionTitle: String? = nil, action: (() -> Void)? = nil,
+         secondaryTitle: String? = nil, secondaryAction: (() -> Void)? = nil) {
         self.systemImage = systemImage
         self.tint = tint
         self.title = title
         self.message = message
         self.actionTitle = actionTitle
         self.action = action
+        self.secondaryTitle = secondaryTitle
+        self.secondaryAction = secondaryAction
     }
 
     var body: some View {
@@ -200,10 +206,16 @@ struct Notice: View {
                 Text(title).font(.callout.weight(.semibold))
                 Text(message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 if let actionTitle, let action {
-                    Button(actionTitle, action: action)
-                        .buttonStyle(.glass)
-                        .controlSize(.small)
-                        .padding(.top, 4)
+                    HStack(spacing: 6) {
+                        Button(actionTitle, action: action)
+                            .buttonStyle(.glass)
+                        if let secondaryTitle, let secondaryAction {
+                            Button(secondaryTitle, action: secondaryAction)
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                    .controlSize(.small)
+                    .padding(.top, 4)
                 }
             }
             Spacer(minLength: 0)

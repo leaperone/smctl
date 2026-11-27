@@ -3,14 +3,14 @@ name: CI
 # Documentation-only changes don't need a macOS build.
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths-ignore:
       - "**/*.md"
       - "docs/**"
       - "assets/**"
       - "LICENSE"
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths-ignore:
       - "**/*.md"
       - "docs/**"

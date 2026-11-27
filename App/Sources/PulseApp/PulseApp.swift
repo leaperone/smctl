@@ -14,7 +14,7 @@ struct PulseApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let store = PulseStore()
+    private let store = PulseStore(updates: .live())
     private var statusItem: StatusItemController?
     private var settings: SettingsWindowController?
     private var safetyNotifier: SafetyNotifier?

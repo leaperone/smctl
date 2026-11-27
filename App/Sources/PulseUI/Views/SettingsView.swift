@@ -60,7 +60,7 @@ public struct SettingsView: View {
                     ContentUnavailableView("Automation Unavailable", systemImage: "wand.and.stars")
                 }
             case .service: ServiceSettings(store: store)
-            case .about: AboutView()
+            case .about: AboutView(updates: store.updates)
             }
         }
         .frame(width: pane.size.width, height: pane.size.height)
@@ -355,14 +355,20 @@ struct ServiceSettings: View {
 }
 
 struct AboutView: View {
+    let updates: UpdateCenter
+
     var body: some View {
         VStack(spacing: 10) {
             Image(nsImage: NSApplication.shared.applicationIconImage)
                 .resizable()
                 .frame(width: 96, height: 96)
             Text("Pulse").font(.title2.weight(.semibold))
-            Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")")
+            Text("Version \(updates.appVersion)")
                 .foregroundStyle(.secondary)
+            if let version = updates.newerVersion, let url = URL(string: ProductIdentity.releasesURL) {
+                Link("Pulse \(version) is available", destination: url)
+                    .font(.callout)
+            }
             Text("Temperatures and fan control for Apple silicon Macs.")
                 .font(.callout)
             HStack(spacing: 4) {

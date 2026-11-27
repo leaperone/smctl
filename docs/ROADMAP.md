@@ -78,7 +78,9 @@ On accepte des motifs (`"Tp*"` pour les hotspots CPU, `"Tg*"` pour le GPU, `"Ts*
 - **Projet** : package SwiftPM séparé dans `App/` (macOS 26), qui dépend du package principal. `App/Package.swift` s'ouvre dans Xcode ; `scripts/build-app.sh` assemble `dist/Pulse.app`. Pas de XcodeGen.
 - **Barre des menus** : `NSStatusItem` + `NSPopover` en AppKit, avec les vues en SwiftUI. `MenuBarExtra` redessinait l'élément à chaque mise à jour de la scène (environ 3,6 % de CPU au repos).
 - **Packaging** : `pulse` et `pulsed` sont embarqués dans `Contents/Helpers/`. L'installation du service passe par `pulse daemon install` avec les droits administrateur. Lancement à l'ouverture de session via `SMAppService.mainApp`, et `LSUIElement` pour ne pas apparaître dans le Dock.
-- **Signature** : ad hoc pour un usage perso. Les écritures sont autorisées aux comptes admin (vérifié sous macOS 27.2).
+- **Signature** : ad hoc, sans compte développeur Apple. Les écritures sont autorisées aux comptes admin (vérifié sous macOS 27.2).
+- **Distribution** : release GitHub et tap Homebrew `fstormacq/tap`, avec le cask `pulse` (l'app et le CLI ; il retire la quarantaine) et la formule `pulse-cli` (CLI et daemon). Chaque merge dans `main` qui contient un `feat`, un `fix` ou un `perf` publie une version, calculée à partir des commits (`.github/workflows/release.yml`, `Makefile`).
+- **Mises à jour** : l'app et le CLI signalent les nouvelles versions. Après une mise à jour, ils remplacent le daemon par leur version (mot de passe admin, une fois), sans jamais revenir à une version plus ancienne.
 
 ### 2.10 Conflits
 On détecte les autres contrôleurs de ventilateurs (daemon smctl, TG Pro, Macs Fan Control). On affiche un avertissement, sans rien désinstaller automatiquement.
@@ -98,9 +100,10 @@ Le déroulé détaillé de chaque étape restante, réévalué entre deux étape
   - [x] 4b : lancement au login (le test après redémarrage est rattaché à la 4e)
   - [x] 4c : déclencheurs selon l'état du système (app ou jeu ouvert, mode économie d'énergie, batterie ou secteur)
   - [x] 4d : validation sur MacBook Pro M1 Pro, `pulse doctor`, interface pour les Mac sans ventilateur et à deux ventilateurs
-  - [ ] 4e : campagne de tests matériels, sur le MacBook et le Mac mini
+  - [x] 4e : campagne de tests matériels, sur le MacBook et le Mac mini
   - [x] 4g : stress test pour régler les courbes, dans l'app (bouton « Stress Test… », graphiques en direct, comparaison avec l'essai précédent) et en CLI (`pulse fan stress`)
-  - [ ] 4f : 1.0 — fait : profilage, intervalle de collecte de 1 à 5 s (avec un rythme sur batterie), fenêtre gardée au premier plan après le mot de passe, CI pour `App/`, aide utilisateur (`docs/HELP.md`, ouverte depuis le popover) ; reste : publication (après la 4e)
+  - [x] 4f : 1.0, partie code : profilage, intervalle de collecte de 1 à 5 s (avec un rythme sur batterie), fenêtre gardée au premier plan après le mot de passe, CI pour `App/`, aide utilisateur (`docs/HELP.md`, ouverte depuis le popover)
+  - [ ] 4h : publication de la 1.0.0 (release GitHub et tap Homebrew, version calculée à partir des commits, détection des nouvelles versions, mise à jour automatique du daemon ; détail dans [PLAN.md](PLAN.md))
 
 ## 4. Tests
 

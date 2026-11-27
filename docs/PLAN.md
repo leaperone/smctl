@@ -189,7 +189,7 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 
 ### 4e. Campagne de tests matériels (§4 de la feuille de route)
 
-> 🟡 **Script prêt** (`scripts/hardware-campaign.sh`). À lancer ensemble sur le MacBook Pro M1 Pro, puis sur le Mac mini M4. Résultats dans `docs/campaign/`.
+> ✅ **Terminée le 27/11/2026** : campagne réussie sur le MacBook Pro M1 Pro, puis sur le Mac mini M4 (`scripts/hardware-campaign.sh`, résultats dans `docs/campaign/`).
 - Installation et désinstallation, changement de profil (app et SSH), veille et réveil, `kill -9 pulsed`, fermeture de l'app, charge soutenue, garde-fou provoqué, outil concurrent, redémarrage.
 - Je prépare un script qui guide chaque test et enregistre les résultats. Les étapes avec `sudo` ou une action physique sont faites par toi.
 
@@ -207,6 +207,48 @@ Deux pistes, sans urgence : `pulsed` est à 0,22 % pour un objectif de 0,2 % (à
 - **Moteur partagé** (`SMCtlClient/PulseStress.swift`) : charge CPU + GPU dans le processus (arrêtable), relevés toutes les 2 s (CPU et GPU max, entrée et sortie de la courbe, vitesse, puissance, garde-fou), attente que le Mac revienne à sa température de départ, phases charge puis refroidissement, synthèse (CPU stable, vitesse stable et écart, accélération, temps jusqu'à 90 % du pic, retour au repos). Le profil d'avant est restauré à la fin. Tests unitaires de la synthèse.
 - **CLI** : `pulse fan stress <profil>… [--load] [--cool] [--settle] [--cpu-only] [--json] [--csv]`, relevés en direct puis tableau comparatif. Remplace le script shell écrit d'abord (jamais commité).
 - **App** : bouton « Stress Test » dans Réglages › Courbes. Une feuille avec durée et type de charge, graphique en direct (températures, entrée de la courbe, vitesse), synthèse à la fin, et l'essai précédent de la même courbe en transparence pour comparer après un réglage.
+
+### 4h. Publication de la 1.0.0 (décidé le 27/11/2026)
+
+> 🟡 **Étapes 1 à 7 terminées le 27/11/2026, reste la validation (8)**, qui passe par le merge de `dev` dans `main`. GitHub est configuré : tap public `fstormacq/homebrew-tap`, branche `dev`, merge commits seulement (pas de squash), secret `TAP_TOKEN`, ruleset sur `main`.
+
+**Décisions**
+- **Branches** : on travaille sur `dev`, et `main` ne reçoit que des PR depuis `dev`. **Chaque push sur `main` publie une release**, s'il y a au moins un `feat`, `fix` ou `perf` depuis le dernier tag.
+- **Version calculée à partir des commits** : `feat` donne une version mineure, `fix` ou `perf` un correctif, `!` ou `BREAKING CHANGE` une version majeure. Les commits `docs`, `ci`, `test` et `chore` seuls ne publient rien. Premier tag : **v1.0.0**. La version n'est jamais commitée : elle vient du tag et elle est injectée au build. Aucun commit sur `main` n'est donc fait par la CI, et le ruleset ne la gêne pas.
+- **Signature ad hoc**, sans compte Apple ni notarisation.
+- **Distribution** : release GitHub et tap Homebrew, sur le modèle de `sebsto/wispr` (Makefile et tap), mais publiée par la CI.
+  - `brew tap fstormacq/tap && brew trust fstormacq/tap` (Homebrew 7 demande de faire confiance aux taps tiers), puis `brew install --cask pulse` (app avec le CLI) ou `brew install pulse-cli` (CLI et daemon seuls).
+  - Assets de chaque release : `Pulse-X.Y.Z.zip` et `pulse-cli-X.Y.Z-arm64.tar.gz`, avec leurs sha256.
+- **Le daemon suit les mises à jour sans réinstallation manuelle**. Le binaire root reste copié dans `/Library/PrivilegedHelperTools/` : le lancer depuis un dossier modifiable par l'utilisateur permettrait d'obtenir les droits root. Il faut donc une autorisation admin à chaque mise à jour, mais elle est demandée automatiquement :
+  - **App** (installée par brew ou à la main) : au lancement, si le `pulsed` embarqué est plus récent que le daemon qui tourne, l'app le réinstalle avec la fenêtre de mot de passe macOS (`ServiceInstaller`) ;
+  - **CLI** : la première commande qui trouve un daemon plus ancien que le CLI le met à jour avec `sudo` (demande de mot de passe), puis continue. Hors terminal interactif, ou avec `--json`, il se contente d'avertir.
+  - Jamais de retour à une version plus ancienne. La config et le profil sont conservés : la campagne l'a vérifié pour une réinstallation par-dessus.
+- **Quarantaine** : le cask la retire (`postflight` avec `xattr -dr com.apple.quarantine`). Homebrew 7 met les casks en quarantaine et n'a plus de `--no-quarantine`. Sans ça, Gatekeeper bloquerait l'app ad hoc au premier lancement et à chaque mise à jour, puisque l'identité ad hoc change à chaque build. Le téléchargement direct garde l'étape « Ouvrir quand même ».
+
+**Étapes**
+1. ✅ **Une seule version.** Un fichier généré au build (`PulseVersion.swift`) remplace le `"0.2.4"` écrit en dur dans `SMCtlProtocolInfo`. La même valeur va dans l'`Info.plist` de l'app. Un build local s'appelle `X.Y.Z-dev+<sha>` : il ne propose aucune mise à jour et n'en déclenche aucune. Tests : comparaison de versions, version de développement.
+2. ✅ **Makefile** (`build`, `test`, `app`, `package VERSION=…`, `release VERSION=…` pour une release manuelle de secours). La CI appelle `make package`, donc une release se reproduit en local. `scripts/release.sh` (signature Developer ID de leaperone) est supprimé.
+3. ✅ **Workflow `release.yml`** : déclenché par un push sur `main`, sur un runner `macos-26`.
+   - Calcul de la version, puis `make package`, tag, release GitHub avec des notes groupées (Nouveautés, Corrections).
+   - Mise à jour du cask et de la formule dans le tap avec `TAP_TOKEN`.
+   - Un `workflow_dispatch` en mode d'essai construit les assets sans rien publier.
+   - La CI tourne aussi sur `dev`.
+4. ✅ **Tap** :
+   - `Casks/pulse.rb` : app, lien `binary` vers `pulse`, `uninstall quit:` puis réouverture, `conflicts_with formula: "pulse-cli"`, `postflight` pour la quarantaine, `caveats` pour la première installation du service ;
+   - `Formula/pulse-cli.rb` : binaires prêts, `caveats` avec `sudo pulse daemon install` au premier usage, `test do` sur `--version`.
+5. ✅ **Détecter une version plus récente.**
+   - Le daemon fait déjà une vérification quotidienne (`latestVersion` dans le ping), et le CLI affiche déjà une note.
+   - À ajouter : l'app affiche la nouvelle version dans le popover et dans À propos, avec un lien vers la release. Sans daemon (surveillance seule), elle fait sa propre vérification une fois par jour.
+   - La commande proposée dépend du canal : `brew upgrade --cask pulse`, `brew upgrade pulse-cli`, ou un lien de téléchargement. Elle remplace `upgradeCommand` (`git pull && swift build`).
+6. ✅ **Mise à jour automatique du daemon**, pour l'app et pour le CLI, comme décrit plus haut. Tests : décision « mettre à jour, avertir ou ne rien faire » selon les versions, le terminal interactif et les builds de développement.
+7. ✅ **Documentation** : section d'installation du README (brew, téléchargement direct et « Ouvrir quand même », mise à jour), section « Mises à jour » de `HELP.md`, feuille de route.
+8. **Validation** :
+   - essai du workflow sans publication ;
+   - merge `dev` → `main`, qui publie la **v1.0.0** ;
+   - installation par le cask sur le MacBook et par la formule sur le Mac mini ;
+   - puis un correctif 1.0.1, pour vérifier la détection, `brew upgrade` et la mise à jour automatique du daemon (app et CLI).
+
+Sans lien avec la publication, toujours à décider : la PR vers smctl et la suppression de `pulse-archive`.
 
 ---
 
@@ -629,3 +671,46 @@ macOS n'offre donc **aucun signal fiable**, et sa propre heuristique ne reconna�
 - **App** : bouton « Stress Test… » dans l'en-tête d'une courbe (désactivé tant que des modifications ne sont pas enregistrées : le test lance la courbe enregistrée). Feuille avec durée (1, 2, 5 min) et type de charge, graphiques en direct alignés (températures et entrée lissée de la courbe, vitesse), relevé du moment, synthèse à côté de l'essai précédent de la même courbe, tracé en pointillés. Capture ajoutée à `PulseSnapshots`.
 - **Au passage** (ta demande) : en RPM, le haut du graphique de l'éditeur n'avait pas d'étiquette (graduations à 1000, 2000, 3000, 4000 pour un maximum à 4900). Les vitesses minimale et maximale sont maintenant toujours graduées.
 - **À essayer** : un vrai stress test depuis l'app (je n'ai validé que les captures et la CLI), et lancer l'app avec le nouveau binaire (`scripts/build-app.sh`).
+
+### 27/11/2026 : décisions pour la publication (4h)
+- **Campagne 4e** : réussie sur le Mac mini. Étape close.
+- **Modèle de distribution** : tap Homebrew et Makefile, comme `sebsto/wispr`. Différence : wispr est notarisé (compte Apple) et publié à la main depuis le Mac, alors que Pulse est signé ad hoc et publié par la CI. C'est pour ça qu'il faut un token (`TAP_TOKEN`) : le jeton par défaut d'un workflow ne peut pas écrire dans le dépôt du tap.
+- **Mise à jour du daemon** : par l'app et par le CLI à l'usage. Pas de `sudo` dans le cask, et pas d'auto-téléchargement par le daemon (trop sensible pour la 1.0). Détail et étapes dans la 4h.
+- **Ruleset de `main`** : 1 approbation exigée, gardée volontairement. Tu préfères forcer le merge de tes propres PR plutôt que risquer un merge sans ton accord. Le contournement ne marche que par PR, donc aucun push direct.
+- **Cask** : retire la quarantaine (`postflight`).
+
+### 27/11/2026 : étape 4h.1, une seule version
+- `Sources/ProductIdentity/PulseVersion.swift` porte la version : `0.0.0-dev` dans le dépôt. `scripts/set-version.sh x.y.z` l'écrit pour une release, et `--dev` la remet. `SMCtlProtocolInfo.version` et `PolicyEngine.version` (deux `"0.2.4"` hérités de smctl) la reprennent. `pulse --version`, le daemon, l'app (À propos) et l'`Info.plist` affichent donc tous la même valeur.
+- `SMCtlProtocolInfo.isRelease` : une version de développement ne se compare à rien. Elle ne propose aucune mise à jour et n'en déclenchera aucune pour le daemon (étape 6). 2 tests ajoutés.
+- `scripts/build-app.sh` ne prend plus de version en argument. Il lit celle du fichier et met la partie numérique dans `CFBundleShortVersionString` (`0.0.0` pour un build de développement).
+- La CI tourne aussi sur `dev`.
+- **Porte** : tous les tests du package passent, ainsi que les 96 de l'app (96 aussi avant le changement : l'écart avec les 98 notés plus haut vient du retrait de l'onglet Aide). `Pulse.app` construite, et un build en 9.9.9 vérifié puis remis en développement.
+
+### 27/11/2026 : étapes 4h.2 à 4h.7 (en autonomie)
+- **Makefile et scripts** (`173d10f`) : `make build|test|app|package|next-version|notes|tap|release`.
+  - `scripts/package.sh` produit `Pulse-<v>.zip`, `pulse-cli-<v>-arm64.tar.gz` et `SHA256SUMS`. Le tar.gz contient les binaires signés de l'app.
+  - `next-version.sh` calcule la version ; vérifié sur un dépôt jetable (docs seuls, fix, perf, feat, `!`, `BREAKING CHANGE`, commit de merge).
+  - `release-notes.sh` groupe les commits et reprend `docs/release-notes/<v>.md` s'il existe (texte de la 1.0.0).
+  - `scripts/release.sh` (Developer ID de leaperone) est supprimé.
+- **Workflow** : un push sur `main` lance tests, packaging, release GitHub, puis met à jour le tap avec `TAP_TOKEN`. Une PR vers `main` (`8c84178`) et un lancement à la main construisent seulement, sans rien publier. Si on relance après une mise à jour du tap ratée, la release n'est pas refaite et le tap reprend les checksums publiés.
+- **Tap** :
+  - `packaging/homebrew/*.rb.in` → `Casks/pulse.rb` et `Formula/pulse-cli.rb`.
+  - **Homebrew 7** : `postflight` est remplacé par `postflight_steps` (étapes déclaratives) ; le retrait de quarantaine s'écrit `run "/usr/bin/xattr", args: [..., "{{appdir}}/Pulse.app"]`.
+  - Un cask ne peut déclarer de conflit qu'avec un autre cask. Brew refuse de toute façon de lier un deuxième `pulse` au même endroit.
+  - Vérifié : `brew style` sans remarque ; cask et formule chargés depuis un tap local temporaire ; **formule installée depuis le tar.gz** (`pulse --version` = 1.0.0, signature ad hoc, pas de quarantaine, `brew test` réussi), puis désinstallée et tap retiré.
+  - Le cask n'a pas été installé : cela aurait remplacé ton Pulse. C'est à faire à l'étape 8.
+- **Détection et mise à jour** (`d701399`) :
+  - `InstallChannel` (cask, formule, téléchargement, source) donne la commande de mise à jour. `DaemonUpdateDecision` ne met à jour qu'entre deux releases, vers l'avant ; les builds de développement ne sont jamais concernés.
+  - **CLI** : `DaemonClient.outdatedDaemonHandler` lance `sudo pulse daemon install`, puis rouvre la connexion XPC. Seulement dans un terminal, ni avec `--json`, ni depuis `pulse daemon …`, ni avec `PULSE_NO_DAEMON_UPDATE=1`.
+  - **App** : `UpdateCenter`.
+    - Le remplacement est automatique, une fois par version du daemon, avec un message dans la fenêtre de mot de passe.
+    - Si l'utilisateur annule, ou en cas d'échec, l'avis « service out of date » propose « Update… ».
+    - L'avis « Pulse X is available » propose « Copy Command » ou « Download… », et « Later ». À propos affiche aussi la nouvelle version.
+    - La dernière version passe par la télémétrie (`latestVersion`) ; sans daemon, l'app interroge GitHub une fois par jour.
+- **Docs** : README (installation brew, téléchargement et « Ouvrir quand même », mises à jour, sources, releases), section « Updates » de `HELP.md`, notes de la 1.0.0, feuille de route.
+- **Porte** :
+  - tests : tous ceux du package passent, et les 103 de l'app (7 nouveaux pour `UpdateCenter`, 6 pour le canal, la décision et le CLI) ;
+  - PulseBench : phases fermées entre 0,38 et 0,86 % ;
+  - captures `popover-updates` et `settings-about` relues ;
+  - avec une version de release, une commande hors terminal ne fait qu'avertir.
+- **Non testé faute de release** : le remplacement réel du daemon (mot de passe), le cask installé et le workflow publié. C'est l'objet de l'étape 8.

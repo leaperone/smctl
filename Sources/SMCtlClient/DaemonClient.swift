@@ -3,13 +3,23 @@ import SMCtlProtocol
 import ProductIdentity
 
 public final class DaemonClient {
-    private let connection: NSXPCConnection
+    private var connection: NSXPCConnection
+
+    /// Called when the running daemon is an older release than this client.
+    /// Returns true after replacing it (the CLI runs `sudo pulse daemon install`);
+    /// false leaves the usual warning. Set once at startup, before any call.
+    nonisolated(unsafe) public static var outdatedDaemonHandler: ((_ installed: String) -> Bool)?
 
     public init() {
-        connection = NSXPCConnection(machServiceName: SMCtlProtocolInfo.machServiceName, options: .privileged)
+        connection = Self.makeConnection()
+    }
+
+    private static func makeConnection() -> NSXPCConnection {
+        let connection = NSXPCConnection(machServiceName: SMCtlProtocolInfo.machServiceName, options: .privileged)
         connection.remoteObjectInterface = NSXPCInterface(with: PulseDaemonXPCProtocol.self)
         // Resumed exactly once here; a second resume would trap (over-resume).
         connection.resume()
+        return connection
     }
 
     deinit {
@@ -174,6 +184,13 @@ public final class DaemonClient {
         guard let ping else { return }
 
         if ping.version != SMCtlProtocolInfo.version {
+            if case .update = DaemonUpdateDecision.decide(daemon: ping.version, client: SMCtlProtocolInfo.version),
+               let handler = Self.outdatedDaemonHandler, handler(ping.version) {
+                // The daemon was restarted: the old connection is gone.
+                connection.invalidate()
+                connection = Self.makeConnection()
+                return
+            }
             emit("""
             warning: \(ProductIdentity.cliName) is \(SMCtlProtocolInfo.version) but the running \(ProductIdentity.daemonName) is \(ping.version).
             Install this version of the protected helper and restart the daemon:
@@ -182,8 +199,8 @@ public final class DaemonClient {
         } else if let latest = ping.latestVersion,
                   SMCtlProtocolInfo.isVersion(latest, newerThan: SMCtlProtocolInfo.version) {
             emit("""
-            note: \(ProductIdentity.cliName) \(latest) is available (you have \(SMCtlProtocolInfo.version)). Upgrade:
-              \(ProductIdentity.upgradeCommand) && sudo \(ProductIdentity.cliName) daemon install
+            note: \(ProductIdentity.cliName) \(latest) is available (you have \(SMCtlProtocolInfo.version)).
+            \(InstallChannel.detect(executablePath: Bundle.main.executablePath ?? CommandLine.arguments[0]).upgradeHint)
             """)
         }
     }

@@ -9,6 +9,7 @@ What each setting does to your fans, and what to do when something looks wrong.
 - [Sensor refresh](#sensor-refresh)
 - [Automation](#automation)
 - [Temperature limit](#temperature-limit)
+- [Updates](#updates)
 - [If something looks wrong](#if-something-looks-wrong)
 
 ## How Pulse drives the fans
@@ -101,9 +102,15 @@ A safety guard watches every sensor while Pulse drives the fans. If one stays ab
 
 The Mac then stays on Auto and Pulse notifies you. It means the cooling could not keep up: check the Mac's vents and the curve, then pick a profile again to resume. Automatic rules wait for that choice too.
 
+## Updates
+
+When a new version is out, the menu bar popover says so, with the command to run in Terminal (`brew upgrade --cask pulse`) or a link to download it. *Later* hides the notice until the next version; **Settings › About** still shows it.
+
+After an update, Pulse replaces the fan control service with its own version the next time it starts. macOS asks for your password once. If you cancel, the popover shows *The fan control service is out of date* with an *Update…* button. Your profile, curves and settings are kept. With the command line only (`brew upgrade pulse-cli`), the next `pulse` command in Terminal does the same through `sudo`.
+
 ## If something looks wrong
 
-**Fans not following the curve.** Check that the service is installed and up to date in **Settings › Service** (*Reinstall* after updating Pulse), and that no other fan app (TG Pro, Macs Fan Control, …) is running. Pulse warns when it finds one.
+**Fans not following the curve.** Check that the service is installed and up to date in **Settings › Service** (the popover warns when it is out of date), and that no other fan app (TG Pro, Macs Fan Control, …) is running. Pulse warns when it finds one.
 
 **Temperatures but no fan readings.** This Mac has no fan (MacBook Air). Pulse shows temperatures only.
 

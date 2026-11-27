@@ -26,8 +26,12 @@ public enum ProductIdentity {
     public static let latestReleaseAPIURL = "https://api.github.com/repos/fstormacq/pulse/releases/latest"
     /// The user help, opened from the menu bar popover.
     public static let helpURL = "https://github.com/fstormacq/pulse/blob/main/docs/HELP.md"
-    /// Shell command suggested when a newer release is available (before reinstalling the daemon).
-    public static let upgradeCommand = "git pull && swift build -c release"
+    /// The latest release, for a manual download.
+    public static let releasesURL = "https://github.com/fstormacq/pulse/releases/latest"
+    /// Homebrew cask (the app, with the CLI) and formula (CLI and daemon only), in the tap below.
+    public static let homebrewCask = "pulse"
+    public static let homebrewFormula = "pulse-cli"
+    public static let homebrewTap = "fstormacq/tap"
     /// Prefix of environment variables read by the daemon and passed to alert commands.
     public static let environmentPrefix = "PULSE"
 }

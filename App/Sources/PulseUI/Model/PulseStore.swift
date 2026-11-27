@@ -87,9 +87,15 @@ public final class PulseStore {
     @ObservationIgnored private var menuBarGPUAverage = TemperatureSmoother(timeConstantSeconds: 8)
     @ObservationIgnored private var menuBarGPUMaximum = TemperatureSmoother(timeConstantSeconds: 8)
 
-    public init(service: any PulseService = DaemonPulseService(), fallback: DirectSensorService? = DirectSensorService()) {
+    /// New releases and the service's version (see `UpdateCenter`).
+    public let updates: UpdateCenter
+
+    public init(service: any PulseService = DaemonPulseService(), fallback: DirectSensorService? = DirectSensorService(),
+                updates: UpdateCenter? = nil) {
         self.service = service
         self.fallback = fallback
+        self.updates = updates ?? .inert()
+        self.updates.onServiceUpdated = { [weak self] in await self?.refresh(forceLists: true) }
     }
 
     // MARK: Polling
@@ -157,7 +163,9 @@ public final class PulseStore {
             self.telemetry = telemetry
             if let event = safetyTracker.update(telemetry) { emitSafetyEvent(event) }
             assignIfChanged(\.daemonState, .connected(version: telemetry.daemonVersion))
+            updates.observe(daemonVersion: telemetry.daemonVersion, latestFromDaemon: telemetry.latestVersion, now: now)
         case .failure(let error):
+            updates.observe(daemonVersion: nil, latestFromDaemon: nil, now: now)
             assignIfChanged(\.daemonState, .unavailable(message: Self.describe(error)))
             assignIfChanged(\.curves, [])
             assignIfChanged(\.invalidCurves, [:])

@@ -4,9 +4,61 @@
 
 # Pulse
 
-**Temperatures and fan speed in your Mac's menu bar, with full control over the fans.**
+**Your Mac's temperatures in the menu bar, and the fans under your control.**
 
-Pulse is a lightweight, native Swift app for Apple silicon Macs. It shows your Mac's temperatures and fan speed in the menu bar, and lets you pick a fan profile or design your own curve. A `pulse` command does the same from Terminal or over SSH.
+Pulse is a small native app for Apple silicon Macs. It shows how hot your Mac runs and how fast its fans spin, and lets you decide how the fans react: quieter, cooler, or exactly to your own curve. A `pulse` command does the same from Terminal or over SSH.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/img/popover-dark.png">
+    <img src="assets/img/popover-light.png" alt="The Pulse popover: CPU, GPU and board temperatures, fan speed, a two-minute history and the profile picker" width="320">
+  </picture>
+</p>
+
+- **See** CPU, GPU and fan speed at a glance in the menu bar, with a dot that beats faster as your Mac heats up.
+- **Choose** how the fans behave with one click: *Silent*, *Balanced*, *Performance*, or *Auto* to leave it to macOS.
+- **Shape** your own fan curve on a chart, then check it with a built-in stress test.
+- **Automate** it: *Performance* while a game is open, *Silent* on battery.
+- **Stay safe**: Pulse always hands the fans back to macOS if anything goes wrong, and you can't turn that off.
+
+Free and open source (MIT). Tested on a Mac mini M4 and a MacBook Pro M1 Pro.
+
+## Install
+
+You need an **Apple silicon Mac** (M1 or later) with **macOS 26** or later for the app.
+
+```console
+$ brew tap fstormacq/tap && brew trust fstormacq/tap
+$ brew install --cask pulse
+```
+
+No Homebrew? Download `Pulse-<version>.zip` from the [latest release](https://github.com/fstormacq/pulse/releases/latest) and drag Pulse to Applications. Pulse isn't notarized by Apple, so the first time macOS refuses to open it: go to **System Settings › Privacy & Security** and click **Open Anyway**. With Homebrew, there is nothing to do.
+
+### First launch
+
+1. **Open Pulse** from Applications. It lives in the menu bar, not in the Dock.
+2. **Click the Pulse icon**, then **Install…**, and enter your password. This installs the small service that drives the fans. Until then, Pulse only shows temperatures.
+3. **Pick a profile.** *Balanced* is a good start.
+
+To have Pulse start with your Mac, turn on **Open Pulse at login** in Settings › General.
+
+### Command line only
+
+For a Mac you reach over SSH, or if you prefer Terminal (macOS 14 or later):
+
+```console
+$ brew tap fstormacq/tap && brew trust fstormacq/tap
+$ brew install pulse-cli
+$ sudo pulse daemon install
+```
+
+The app already includes the `pulse` command, so install one or the other.
+
+## Using Pulse
+
+### The menu bar
+
+The dot is coloured by temperature (green → yellow → orange → red) and beats like a heart when the Mac is warm, faster as it heats up. Next to it, the readings you choose: CPU and GPU temperature, fan speed, power draw.
 
 <p align="center">
   <picture>
@@ -25,58 +77,16 @@ Pulse is a lightweight, native Swift app for Apple silicon Macs. It shows your M
   </picture>
 </p>
 
-> 🚧 **Work in progress, close to 1.0.** Tested on a Mac mini M4 and a 14" MacBook Pro M1 Pro (macOS 27). A hardware test campaign and the 1.0 release are next. See the [roadmap](docs/ROADMAP.md).
+Click it for the details: average and hottest sensor per group, fan speed and what the curve asks for, the last few minutes, and the profiles. **Settings › General** changes the icon (pulse dot, heartbeat, fan, or none, in colour or monochrome) and the readings.
 
-## What works today
+### Profiles
 
-| | |
+| Profile | What it does |
 |---|---|
-| **Menu bar** | A **pulse dot** coloured by temperature (green → yellow → orange → red) that **beats like a heart**, faster as the Mac heats up (40 to 120 bpm), or a **monochrome** dot that blends in with the other menu bar icons. Alternatives are a heartbeat trace, a fan, or no icon. Readings are optional: CPU and GPU temperature, fan speed (RPM or %), and power draw, **stacked** on two small lines or inline. Values are smoothed over ~8 s and centred on cap height, with fixed widths so nothing shifts. |
-| **Popover** | Average and hottest sensor per group (CPU, GPU, board), fan speed and curve target, a 5-minute history, and one-click profiles. Warnings appear when the fan service is missing, the safety guard has engaged, or another fan app is running. |
-| **Profiles** | *Auto* (macOS), *Silent*, *Balanced*, *Performance*, and your own curves. |
-| **Custom curves** | Percent-based shapes (linear, sigmoid, exponential, logarithmic, steps) that you stretch with start/end temperatures, a floor, a ceiling and a steepness. You can also use explicit points. |
-| **Curve editor** | In Settings › Curves: drag the ramp's ends or free points on a chart, pick a shape and its steepness, choose sensors and how fast the fan may speed up or slow down. A live marker shows the current temperature and what the curve would ask for, with the presets drawn faintly for reference. Undo, % or RPM axis, and unsaved changes are never lost silently. |
-| **Automation** | In Settings › Automation, rules switch the profile on their own: *Performance* while a game or app is open, *Silent* in Low Power Mode, on battery or on the power adapter. The first rule that applies wins; a profile you pick by hand always wins until the rule's condition goes away. |
-| **Sensor refresh** | In Settings › General › Sensors, a slider sets how often the sensors are read, from 1 to 5 s (2 s by default). On a MacBook, an optional slower pace applies on battery; the service switches the moment you unplug, even with Pulse closed. |
-| **Every Apple silicon Mac** | Two-fan MacBook Pros run each fan on its own range from the same curve. Fanless MacBook Airs get temperatures only: no fan readings, no profiles. |
-| **Help** | [docs/HELP.md](docs/HELP.md) explains what each setting does to the fans, and what to do when something looks wrong. **Help** in the menu bar popover opens it. |
-| **`pulse` CLI** | `pulse status` gives an overview for SSH. `pulse fan curve …` creates, previews, edits and deletes curves. Every command supports `--json`. |
-| **Footprint** | The app uses ~0.1% CPU and ~20 MB at idle (closed windows release their views; the beating icon costs ~2–4% while it beats). With a curve active, the daemon uses ~0.3% CPU at the default 2 s pace (0.14% at 5 s); on *Auto* it reads the sensors only when the app asks. It skips redundant fan writes and caches SMC key metadata. |
-
-### The heartbeat
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/img/menubar-beats-dark.png">
-    <img src="assets/img/menubar-beats-light.png" alt="Pulse dot and heartbeat frames at rest and at the peak of a beat, from cool to hot" width="560">
-  </picture>
-</p>
-
-By default the icon beats **only when the Mac is warm** (CPU above 65 °C). At rest it stays still and costs nothing. Every beat redraws the menu bar item, which macOS 26 repeats for each display and appearance. *Always* therefore costs about 2–3% CPU, while *When warm* costs nothing until the Mac is working hard anyway. The heartbeat stops while the screens sleep, in Low Power Mode, with Reduce Motion, and when the safety guard engages.
-
-## Profiles and curves
-
-Every curve maps a **smoothed** temperature to a fan speed in **percent of the fan's own range**. 0% is the fan's minimum RPM and 100% its maximum. The same curve therefore behaves the same on a Mac mini and on a MacBook with two fans.
-
-What happens **at 0%** (below the ramp, when the curve's floor is 0%) is chosen per curve, in the editor (*At 0 %*) or with `--at-zero`:
-
-| | |
-|---|---|
-| **macOS decides** (default) | After 15 s at 0%, Pulse hands the fan back to macOS. A cool MacBook stops its fans, as it does without Pulse; its reported minimum (1200 RPM on a 14" MacBook Pro) is only the slowest *spinning* speed. A Mac mini idles at its minimum. macOS may also spin the fan faster than the curve's floor. |
-| **Minimum speed** | The fan holds its minimum RPM: predictable, never faster than the curve, never stopped. |
-| **Stopped** (experimental) | After 15 s at 0%, Pulse stops the fan, even on a Mac mini. It restarts it at its minimum as soon as a CPU or GPU sensor passes 75 °C or any other sensor 50 °C, whatever the curve watches, and stops it again only 5 °C below. |
-
-> [!WARNING]
-> **Stopping a fan may harm your Mac.** You force the hardware into a state its firmware does not choose on its own: macOS never stops a Mac mini's fan, and parts without a temperature sensor may heat up without airflow. It is off unless you also opt in as root, under `[safety]` in `/etc/pulse/config.toml`:
->
-> ```toml
-> [safety]
-> allow_below_minimum = true
-> ```
->
-> then `sudo pulse daemon restart`. Without it, *Stopped* behaves like *macOS decides*. The thermal safety guard (100 °C) stays active in every mode.
-
-The 15 s delay keeps a temperature hovering at the ramp start from toggling the fan. As soon as the curve rises above 0%, Pulse takes the fan again. A curve with a floor above 0%, like *Performance* (10%), keeps the fans spinning.
+| **Auto** | macOS drives the fans, as if Pulse weren't there. |
+| **Silent** | Stays quiet until the chip gets really hot (from 80 °C), then catches up quickly. |
+| **Balanced** | Calm at light load, then a decisive climb between 70 and 100 °C. |
+| **Performance** | Fans always spinning, rising steadily from 55 °C: cooler under sustained load. |
 
 <p align="center">
   <picture>
@@ -85,25 +95,11 @@ The 15 s delay keeps a temperature hovering at the ramp start from toggling the 
   </picture>
 </p>
 
-| Preset | Shape | Ramp | Speed | Smoothing | Hysteresis | Rise / fall |
-|---|---|---|---|---|---|---|
-| **Silent** | exponential (steepness 3): stays low, then accelerates | 80 → 105 °C | 0 → 100% | 10 s | 3 °C | 5 / 2 %/s |
-| **Balanced** | sigmoid (steepness 8): calm, then a decisive climb | 70 → 100 °C | 0 → 100% | 6 s | 3 °C | 3 / 1 %/s |
-| **Performance** | linear, on the **CPU average** (not the hottest sensor): steady and predictable | 55 → 90 °C | 10 → 100% | 5 s | 2 °C | 10 / 4 %/s |
-
-Each curve runs through the same pipeline at every sensor read (every 2 s by default, 1 to 5 s in Settings › General › Sensors):
-
-1. Take the **max** of all temperature sensors, or of the curve's sensors. Sensors of powered-down blocks are ignored: an idle GPU reads ~0 °C.
-2. **Smooth** it with an exponential moving average, so a one-second spike does not rev the fan.
-3. Apply **hysteresis**: the temperature has to drop a few degrees before the fan slows down.
-4. Read the speed off the curve.
-5. Limit how fast the speed changes. Rising is faster than falling, so the fan ramps up quickly and winds down gently.
-
-The presets are calibrated for Apple silicon hot-spot sensors. These idle around 55–65 °C and reach 95–105 °C under sustained load. Apple's own policy on the Mac mini M4 keeps the fan near its minimum until ~100 °C.
+Apple silicon chips run hot by design: hot spots idle around 55–65 °C and reach 95–105 °C under load. That is normal.
 
 ### Your own curves
 
-Duplicate a preset (or click **+**) in **Settings › Curves**, then shape it on the chart:
+In **Settings › Curves**, duplicate a profile (or click **+**) and shape it on the chart: drag the ends of the ramp or free points, pick a shape, choose which sensors it watches and how fast the fans may speed up or slow down. A live marker shows the current temperature and the speed the curve would ask for.
 
 <p align="center">
   <picture>
@@ -112,42 +108,28 @@ Duplicate a preset (or click **+**) in **Settings › Curves**, then shape it on
   </picture>
 </p>
 
-Or from the command line, the same curves:
+Curves are in percent of each fan's own range, so one curve behaves the same on a Mac mini and on a MacBook Pro with two fans.
 
-```console
-$ pulse fan curve set night --shape sigmoid --start 75 --end 100 --max 60% --activate
-$ pulse fan curve set work --from balanced --start 65          # copy a preset and tweak it
-$ pulse fan curve set custom --points 60:10%,80:45%,95:max --sensors 'Tp*'
-$ pulse fan curve show night                                   # table and bars: °C → % → RPM
-$ pulse fan curve set night --end 95 --dry-run                 # preview without saving
-$ pulse fan stress balanced night                              # heat the Mac under each, compare
-```
+### Check a curve with a stress test
 
-Curves live in `/etc/pulse/config.toml`. The file is readable and versionable, and you can also edit it by hand:
+**Stress Test…** next to a curve heats every CPU core and the GPU for 1 to 5 minutes, records how the fans respond and how the Mac cools down, and puts the result next to the previous run. Tweak the curve, run it again, compare.
 
-```toml
-[fan]
-profile = "night"
-interval = 2            # seconds between sensor reads, 1 to 5 (Settings › General › Sensors)
-battery_interval = 4    # optional: slower pace on battery
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/img/stress-test-dark.png">
+    <img src="assets/img/stress-test-light.png" alt="Stress test: temperatures, curve input and fan speed during two minutes of load and the cool-down, compared with the previous run" width="640">
+  </picture>
+</p>
 
-[[fan.curves]]
-name = "night"
-label = "Night"
-sensors = ["Tp*"]
-shape = { type = "sigmoid", start = 75.0, end = 100.0, min = "0%", max = "60%", steepness = 8.0 }
-hysteresis = 3.0
-slew_rate = "6%"
-fall_slew_rate = "2%"
-smoothing = 10.0
-idle = "minimum"        # at 0%: "system" (default), "minimum" or "off"
-```
+### Automation
 
-## Command line
+In **Settings › Automation**, rules switch the profile for you: while an app or game is open, in Low Power Mode, on battery, or on the power adapter. The first matching rule wins, and a profile you pick by hand wins until the rule's condition goes away.
+
+### From Terminal or over SSH
 
 ```console
 $ pulse status
-pulse · daemon 0.2.4 · profile balanced · every 2 s
+pulse · daemon 1.0.0 · profile balanced · every 2 s
 
 Temperatures
   CPU     avg 55.5 °C  max 75.0 °C  (Tp3P) · 12 sensors
@@ -157,61 +139,174 @@ Temperatures
 Fans
   Fan 0   1341 RPM  9% · target 1340 RPM · manual · range 1000–4900
 
-Curve
-  Fan 0   75.0 °C in → 58.4 °C effective → 1340 RPM
-
 Safety  ok · ceiling 100.0 °C (hot-spots 110.0 °C)
+
+$ pulse fan profile silent                    # switch profile
+$ pulse fan curve set night --from balanced --start 75 --max 60% --activate
+$ pulse fan stress balanced night             # heat the Mac under each, compare
 ```
+
+Every command accepts `--json`. The [full list](#command-reference) is below.
+
+## Updates
+
+Pulse tells you when a new version is out, in the popover and in `pulse`. To update:
+
+```console
+$ brew upgrade --cask pulse        # or: brew upgrade pulse-cli
+```
+
+The fan service updates itself: the next time Pulse starts, it asks for your password once and installs its new version. Your profiles and curves are kept. With the command line only, the next `pulse` command does the same through `sudo`.
+
+## How Pulse keeps your Mac safe
+
+- **A temperature guard you can't turn off.** If a sensor stays above 100 °C (110 °C for the chip's hot spots), or if no sensor can be read, Pulse hands the fans back to macOS and notifies you. Near the limit it reads the sensors every second.
+- **Nothing gets stuck.** Quitting Pulse, a crash or uninstalling all return the fans to macOS.
+- **One small privileged service.** Only `pulsed` writes to the hardware. The app and the `pulse` command ask it over XPC, and it checks every request.
+- **It degrades gracefully.** If a macOS update changes the hardware interface, fan control turns read-only and says so.
+- **It warns about other fan apps** (TG Pro, Macs Fan Control, Stats, …), which would fight over the fans.
+
+## Uninstall
+
+```console
+$ sudo pulse daemon uninstall      # stops the service and hands the fans back to macOS
+$ brew uninstall --cask pulse      # or: brew uninstall pulse-cli
+```
+
+Without Homebrew: **Settings › Service › Uninstall…**, then drag Pulse to the Trash.
+
+## Help
+
+- **[docs/HELP.md](docs/HELP.md)** explains every setting and what to do when something looks wrong. **Help** in the popover opens it.
+- **Something wrong?** Run `pulse doctor` and paste the output in an [issue](https://github.com/fstormacq/pulse/issues). `pulse doctor --test-fans` also checks that each fan obeys.
+- **MacBooks with an M3 or M4** use a fan unlock path not yet tested on real hardware. A `pulse doctor --test-fans` report from one is very welcome.
+
+## Going further
+
+<details>
+<summary><b>How a curve turns temperature into fan speed</b></summary>
+
+At every sensor read (every 2 s by default, 1 to 5 s in Settings › General › Sensors, optionally slower on battery):
+
+1. Take the **hottest** of the curve's sensors (all of them by default). Sensors of powered-down parts are ignored: an idle GPU reads ~0 °C.
+2. **Smooth** it, so a one-second spike does not rev the fan.
+3. Apply **hysteresis**: the temperature has to drop a few degrees before the fan slows down.
+4. Read the speed off the curve, in percent: 0 % is the fan's minimum RPM, 100 % its maximum.
+5. Limit how fast the speed changes. Rising is faster than falling: the fan ramps up quickly and winds down gently.
+
+| Preset | Shape | Ramp | Speed | Smoothing | Hysteresis | Rise / fall |
+|---|---|---|---|---|---|---|
+| **Silent** | exponential (steepness 3) | 80 → 105 °C | 0 → 100 % | 10 s | 3 °C | 5 / 2 %/s |
+| **Balanced** | sigmoid (steepness 8) | 70 → 100 °C | 0 → 100 % | 6 s | 3 °C | 3 / 1 %/s |
+| **Performance** | linear, on the CPU average | 55 → 90 °C | 10 → 100 % | 5 s | 2 °C | 10 / 4 %/s |
+
+</details>
+
+<details>
+<summary><b>What happens at 0 %</b></summary>
+
+Below the ramp, a curve with a 0 % floor can do one of three things, chosen per curve (*At 0 %* in the editor, `--at-zero` in the CLI):
+
+| | |
+|---|---|
+| **macOS decides** (default) | After 15 s at 0 %, Pulse hands the fan back to macOS. A cool MacBook stops its fans, as it does without Pulse; a Mac mini idles at its minimum. |
+| **Minimum speed** | The fan holds its minimum: predictable, never stopped. |
+| **Stopped** (experimental) | After 15 s at 0 %, Pulse stops the fan, even on a Mac mini, and restarts it as soon as a CPU or GPU sensor passes 75 °C or any other sensor 50 °C. |
+
+> [!WARNING]
+> **Stopping a fan may harm your Mac.** macOS never stops a Mac mini's fan, and parts without a temperature sensor may heat up without airflow. *Stopped* stays off unless you also opt in as root, in `/etc/pulse/config.toml`:
+>
+> ```toml
+> [safety]
+> allow_below_minimum = true
+> ```
+>
+> then `sudo pulse daemon restart`. The temperature guard stays active in every mode.
+
+</details>
+
+<details>
+<summary><b>The configuration file</b></summary>
+
+Everything lives in `/etc/pulse/config.toml`: readable, versionable, editable by hand or over SSH. The app and the CLI write the same file through the service.
+
+```toml
+[fan]
+profile = "night"
+interval = 2            # seconds between sensor reads, 1 to 5
+battery_interval = 4    # optional: slower pace on battery
+
+[[fan.curves]]
+name = "night"
+label = "Night"
+sensors = ["Tp*"]       # CPU hot spots; "Tg*" GPU, "Ts*" board
+shape = { type = "sigmoid", start = 75.0, end = 100.0, min = "0%", max = "60%", steepness = 8.0 }
+hysteresis = 3.0
+slew_rate = "6%"        # per second, rising
+fall_slew_rate = "2%"   # per second, falling
+smoothing = 10.0
+idle = "minimum"        # at 0 %: "system" (default), "minimum" or "off"
+
+[update]
+check = true            # daily check for new releases on GitHub
+```
+
+</details>
+
+<details>
+<summary><b>The heartbeat and Pulse's footprint</b></summary>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/img/menubar-beats-dark.png">
+    <img src="assets/img/menubar-beats-light.png" alt="Pulse dot and heartbeat frames at rest and at the peak of a beat, from cool to hot" width="560">
+  </picture>
+</p>
+
+By default the icon beats only when the Mac is warm (CPU above 65 °C), from 40 to 120 beats per minute. At rest it stays still and costs nothing. *Always* costs about 2–3 % CPU, because macOS redraws the menu bar item for every display. The heartbeat stops while the screens sleep, in Low Power Mode, with Reduce Motion, and when the temperature guard engages.
+
+At rest, the app uses about 0.1 % CPU and 20 MB. With a curve active, the service uses about 0.3 % CPU at the default 2 s pace (0.14 % at 5 s). On *Auto*, it reads the sensors only when the app asks.
+
+</details>
+
+### Command reference
 
 | Command | What it does |
 |---|---|
-| `pulse status [--watch] [--json]` | Overview: temperatures, fans, profile, curve, power, safety, other fan controllers |
-| `pulse doctor [--test-fans] [--json]` | Diagnostic report for bug reports: model, chip, fans and their unlock path (direct or Ftst), charging control, sensors, daemon, conflicts. `--test-fans` drives each fan to 40 % for a few seconds and restores the profile |
-| `pulse fan interval [1-5] [--on-battery]` | Show or set how often the daemon reads the sensors (default 2 s), optionally a slower pace on battery (`same` removes it). Shorter reacts faster, longer uses less energy; near the safety ceiling it reads every second anyway |
+| `pulse status [--watch]` | Temperatures, fans, profile, curve, power, safety, other fan apps |
 | `pulse fan profile auto\|silent\|balanced\|performance\|<curve>` | Switch profile |
-| `pulse fan curve list\|show\|set\|delete` | Manage curves |
-| `pulse fan stress <profile>… [--load s] [--cool s] [--cpu-only] [--csv file] [--json]` | Heat the Mac (every CPU core and the GPU) under each profile, record temperatures, the curve's input and fan speed, and compare: steady CPU and fan speed, when the fan speeds up, how long it takes to come back to rest. Also in the app: **Stress Test…** next to a curve |
-| `pulse fan set <rpm>` / `pulse fan auto` | Manual target / back to macOS |
+| `pulse fan curve list\|show\|set\|delete` | Manage curves (`set --dry-run` previews) |
+| `pulse fan stress <profile>… [--load s] [--cool s] [--cpu-only] [--csv file]` | Stress test one or more profiles and compare them |
+| `pulse fan interval [1-5] [--on-battery]` | How often the sensors are read |
+| `pulse fan set <rpm>` / `pulse fan auto` | Fixed speed / back to macOS |
+| `pulse doctor [--test-fans]` | Diagnostic report for bug reports |
 | `pulse sensors`, `pulse power status` | Raw sensors, thermal pressure and power |
-| `pulse battery …`, `pulse display …`, `pulse alert …` | Inherited from smctl (see [docs/smctl-README.md](docs/smctl-README.md)) |
-| `pulse daemon install\|uninstall\|status\|logs` | Manage the privileged service |
+| `pulse daemon install\|uninstall\|restart\|status\|logs` | Manage the fan service |
+| `pulse battery …`, `pulse display …`, `pulse alert …` | Inherited from smctl ([docs](docs/smctl-README.md)) |
 
-## Install (from source)
+All commands accept `--json`.
 
-Requires Xcode 26 or later and an Apple silicon Mac. The Command Line Tools alone are not enough: SwiftUI's macros (`@State`, …) ship only with Xcode. If `xcode-select -p` prints `/Library/Developer/CommandLineTools`, `build-app.sh` uses Xcode for the build anyway. To make Xcode the default:
+## For developers
 
-```console
-$ sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-```
+<details>
+<summary><b>Build from source</b></summary>
+
+Requires Xcode 26 or later (the Command Line Tools alone lack SwiftUI's macros).
 
 ```console
 $ git clone https://github.com/fstormacq/pulse && cd pulse
-$ scripts/build-app.sh                 # builds dist/Pulse.app with pulse and pulsed inside
+$ make app                     # dist/Pulse.app, with pulse and pulsed inside
 $ open dist/Pulse.app
+$ make test                    # both packages
+$ make help                    # every target
 ```
 
-Open the menu bar item, click **Install…**, and enter your administrator password. This installs the fan control service. **Settings → Service** can also put the `pulse` command in `/usr/local/bin`.
+Command line only: `swift build -c release && sudo .build/release/pulse daemon install`. A build from source is version `0.0.0-dev`: it never offers updates and never replaces a released service.
 
-CLI only:
+</details>
 
-```console
-$ swift build -c release
-$ sudo .build/release/pulse daemon install
-```
-
-The build is ad-hoc signed for personal use. Writes to the fan service are allowed for administrator accounts.
-
-## Safety
-
-Fan writes happen in one small root daemon (`pulsed`). The app and the CLI are unprivileged clients over XPC. From smctl, Pulse inherits:
-
-- **Never leave a brick.** Quitting, killing, uninstalling or crashing hands the fans back to macOS: termination hooks, startup reconciliation and launchd restart.
-- **Thermal safety guard.** It cannot be disabled. A sustained reading above 100 °C (hot-spots 110 °C) returns the fans to macOS until things cool down. Losing every sensor also trips it. Pulse reads the sensors every second near the limit, whatever the refresh setting, and notifies you when the guard engages and when it releases.
-- **Verified writes and graceful degradation.** If a macOS update changes the SMC, fan control turns read-only and says so.
-
-Pulse adds input validation for curves, refuses to rewrite a config file that fails to parse, ignores powered-down sensors, and warns when another fan app (TG Pro, Macs Fan Control, Stats, smcFanControl, smctl) is installed or running.
-
-## Architecture
+<details>
+<summary><b>Architecture</b></summary>
 
 ```
 Pulse.app (SwiftUI + AppKit status item) ─┐
@@ -220,14 +315,23 @@ pulse CLI ───────────────────────�
                                           │          └─ /etc/pulse/config.toml
 ```
 
-- `Sources/`: the core package (smctl plus Pulse additions in separate files).
-- `App/`: the menu bar app (separate SwiftPM package; open `App/Package.swift` in Xcode).
-- `swift test` in the root and in `App/` runs ~280 tests. `swift run --package-path App PulseSnapshots <dir>` renders the UI with sample data.
-- `swift run -c release --package-path App PulseBench` measures CPU and memory with the real status item, popover, settings and editor (and checks that closed windows release their views). `swift run --package-path App PulseLiveCheck <path to pulse>` runs the editor's save path against the installed daemon and cleans up after itself.
+- `Sources/`: the core package (smctl, plus Pulse's additions in separate files).
+- `App/`: the menu bar app, a separate SwiftPM package (open `App/Package.swift` in Xcode).
+- `swift run --package-path App PulseSnapshots <dir>` renders the UI with sample data; `swift run -c release --package-path App PulseBench` measures CPU and memory with the real windows.
+- Design notes and history: [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/PLAN.md](docs/PLAN.md) (in French).
+
+</details>
+
+<details>
+<summary><b>Releases</b></summary>
+
+Work happens on `dev`; `main` only receives pull requests from it. Every merge into `main` that contains a `feat`, `fix` or `perf` commit publishes a release. The version follows the commit types since the last one: `feat` → minor, `fix`/`perf` → patch, `!` → major. The workflow builds the app and the CLI, publishes them on GitHub and updates the Homebrew tap. A pull request to `main` builds the next release as a preview.
+
+</details>
 
 ## Built on smctl
 
-Pulse is a fork of [**smctl**](https://github.com/leaperone/smctl) by harryisfish and contributors (MIT). smctl provides the SMC layer, the privileged daemon, the fan curve engine and its safety mechanisms, plus battery, power and display control. Pulse keeps all of it and regularly merges upstream changes. Product names live in one file, `Sources/ProductIdentity`, so merges stay simple.
+Pulse is a fork of [**smctl**](https://github.com/leaperone/smctl) by harryisfish and contributors (MIT). smctl provides the hardware layer, the privileged service, the fan curve engine and its safety mechanisms, plus battery, power and display control. Pulse keeps all of it and merges upstream changes regularly.
 
 ## License
 
